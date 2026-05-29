@@ -1,4 +1,4 @@
-# AI.RepoKit.MCP
+﻿# AI.RepoKit.MCP
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
@@ -109,7 +109,7 @@ ai-repo plan: add focused tests for context pack selection
 ai-repo review: check this API change for compatibility risk
 ```
 
-Supported optional sub-prefixes are `ai-repo ask:`, `ai-repo plan:`, `ai-repo fix:`, `ai-repo review:`, and `ai-repo test:`. Agents should start with compact calls to `get_repo_brief`, `get_health`, `get_context kind=context-packs detail=brief`, and `search_context` with the user task, keep responses token-efficient, avoid broad file reads, and avoid write, build, server, Docker, migration, SQL, or database commands unless the selected role and user permission allow them. v0.13.0 does not include a CLI prompt translator and does not add MCP tools for these shortcuts.
+Supported optional sub-prefixes are `ai-repo ask:`, `ai-repo plan:`, `ai-repo fix:`, `ai-repo review:`, and `ai-repo test:`. Agents should start with compact calls to `get_repo_brief`, `get_health`, `get_context kind=context-packs detail=brief`, and `search_context` with the user task, keep responses token-efficient, avoid broad file reads, and avoid write, build, server, Docker, migration, SQL, or database commands unless the selected role and user permission allow them. v1.0.0 does not include a CLI prompt translator and does not add MCP tools for these shortcuts.
 
 ## Release And Versioning
 
@@ -126,7 +126,7 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 0.13.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.0.0
 artifacts/publish/win-x64/airepo.exe --help
 artifacts/publish/win-x64/airepo.exe self-check --repo . --agents --profile dotnet --skip-build-mcp
 artifacts/publish/win-x64/airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs --skip-build
@@ -196,7 +196,7 @@ By default, the release script uses the current `<Version>` from `src/AiRepoKit.
 To override the version explicitly:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 0.13.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.0.0
 ```
 
 Linux:
@@ -546,7 +546,7 @@ Supported profiles:
 
 `demo` composes useful guidance from `dotnet`, `aspnet-core`, `legacy-dotnet`, WinForms, source-generator, and general repository safety concerns. The profile system remains explicit and deterministic; repository type and language detection is reported for visibility and future roadmap work, but it does not auto-select profiles.
 
-VS Code and Copilot agents should use the generated instructions to query MCP server `ai_repo_context` before opening many source files. For `ai-repo:` requests, start with `get_repo_brief`, `get_health`, `get_context` for a context-packs brief, and `search_context` with the user task; then inspect only the files needed for the task. The shortcut is guidance for assistants only and does not add CLI prompt translation or new MCP tools in v0.13.0.
+VS Code and Copilot agents should use the generated instructions to query MCP server `ai_repo_context` before opening many source files. For `ai-repo:` requests, start with `get_repo_brief`, `get_health`, `get_context` for a context-packs brief, and `search_context` with the user task; then inspect only the files needed for the task. The shortcut is guidance for assistants only and does not add CLI prompt translation or new MCP tools in v1.0.0.
 
 Recommended manual order:
 
