@@ -383,6 +383,14 @@ public sealed class McpDiagnoseCommand
 
             IReadOnlyList<string> toolNames = GetToolNames(tools.RootElement);
             string[] missing = ExpectedTools.Where(tool_ => !toolNames.Contains(tool_, StringComparer.Ordinal)).ToArray();
+            List<string> optionalWarnings = [];
+            if (missing.Length == 0)
+            {
+                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 3, "context-packs");
+                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 4, "changed-files");
+                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 5, "graph");
+            }
+
             process.StandardInput.Close();
             process.WaitForExit(2000);
 
@@ -392,6 +400,11 @@ public sealed class McpDiagnoseCommand
             }
 
             string message = "MCP initialize and tools/list passed. Expected tools listed: " + string.Join(", ", ExpectedTools) + ".";
+            if (optionalWarnings.Count > 0)
+            {
+                return Warning("smoke-test", true, message + " Optional context-kind checks returned warnings: " + string.Join("; ", optionalWarnings) + ".", null, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames));
+            }
+
             if (stderrLines.Count > 0)
             {
                 return Warning("smoke-test", true, message + $" stderr contained {stderrLines.Count} log line(s), but stdout was valid JSON-RPC.", null, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames));
@@ -421,6 +434,42 @@ public sealed class McpDiagnoseCommand
     {
         process_.StandardInput.WriteLine(JsonSerializer.Serialize(value_));
         process_.StandardInput.Flush();
+    }
+
+    private static void AddOptionalContextCall(Process process_, List<string> stdoutLines_, List<string> stderrLines_, List<string> warnings_, int id_, string kind_)
+    {
+        try
+        {
+            WriteJson(process_, new
+            {
+                jsonrpc = "2.0",
+                id = id_,
+                method = "tools/call",
+                @params = new
+                {
+                    name = "get_context",
+                    arguments = new
+                    {
+                        kind = kind_,
+                        detail = "brief",
+                        limit = 5
+                    }
+                }
+            });
+            using JsonDocument response = WaitForResponse(stdoutLines_, id_, TimeSpan.FromSeconds(20));
+            if (response.RootElement.TryGetProperty("error", out _))
+            {
+                warnings_.Add($"get_context kind={kind_} returned a JSON-RPC error");
+            }
+        }
+        catch (Exception exception)
+        {
+            warnings_.Add($"get_context kind={kind_}: {ProcessRunner.Redact(exception.Message)}");
+            lock (stderrLines_)
+            {
+                stderrLines_.Add($"optional context smoke warning for {kind_}");
+            }
+        }
     }
 
     private static JsonDocument WaitForResponse(List<string> stdoutLines_, int id_, TimeSpan timeout_)

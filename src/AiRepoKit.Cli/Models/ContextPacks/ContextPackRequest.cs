@@ -10,4 +10,5 @@ public sealed record ContextPackRequest(
     bool RebuildIndex,
     bool SkipCodeIndex,
     bool Verbose,
-    bool NoProgress);
+    bool NoProgress,
+    int Budget = 0);

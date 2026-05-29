@@ -112,7 +112,136 @@ public sealed class ContextRepository
             return this.ReadContextPacks(detail_, limit_, task_, target_);
         }
 
+        if (string.Equals(kind_, "changed-files", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.ReadChangedFiles(detail_, limit_);
+        }
+
+        if (string.Equals(kind_, "graph", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.ReadGraphs(detail_, limit_, target_);
+        }
+
+        if (string.Equals(kind_, "impact", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.ReadImpact(detail_, limit_);
+        }
+
         return this.ReadContext(kind_, detail_, limit_);
+    }
+
+    private object ReadChangedFiles(ContextDetail detail_, int? limit_)
+    {
+        JsonObject? pack = this.ReadGeneratedJson(".ai/generated/context-packs/changed-files.json", ".ai/generated/context-packs");
+        if (pack is null)
+        {
+            return new { available = false, message = "Run `airepo context-pack --task changed-files --apply` to generate changed-files context.", suggestedCommand = "airepo context-pack --task changed-files --apply", estimatedSizeBytes = 0, tokenCostHint = "missing" };
+        }
+
+        int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
+        object data = detail_ == ContextDetail.Brief
+            ? new
+            {
+                available = true,
+                task = GetString(pack, "Task"),
+                summary = GetString(pack, "Summary"),
+                stagedFiles = GetArray(pack, "StagedFiles").Take(limit).ToArray(),
+                unstagedFiles = GetArray(pack, "UnstagedFiles").Take(limit).ToArray(),
+                untrackedFiles = GetArray(pack, "UntrackedFiles").Take(limit).ToArray(),
+                estimatedTokens = GetInt(pack, "EstimatedTokens"),
+                budget = GetInt(pack, "Budget"),
+                truncated = GetBool(pack, "Truncated")
+            }
+            : new
+            {
+                available = true,
+                pack = ProjectContextPackCompact(pack, limit),
+                stagedFiles = GetArray(pack, "StagedFiles").Take(limit).ToArray(),
+                unstagedFiles = GetArray(pack, "UnstagedFiles").Take(limit).ToArray(),
+                untrackedFiles = GetArray(pack, "UntrackedFiles").Take(limit).ToArray(),
+                affectedProjects = GetStringArray(pack, "AffectedProjects").Take(limit).ToArray(),
+                affectedSymbols = GetStringArray(pack, "AffectedSymbols").Take(limit).ToArray(),
+                estimatedTokens = GetInt(pack, "EstimatedTokens"),
+                budget = GetInt(pack, "Budget"),
+                truncated = GetBool(pack, "Truncated")
+            };
+        return data;
+    }
+
+    private object ReadGraphs(ContextDetail detail_, int? limit_, string? graph_)
+    {
+        string directory = Path.Combine(this.RepoRoot, ".ai", "generated", "graphs");
+        if (!Directory.Exists(directory))
+        {
+            return new { available = false, graphs = Array.Empty<object>(), message = "Run `airepo graph --apply` to generate graph artifacts.", suggestedCommand = "airepo graph --apply", estimatedSizeBytes = 0, tokenCostHint = "missing" };
+        }
+
+        int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
+        List<object> graphs = [];
+        foreach (string file in Directory.GetFiles(directory, "*-graph.json", SearchOption.TopDirectoryOnly).Order(StringComparer.OrdinalIgnoreCase))
+        {
+            JsonObject? graph = this.ReadGeneratedJsonFromFullPath(file, ".ai/generated/graphs");
+            if (graph is null)
+            {
+                continue;
+            }
+
+            string kind = GetString(graph, "Kind");
+            if (!string.IsNullOrWhiteSpace(graph_) && !kind.Equals(graph_, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            graphs.Add(detail_ == ContextDetail.Brief
+                ? new
+                {
+                    kind,
+                    summary = GetString(graph, "Summary"),
+                    nodes = GetArray(graph, "Nodes").Count,
+                    edges = GetArray(graph, "Edges").Count,
+                    estimatedTokens = GetInt(graph, "EstimatedTokens"),
+                    budget = GetInt(graph, "Budget"),
+                    truncated = GetBool(graph, "Truncated")
+                }
+                : new
+                {
+                    kind,
+                    summary = GetString(graph, "Summary"),
+                    nodes = GetArray(graph, "Nodes").Take(limit).ToArray(),
+                    edges = GetArray(graph, "Edges").Take(limit).ToArray(),
+                    estimatedTokens = GetInt(graph, "EstimatedTokens"),
+                    budget = GetInt(graph, "Budget"),
+                    truncated = GetBool(graph, "Truncated")
+                });
+        }
+
+        return new { available = graphs.Count > 0, graphs, estimatedSizeBytes = EstimateSize(graphs), tokenCostHint = detail_ == ContextDetail.Brief ? "brief" : "compact" };
+    }
+
+    private object ReadImpact(ContextDetail detail_, int? limit_)
+    {
+        JsonObject? impact = this.ReadGeneratedJson(".ai/generated/reports/impact-report.json", ".ai/generated/reports");
+        if (impact is null)
+        {
+            return new { available = false, message = "Run `airepo impact --apply` to persist an impact report.", suggestedCommand = "airepo impact --apply", estimatedSizeBytes = 0, tokenCostHint = "missing" };
+        }
+
+        int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
+        return new
+        {
+            available = true,
+            summary = GetString(impact, "Summary"),
+            changedFiles = GetArray(impact, "ChangedFiles").Take(limit).ToArray(),
+            affectedProjects = GetStringArray(impact, "AffectedProjects").Take(limit).ToArray(),
+            affectedSymbols = detail_ == ContextDetail.Brief ? Array.Empty<string>() : GetStringArray(impact, "AffectedSymbols").Take(limit).ToArray(),
+            risks = GetStringArray(impact, "Risks").Take(limit).ToArray(),
+            validationCommands = GetStringArray(impact, "ValidationCommands").Take(limit).ToArray(),
+            estimatedTokens = GetInt(impact, "EstimatedTokens"),
+            budget = GetInt(impact, "Budget"),
+            truncated = GetBool(impact, "Truncated"),
+            estimatedSizeBytes = EstimateSize(impact),
+            tokenCostHint = detail_ == ContextDetail.Brief ? "brief" : "compact"
+        };
     }
 
     private object ReadContextPacks(ContextDetail detail_, int? limit_, string? task_, string? target_)
@@ -307,7 +436,54 @@ public sealed class ContextRepository
             }
         }
 
+        foreach (string relativePath in this.GetGeneratedSearchFiles())
+        {
+            JsonObject? json = this.ReadGeneratedJson(relativePath, Path.GetDirectoryName(relativePath)?.Replace('\\', '/') ?? ".ai/generated");
+            if (json is null)
+            {
+                continue;
+            }
+
+            string text = this._redactor.Redact(JsonSerializer.Serialize(json));
+            if (text.Contains(query_, StringComparison.OrdinalIgnoreCase))
+            {
+                string preview = text.Length <= budget.Options.PreviewChars ? text : text[..budget.Options.PreviewChars];
+                matches.Add(new { file = relativePath, preview });
+                if (matches.Count >= limit)
+                {
+                    return matches;
+                }
+            }
+        }
+
         return matches;
+    }
+
+    private IReadOnlyList<string> GetGeneratedSearchFiles()
+    {
+        List<string> files = [];
+        string[] roots =
+        [
+            ".ai/generated/graphs",
+            ".ai/generated/context-packs",
+            ".ai/generated/reports"
+        ];
+        foreach (string root in roots)
+        {
+            string fullRoot = Path.Combine(this.RepoRoot, root.Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(fullRoot))
+            {
+                continue;
+            }
+
+            files.AddRange(Directory.GetFiles(fullRoot, "*.json", SearchOption.TopDirectoryOnly)
+                .Select(path_ => Path.GetRelativePath(this.RepoRoot, path_).Replace('\\', '/'))
+                .Where(path_ => path_.Contains("graph", StringComparison.OrdinalIgnoreCase)
+                    || path_.Contains("impact", StringComparison.OrdinalIgnoreCase)
+                    || path_.Contains("changed-files", StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return files.Order(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     private bool TryResolveAllowedFile(string relativePath_, out string fullPath_)
@@ -411,6 +587,37 @@ public sealed class ContextRepository
         try
         {
             return JsonNode.Parse(File.ReadAllText(fullPath_)) as JsonObject;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private JsonObject? ReadGeneratedJson(string relativePath_, string allowedRoot_)
+    {
+        string fullPath = Path.GetFullPath(Path.Combine(this.RepoRoot, relativePath_.Replace('/', Path.DirectorySeparatorChar)));
+        return this.ReadGeneratedJsonFromFullPath(fullPath, allowedRoot_);
+    }
+
+    private JsonObject? ReadGeneratedJsonFromFullPath(string fullPath_, string allowedRoot_)
+    {
+        try
+        {
+            string fullPath = Path.GetFullPath(fullPath_);
+            string root = Path.GetFullPath(Path.Combine(this.RepoRoot, allowedRoot_.Replace('/', Path.DirectorySeparatorChar))).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(fullPath))
+            {
+                return null;
+            }
+
+            FileAttributes attributes = File.GetAttributes(fullPath);
+            if ((attributes & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
+            {
+                return null;
+            }
+
+            return JsonNode.Parse(File.ReadAllText(fullPath)) as JsonObject;
         }
         catch
         {
@@ -593,3 +800,4 @@ public sealed class ContextRepository
         return value_[..max_];
     }
 }
+

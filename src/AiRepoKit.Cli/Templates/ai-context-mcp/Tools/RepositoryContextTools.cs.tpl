@@ -34,7 +34,7 @@ public sealed class RepositoryContextTools
     }
 
     [McpServerTool(Name = "get_context")]
-    public object GetContext(string? kind = null, string detail = "compact", int? limit = null, string? task = null, string? target = null)
+    public object GetContext(string? kind = null, string detail = "brief", int? limit = null, string? task = null, string? target = null)
     {
         ContextDetail parsed = ParseDetail(detail);
         object data = this._repository.ReadContextObject(kind, parsed, limit, task, target);
@@ -98,3 +98,4 @@ public sealed class RepositoryContextTools
         };
     }
 }
+

@@ -3,8 +3,12 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using AiRepoKit.Cli.Models;
+using AiRepoKit.Cli.Models.ChangedFiles;
 using AiRepoKit.Cli.Models.ContextPacks;
 using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.ChangedFiles;
+using AiRepoKit.Cli.Services.ContextBudget;
+using AiRepoKit.Cli.Services.Impact;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -23,7 +27,8 @@ public sealed class ContextPackCommand
         "update-package",
         "review-risk",
         "security-review",
-        "test-generation"
+        "test-generation",
+        "changed-files"
     ];
 
     public CommandResult Execute(BootstrapOptions options_)
@@ -45,7 +50,7 @@ public sealed class ContextPackCommand
                 warnings.Add("Updated .gitignore with AiRepoKit local/generated artifact rules.");
             }
 
-            ContextPackRequest request = new(options_.RepoPath, task, options_.Target, format, limit, apply, options_.RebuildCache, options_.SkipCodeInventory, options_.Verbose, options_.NoProgress);
+            ContextPackRequest request = new(options_.RepoPath, task, options_.Target, format, limit, apply, options_.RebuildCache, options_.SkipCodeInventory, options_.Verbose, options_.NoProgress, options_.Budget);
             if (!request.SkipCodeIndex)
             {
                 progress.StartPhase("Loading inventories");
@@ -67,7 +72,9 @@ public sealed class ContextPackCommand
             progress.FailPhase("Context-pack failed");
         }
 
-        string markdown = this.WriteReport(options_, pack, files, warnings, errors);
+        string markdown = options_.AuditJson
+            ? JsonSerializer.Serialize(new { pack, files, warnings, errors }, JsonOptions)
+            : this.WriteReport(options_, pack, files, warnings, errors);
         return errors.Count == 0 ? CommandResult.Ok(markdown) : CommandResult.Failure(markdown, 1);
     }
 
@@ -145,6 +152,11 @@ public sealed class ContextPackCommand
         JsonObject? secretRoot = this.ReadJson(request_.RepoRoot, ".ai/generated/reports/secret-scan-report.json", false, warnings_);
         JsonObject? manifestRoot = this.ReadJson(request_.RepoRoot, ".ai/manifests/mcp-context-manifest.json", false, warnings_);
         JsonArray symbols = GetArray(symbolsRoot, "Symbols");
+        if (request_.Task == "changed-files")
+        {
+            return this.BuildChangedFilesPack(request_, symbols, warnings_);
+        }
+
         JsonArray endpoints = GetArray(endpointsRoot, "Endpoints");
         JsonArray packages = GetArray(packagesRoot, "packages");
         if (packages.Count == 0)
@@ -162,7 +174,7 @@ public sealed class ContextPackCommand
         IReadOnlyList<string> notes = this.GetNotes(request_, buildRoot, secretRoot, manifestRoot);
         string summary = this.GetSummary(request_, symbolItems, endpointItems, packageItems, riskAreas);
 
-        return new ContextPack(
+        ContextPack pack = new(
             DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
             ".",
             request_.Task,
@@ -178,6 +190,80 @@ public sealed class ContextPackCommand
             validation,
             calls,
             notes);
+        return this.ApplyBudget(pack, request_.Budget);
+    }
+
+    private ContextPack BuildChangedFilesPack(ContextPackRequest request_, JsonArray symbols_, List<string> warnings_)
+    {
+        ChangedFilesResult changed = new ChangedFilesService().GetChangedFiles(request_.RepoRoot);
+        warnings_.AddRange(changed.Warnings);
+        HashSet<string> files = new(changed.Files.Select(file_ => file_.Path), StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<ContextPackItem> symbolItems = symbols_
+            .OfType<JsonObject>()
+            .Where(symbol_ => files.Contains(CleanPath(GetString(symbol_, "File"))))
+            .Select(symbol_ => new ContextPackItem(
+                GetString(symbol_, "Name"),
+                FirstString(symbol_, "Classification", "Kind"),
+                CleanPath(GetString(symbol_, "File")),
+                "Symbol is in a changed file.",
+                90))
+            .OrderBy(item_ => item_.File, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item_ => item_.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(request_.Limit)
+            .ToArray();
+        IReadOnlyList<ContextPackItem> likelyFiles = changed.Files
+            .Take(request_.Limit)
+            .Select(file_ => new ContextPackItem(Path.GetFileName(file_.Path), "File", file_.Path, file_.Status, file_.Staged ? 100 : file_.Unstaged ? 80 : 60))
+            .ToArray();
+        IReadOnlyList<string> affectedProjects = likelyFiles.Select(item_ => GuessProject(item_.File)).Where(value_ => !string.IsNullOrWhiteSpace(value_)).Distinct(StringComparer.OrdinalIgnoreCase).Take(request_.Limit).ToArray();
+        IReadOnlyList<string> risks = GetChangedFileRisks(changed.Files, symbolItems).Take(request_.Limit).ToArray();
+        IReadOnlyList<string> validation = GetChangedFileValidation(affectedProjects, changed.Files);
+        string summary = changed.Files.Count == 0
+            ? "changed-files context: no local changed files detected."
+            : $"changed-files context: {changed.StagedFiles.Count} staged, {changed.UnstagedFiles.Count} unstaged, {changed.UntrackedFiles.Count} untracked files.";
+        ContextPack pack = new(
+            DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+            ".",
+            request_.Task,
+            request_.Target,
+            "reviewer",
+            request_.Budget > 0 ? "budgeted" : request_.Limit <= 20 ? "compact" : "standard",
+            summary,
+            likelyFiles,
+            symbolItems,
+            [],
+            [],
+            risks,
+            validation,
+            ["get_context changed-files brief", "get_context impact brief", "search_context changed-file"],
+            ["Generated from Git status and local regenerable inventories.", "No source method bodies are included."],
+            changed.Files.Where(file_ => file_.Staged).ToArray(),
+            changed.Files.Where(file_ => file_.Unstaged).ToArray(),
+            changed.Files.Where(file_ => file_.Untracked).ToArray(),
+            affectedProjects,
+            symbolItems.Select(item_ => $"{item_.Name} {item_.File}").ToArray(),
+            summary,
+            changed.Files.Count == 0 ? string.Empty : $"Review changed files ({changed.Files.Count} files)");
+        return this.ApplyBudget(pack, request_.Budget);
+    }
+
+    private ContextPack ApplyBudget(ContextPack pack_, int budget_)
+    {
+        ContextBudgeter budgeter = new();
+        var result = budgeter.Report(pack_, budget_ > 0 ? budget_ : null);
+        IReadOnlyList<AiRepoKit.Cli.Models.ContextBudget.BudgetCut> cuts = result.Cuts;
+        if (budget_ > 0 && result.EstimatedTokens > budget_ && cuts.Count == 0)
+        {
+            cuts = [new("context-pack", "Estimated output exceeds budget; compact fields should be preferred by consumers.", result.EstimatedTokens - budget_)];
+        }
+
+        return pack_ with
+        {
+            EstimatedTokens = result.EstimatedTokens,
+            Budget = result.Budget,
+            Truncated = result.Truncated || cuts.Count > 0,
+            Cuts = cuts
+        };
     }
 
     private IReadOnlyList<ContextPackItem> ScoreSymbols(ContextPackRequest request_, JsonArray symbols_)
@@ -514,8 +600,16 @@ public sealed class ContextPackCommand
         builder.AppendLine($"Target: {ValueOrNone(pack_.Target)}");
         builder.AppendLine($"Recommended agent: {pack_.RecommendedAgent}");
         builder.AppendLine($"Token budget hint: {pack_.TokenBudgetHint}");
+        builder.AppendLine($"Estimated tokens: {pack_.EstimatedTokens}");
+        builder.AppendLine($"Budget: {ValueOrNone(pack_.Budget?.ToString())}");
+        builder.AppendLine($"Truncated: {pack_.Truncated}");
         builder.AppendLine();
         builder.AppendLine(pack_.Summary);
+        this.AppendChangedFiles(builder, "Staged Files", pack_.StagedFiles);
+        this.AppendChangedFiles(builder, "Unstaged Files", pack_.UnstagedFiles);
+        this.AppendChangedFiles(builder, "Untracked Files", pack_.UntrackedFiles);
+        this.AppendStrings(builder, "Affected Projects", pack_.AffectedProjects ?? []);
+        this.AppendStrings(builder, "Affected Symbols", pack_.AffectedSymbols ?? []);
         this.AppendItems(builder, "Likely Files", pack_.LikelyFiles);
         this.AppendItems(builder, "Relevant Symbols", pack_.RelevantSymbols);
         this.AppendItems(builder, "Relevant Endpoints", pack_.RelevantEndpoints);
@@ -524,7 +618,48 @@ public sealed class ContextPackCommand
         this.AppendStrings(builder, "Validation Commands", pack_.ValidationCommands);
         this.AppendStrings(builder, "Suggested MCP Calls", pack_.SuggestedMcpCalls);
         this.AppendStrings(builder, "Notes", pack_.Notes);
+        if (!string.IsNullOrWhiteSpace(pack_.CommitMessageSuggestion))
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Commit Message Suggestion");
+            builder.AppendLine();
+            builder.AppendLine(pack_.CommitMessageSuggestion);
+        }
+
+        if (pack_.Cuts is { Count: > 0 })
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Budget Cuts");
+            builder.AppendLine();
+            foreach (var cut in pack_.Cuts)
+            {
+                builder.AppendLine($"- {cut.Path} - {cut.Reason} ({cut.RemovedEstimatedTokens} tokens)");
+            }
+        }
+
         return builder.ToString().TrimEnd();
+    }
+
+    private void AppendChangedFiles(StringBuilder builder_, string title_, IReadOnlyList<ChangedFileItem>? files_)
+    {
+        if (files_ is null)
+        {
+            return;
+        }
+
+        builder_.AppendLine();
+        builder_.AppendLine($"## {title_}");
+        builder_.AppendLine();
+        if (files_.Count == 0)
+        {
+            builder_.AppendLine("- None");
+            return;
+        }
+
+        foreach (ChangedFileItem file in files_)
+        {
+            builder_.AppendLine($"- {file.Path} [{file.Status}]");
+        }
     }
 
     private void AppendItems(StringBuilder builder_, string title_, IReadOnlyList<ContextPackItem> items_)
@@ -573,9 +708,12 @@ public sealed class ContextPackCommand
         builder.AppendLine($"- Target: `{ValueOrNone(pack_?.Target ?? options_.Target)}`");
         builder.AppendLine($"- Format: `{options_.Format}`");
         builder.AppendLine($"- Limit: `{options_.Limit}`");
+        builder.AppendLine($"- Budget: `{(options_.Budget > 0 ? options_.Budget.ToString() : "none")}`");
         if (pack_ is not null)
         {
             builder.AppendLine($"- Summary: {pack_.Summary}");
+            builder.AppendLine($"- EstimatedTokens: `{pack_.EstimatedTokens}`");
+            builder.AppendLine($"- Truncated: `{pack_.Truncated}`");
         }
 
         builder.AppendLine();
@@ -706,6 +844,75 @@ public sealed class ContextPackCommand
     private static bool TargetMatches(string target_, string text_)
     {
         return !string.IsNullOrWhiteSpace(target_) && text_.Contains(target_, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> GetChangedFileRisks(IReadOnlyList<ChangedFileItem> files_, IReadOnlyList<ContextPackItem> symbols_)
+    {
+        List<string> risks = [];
+        if (files_.Any(file_ => file_.Untracked))
+        {
+            risks.Add("Untracked files need review before commit.");
+        }
+
+        if (symbols_.Any(symbol_ => symbol_.Kind.Contains("Repository", StringComparison.OrdinalIgnoreCase)))
+        {
+            risks.Add("Persistence boundary symbols changed.");
+        }
+
+        if (symbols_.Any(symbol_ => symbol_.Kind.Contains("Configuration", StringComparison.OrdinalIgnoreCase)) || files_.Any(file_ => file_.Path.Contains("Program.cs", StringComparison.OrdinalIgnoreCase)))
+        {
+            risks.Add("Configuration-sensitive files changed.");
+        }
+
+        if (files_.Any(file_ => file_.Path.Contains("Test", StringComparison.OrdinalIgnoreCase)))
+        {
+            risks.Add("Test files changed.");
+        }
+
+        if (files_.Count == 0)
+        {
+            risks.Add("No changed files detected.");
+        }
+        else if (risks.Count == 0)
+        {
+            risks.Add("General review required for changed files.");
+        }
+
+        return risks.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static IReadOnlyList<string> GetChangedFileValidation(IReadOnlyList<string> affectedProjects_, IReadOnlyList<ChangedFileItem> files_)
+    {
+        List<string> commands = ["dotnet build"];
+        if (files_.Any(file_ => file_.Path.Contains("Test", StringComparison.OrdinalIgnoreCase)) || affectedProjects_.Any(project_ => project_.Contains("Test", StringComparison.OrdinalIgnoreCase)))
+        {
+            commands.Add("dotnet test");
+        }
+        else
+        {
+            commands.Add("dotnet test when explicitly allowed");
+        }
+
+        commands.Add("airepo impact");
+        commands.Add("airepo self-check --repo . --skip-build-mcp");
+        return commands;
+    }
+
+    private static string GuessProject(string file_)
+    {
+        string path = file_.Replace('\\', '/');
+        if (path.StartsWith("src/", StringComparison.OrdinalIgnoreCase))
+        {
+            string[] parts = path.Split('/');
+            return parts.Length >= 2 ? $"src/{parts[1]}/{parts[1]}.csproj" : string.Empty;
+        }
+
+        if (path.StartsWith("Tools/AiContextMcp/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Tools/AiContextMcp/AiRepo.ContextMcp.csproj";
+        }
+
+        return string.Empty;
     }
 
     private static string Slug(string value_)

@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.1.0 zero-config C#/.NET repo intelligence; smart repo discovery; auto-profile; setup/detect flows; MCP/client diagnostics; profile-driven VS Code agent, instruction, and prompt generation; self-check; managed agent instructions; audit baseline; RoslynLite code-index cache; and task-oriented context packs for lower-token local LLM context.
+Status: v1.2.0 zero-config C#/.NET repo intelligence with graph, impact, changed-files context packs, deterministic context budgets, improved progress UX, smart repo discovery, auto-profile, setup/detect flows, MCP/client diagnostics, self-check, audit baseline, RoslynLite code-index cache, and task-oriented context packs for lower-token local LLM context.
 
 ## Goals
 
@@ -55,7 +55,7 @@ airepo setup --apply
 airepo self-check
 ```
 
-`setup` without `--apply` detects the repository, infers defaults, plans changes, and previews validation. `setup --apply` bootstraps managed files, refreshes the code index, generates baseline context packs (`review-risk` and `test-generation` when possible), runs `self-check`, and runs MCP diagnostics when possible. It does not commit, push, run Docker, run migrations, run SQL, start target services, or call cloud services.
+`setup` without `--apply` detects the repository, infers defaults, plans changes, and previews validation. `setup --apply` bootstraps managed files, refreshes the code index, generates baseline context packs (`changed-files`, `review-risk`, and `test-generation` when possible), generates a graph baseline when possible, runs `self-check`, and runs MCP diagnostics when possible. No changed files is a warning, not a blocking setup failure. It does not commit, push, run Docker, run migrations, run SQL, start target services, or call cloud services.
 
 Start with explicit read-only and generated-output checks when you need tighter control:
 
@@ -64,6 +64,9 @@ airepo audit --repo .
 airepo plan --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet
 airepo code-index --repo . --apply
 airepo context-pack --repo . --task review-risk --apply
+airepo context-pack --repo . --task changed-files --apply --budget 12000
+airepo graph --repo . --apply
+airepo impact --repo .
 airepo bootstrap --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet --apply --backup
 airepo self-check --repo . --agents --profile dotnet --skip-build-mcp
 airepo mcp-diagnose --repo . --clients codex,vscode,vs --skip-build
@@ -108,6 +111,9 @@ In Copilot Agent or another MCP-capable assistant, start with the `ai_repo_conte
 get_repo_brief
 get_health area=all
 get_context kind=context-packs detail=brief
+get_context kind=changed-files detail=brief
+get_context kind=graph detail=brief
+get_context kind=impact detail=brief
 search_context query="<task keywords>" limit=10
 ```
 
@@ -372,6 +378,11 @@ airepo code-index --repo <path> --apply --rebuild-cache
 airepo code-index --repo <path> --apply --no-cache
 airepo context-pack --repo <path>
 airepo context-pack --repo <path> --task change-api --target User --apply
+airepo context-pack --repo <path> --task changed-files --apply --budget 12000
+airepo graph --repo <path>
+airepo graph --repo <path> --kind project --apply
+airepo impact --repo <path>
+airepo impact --repo <path> --since origin/main --budget 12000
 airepo audit --repo <path>
 airepo audit --repo <path> --json
 airepo self-check --repo <path>
@@ -647,9 +658,10 @@ airepo context-pack --repo . --task change-api --target User
 airepo context-pack --repo . --task change-api --target User --apply
 airepo context-pack --repo . --task fix-build --apply --format json
 airepo context-pack --repo . --task review-risk --apply --limit 20
+airepo context-pack --repo . --task changed-files --apply --budget 12000
 ```
 
-Supported tasks are `change-api`, `change-ui`, `fix-build`, `update-package`, `review-risk`, `security-review`, and `test-generation`.
+Supported tasks are `change-api`, `change-ui`, `fix-build`, `update-package`, `review-risk`, `security-review`, `test-generation`, and `changed-files`.
 
 Defaults are `--task review-risk`, `--format all`, `--limit 20`, and output directory `.ai/generated/context-packs/`. When `--target` is supplied, the target is sanitized into the file name, for example `.ai/generated/context-packs/change-api.user.json` and `.ai/generated/context-packs/change-api.user.md`.
 
@@ -663,6 +675,48 @@ get_context kind=context-pack detail=compact task=change-api target=User
 ```
 
 Brief mode lists available packs with task, target, summary, token budget hint, and suggested MCP calls. Compact mode returns selected pack contents within the existing MCP budget.
+
+## v1.2 Graph, Impact, Changed Files, And Context Budget
+
+`airepo graph` builds lightweight local graphs from existing inventories. It is dry-run by default and writes only with `--apply` under `.ai/generated/graphs/`.
+
+```powershell
+airepo graph
+airepo graph --kind project
+airepo graph --kind symbol --format markdown
+airepo graph --kind risk --apply
+```
+
+`airepo impact` previews current changed-file impact by default. It can analyze a target or branch diff and persists `.ai/generated/reports/impact-report.json` and `.md` only with `--apply`.
+
+```powershell
+airepo impact
+airepo impact --changed-files
+airepo impact --target SomeClass
+airepo impact --since origin/main --budget 12000
+airepo impact --apply
+```
+
+`context-pack --task changed-files` creates review-ready pre-commit context with staged, unstaged, and relevant untracked files, affected projects and symbols, risks, validation commands, and a commit-message suggestion when there is enough signal.
+
+```powershell
+airepo impact
+airepo context-pack --task changed-files --apply --budget 12000
+airepo setup --no-progress
+airepo self-check
+```
+
+The budgeter is deterministic and approximate: `estimatedTokens = ceil(chars / 4)`. Budgeted outputs report `estimatedTokens`, `budget`, `truncated`, and `cuts`. It is intended to be predictable and testable, not a tokenizer replacement.
+
+The MCP design remains kind-based and keeps the same five tools. v1.2.0 intentionally does not add `get_graph` or `get_impact`; agents should use:
+
+```text
+get_context kind=graph detail=brief
+get_context kind=graph target=project detail=compact
+get_context kind=impact detail=brief
+get_context kind=changed-files detail=brief
+search_context query="changed-file public-api risk"
+```
 
 ## v1.0 Efficiency Report
 

@@ -8,6 +8,7 @@ public sealed class SetupCommand
 {
     public CommandResult Execute(BootstrapOptions options_)
     {
+        using ProgressReporter progress = ProgressReporter.Create(options_);
         bool apply = options_.Apply && !options_.DryRun;
         RepoDetection detection = new RepoDetector().Detect(options_.RepoPath);
         List<string> warnings = [];
@@ -17,15 +18,19 @@ public sealed class SetupCommand
 
         BootstrapOptions baseOptions = options_.With(includeMcp_: true, includeAgents_: true, backup_: apply ? true : options_.Backup);
 
+        progress.StartPhase("Planning setup");
         phases.Add("detect");
         CommandResult plan = new PlanCommand().Execute(baseOptions.With(command_: "plan", apply_: false, dryRun_: true));
         results.Add(plan);
+        progress.CompletePhase("Setup plan completed");
 
         if (apply)
         {
+            progress.StartPhase("Running bootstrap");
             phases.Add("bootstrap");
             CommandResult bootstrap = new BootstrapCommand().Execute(baseOptions.With(command_: "bootstrap", apply_: true, dryRun_: false, backup_: true));
             results.Add(bootstrap);
+            progress.CompletePhase("Bootstrap phase completed");
             if (!bootstrap.Success)
             {
                 if (CanDowngradeLockedDllFailure(options_, bootstrap, warnings))
@@ -38,35 +43,69 @@ public sealed class SetupCommand
                 }
             }
 
+            progress.StartPhase("Generating changed-files context pack");
+            phases.Add("context-pack changed-files");
+            RunOptionalContextPack(baseOptions, "changed-files", results, warnings);
+            progress.CompletePhase("Changed-files context pack phase completed");
             phases.Add("context-pack review-risk");
+            progress.StartPhase("Generating review-risk context pack");
             RunOptionalContextPack(baseOptions, "review-risk", results, warnings);
+            progress.CompletePhase("Review-risk context pack phase completed");
             phases.Add("context-pack test-generation");
+            progress.StartPhase("Generating test-generation context pack");
             RunOptionalContextPack(baseOptions, "test-generation", results, warnings);
+            progress.CompletePhase("Test-generation context pack phase completed");
+
+            progress.StartPhase("Generating graph baseline");
+            phases.Add("graph baseline");
+            CommandResult graph = new GraphCommand().Execute(baseOptions.With(command_: "graph", apply_: true, dryRun_: false));
+            results.Add(graph);
+            if (!graph.Success)
+            {
+                warnings.Add("Graph baseline could not be generated.");
+            }
+            progress.CompletePhase("Graph baseline phase completed");
 
             phases.Add("self-check");
+            progress.StartPhase("Running self-check");
             CommandResult selfCheck = new SelfCheckCommand().Execute(baseOptions.With(command_: "self-check", requireContextPacks_: true));
             results.Add(selfCheck);
             if (!selfCheck.Success)
             {
                 warnings.Add("self-check completed with failures or warnings; review its report.");
             }
+            progress.CompletePhase("Self-check phase completed");
 
             phases.Add("mcp-diagnose");
+            progress.StartPhase("Running MCP diagnostics");
             CommandResult diagnose = new McpDiagnoseCommand().Execute(baseOptions.With(command_: "mcp-diagnose"));
             results.Add(diagnose);
             if (!diagnose.Success)
             {
                 warnings.Add("mcp-diagnose completed with failures; MCP may still need client reload or unlocked DLL.");
             }
+            progress.CompletePhase("MCP diagnostics phase completed");
         }
         else
         {
             phases.Add("preview self-check");
+            progress.StartPhase("Running preview self-check");
             CommandResult previewSelfCheck = new SelfCheckCommand().Execute(baseOptions.With(command_: "self-check", skipBuildMcp_: true, skipCodeInventory_: true, skipBudget_: true, skipAudit_: true, requireContextPacks_: true));
             results.Add(previewSelfCheck);
+            if (!previewSelfCheck.Success)
+            {
+                warnings.Add($"Self Check preview returned exit code {previewSelfCheck.ExitCode}. Run `airepo self-check` for details.");
+            }
+            progress.CompletePhase("Preview self-check completed");
             phases.Add("preview mcp-diagnose");
+            progress.StartPhase("Running preview MCP diagnostics");
             CommandResult previewMcp = new McpDiagnoseCommand().Execute(baseOptions.With(command_: "mcp-diagnose", skipBuildMcp_: true));
             results.Add(previewMcp);
+            if (!previewMcp.Success)
+            {
+                warnings.Add($"MCP Diagnose preview returned exit code {previewMcp.ExitCode}. Run `airepo mcp-diagnose` for details.");
+            }
+            progress.CompletePhase("Preview MCP diagnostics completed");
         }
 
         bool success = errors.Count == 0;

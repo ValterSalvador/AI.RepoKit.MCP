@@ -131,6 +131,8 @@ public sealed class SelfCheckCommand
             progress.StartPhase("Checking generated outputs");
             AddGeneratedOutputChecks(checks, repoPath);
             AddContextPackChecks(checks, repoPath, options_.RequireContextPacks);
+            AddChangedFilesContextPackCheck(checks, repoPath, options_.RequireContextPacks);
+            AddGraphChecks(checks, repoPath, false);
             AddForbiddenTermChecks(checks, repoPath, options_.ForbiddenTerms);
             AddGitIgnoreCheck(checks, repoPath);
             AddAgentChecks(checks, repoPath, options_.IncludeAgents, options_.Profile);
@@ -242,12 +244,58 @@ public sealed class SelfCheckCommand
         checks_.Add(Check("context-packs", required_, readable == files.Length && readable > 0, $"Readable context pack JSON files: {readable}/{files.Length}."));
     }
 
+    private static void AddChangedFilesContextPackCheck(List<SelfCheckItem> checks_, string repoPath_, bool required_)
+    {
+        string path = Path.Combine(repoPath_, ".ai", "generated", "context-packs", "changed-files.json");
+        if (!File.Exists(path))
+        {
+            checks_.Add(required_ ? Failed("context-pack:changed-files", true, "Missing .ai/generated/context-packs/changed-files.json.") : Skipped("context-pack:changed-files", false, "changed-files context pack is not present."));
+            return;
+        }
+
+        checks_.Add(Check("context-pack:changed-files", required_, IsReadableJson(path), ".ai/generated/context-packs/changed-files.json is readable."));
+    }
+
+    private static void AddGraphChecks(List<SelfCheckItem> checks_, string repoPath_, bool required_)
+    {
+        string path = Path.Combine(repoPath_, ".ai", "generated", "graphs");
+        if (!Directory.Exists(path))
+        {
+            checks_.Add(Skipped("graphs", required_, "No graph artifacts found."));
+            return;
+        }
+
+        string[] files = Directory.GetFiles(path, "*-graph.json", SearchOption.TopDirectoryOnly);
+        if (files.Length == 0)
+        {
+            checks_.Add(Skipped("graphs", required_, "No graph JSON artifacts found."));
+            return;
+        }
+
+        int readable = files.Count(IsReadableJson);
+        checks_.Add(Check("graphs", required_, readable == files.Length, $"Readable graph JSON files: {readable}/{files.Length}."));
+    }
+
     private static void AddGitIgnoreCheck(List<SelfCheckItem> checks_, string repoPath_)
     {
         string path = Path.Combine(repoPath_, ".gitignore");
         bool exists = File.Exists(path);
         bool hasSection = exists && new GitIgnoreService().HasSection(File.ReadAllText(path));
         checks_.Add(Check("gitignore-airepokit-section", true, hasSection, ".gitignore contains AiRepoKit section."));
+    }
+
+    private static bool IsReadableJson(string path_)
+    {
+        try
+        {
+            using FileStream stream = File.OpenRead(path_);
+            JsonDocument.Parse(stream);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void AddForbiddenTermChecks(List<SelfCheckItem> checks_, string repoPath_, IReadOnlyList<string> terms_)

@@ -57,7 +57,11 @@ public sealed record BootstrapOptions
         string sanitizeTerm_ = "",
         string sanitizeReplacement_ = "",
         bool strict_ = false,
-        string defaultsSummary_ = "")
+        string defaultsSummary_ = "",
+        int budget_ = 0,
+        string kind_ = "",
+        string since_ = "",
+        bool changedFiles_ = false)
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -114,6 +118,10 @@ public sealed record BootstrapOptions
         this.SanitizeReplacement = sanitizeReplacement_;
         this.Strict = strict_;
         this.DefaultsSummary = defaultsSummary_;
+        this.Budget = budget_;
+        this.Kind = kind_;
+        this.Since = since_;
+        this.ChangedFiles = changedFiles_;
     }
 
     public string Command { get; }
@@ -226,6 +234,14 @@ public sealed record BootstrapOptions
 
     public string DefaultsSummary { get; }
 
+    public int Budget { get; }
+
+    public string Kind { get; }
+
+    public string Since { get; }
+
+    public bool ChangedFiles { get; }
+
     public BootstrapOptions With(
         string? command_ = null,
         bool? includeMcp_ = null,
@@ -295,6 +311,10 @@ public sealed record BootstrapOptions
             this.SanitizeTerm,
             this.SanitizeReplacement,
             this.Strict,
-            this.DefaultsSummary);
+            this.DefaultsSummary,
+            this.Budget,
+            this.Kind,
+            this.Since,
+            this.ChangedFiles);
     }
 }

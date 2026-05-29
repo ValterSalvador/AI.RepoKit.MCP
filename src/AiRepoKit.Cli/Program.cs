@@ -37,6 +37,8 @@ public static class Program
                 "bootstrap" => new BootstrapCommand().Execute(options),
                 "code-index" => new CodeIndexCommand().Execute(options),
                 "context-pack" => new ContextPackCommand().Execute(options),
+                "graph" => new GraphCommand().Execute(options),
+                "impact" => new ImpactCommand().Execute(options),
                 "audit" => new AuditCommand().Execute(options),
                 "detect" => new DetectCommand().Execute(options),
                 "setup" => new SetupCommand().Execute(options),
@@ -354,6 +356,10 @@ public static class Program
         string sanitizeTerm = string.Empty;
         string sanitizeReplacement = string.Empty;
         bool strict = false;
+        int budget = 0;
+        string kind = string.Empty;
+        string since = string.Empty;
+        bool changedFiles = false;
 
         if (args_.Any(arg_ => string.Equals(arg_, "--help", StringComparison.OrdinalIgnoreCase) || string.Equals(arg_, "-h", StringComparison.OrdinalIgnoreCase)))
         {
@@ -639,6 +645,34 @@ public static class Program
                 continue;
             }
 
+            if (string.Equals(value, "--budget", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                if (int.TryParse(args_[++index], out int parsed))
+                {
+                    budget = parsed;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(value, "--kind", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                kind = args_[++index];
+                continue;
+            }
+
+            if (string.Equals(value, "--since", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                since = args_[++index];
+                continue;
+            }
+
+            if (string.Equals(value, "--changed-files", StringComparison.OrdinalIgnoreCase))
+            {
+                changedFiles = true;
+                continue;
+            }
+
             if (string.Equals(value, "--no-progress", StringComparison.OrdinalIgnoreCase))
             {
                 noProgress = true;
@@ -732,7 +766,7 @@ public static class Program
             resolvedRepoPath = Directory.GetCurrentDirectory();
         }
 
-        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict);
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, string.Empty, budget, kind, since, changedFiles);
         if (command is "--help" or "--version" or "help" or "version" or "")
         {
             return parsedOptions;
@@ -741,7 +775,7 @@ public static class Program
         try
         {
             ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
-            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, resolvedDefaults.Summary);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, resolvedDefaults.Summary, budget, kind, since, changedFiles);
         }
         catch
         {
@@ -787,7 +821,9 @@ public static class Program
         airepo init --repo <path> --clients codex,vscode,vs --mcp [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
         airepo plan --repo <path> [--clients codex,vscode,vs] [--mcp] [--agents] [--profile generic]
         airepo code-index [--repo <path>] [--apply] [--max-files 3000] [--max-items 10000] [--include-private-members] [--format json|markdown|all] [--no-cache|--rebuild-cache|--rebuild-index]
-        airepo context-pack [--repo <path>] [--task change-api|change-ui|fix-build|update-package|review-risk|security-review|test-generation] [--target name] [--apply] [--format json|markdown|all] [--limit 20] [--skip-code-index|--rebuild-index]
+        airepo context-pack [--repo <path>] [--task change-api|change-ui|fix-build|update-package|review-risk|security-review|test-generation|changed-files] [--target name] [--apply] [--format json|markdown|all] [--limit 20] [--budget 12000] [--skip-code-index|--rebuild-index]
+        airepo graph [--repo <path>] [--kind project|symbol|risk] [--format json|markdown|all] [--apply] [--limit 20] [--budget 12000]
+        airepo impact [--repo <path>] [--changed-files] [--target name] [--since origin/main] [--format json|markdown|all] [--apply] [--limit 20] [--budget 12000]
         airepo audit [--repo <path>] [--include-source] [--create-baseline] [--update-baseline] [--baseline] [--fail-on-accepted] [--json] [--verbose]
         airepo self-check [--repo <path>] [--agents] [--context-packs] [--fail-on-accepted] [--skip-audit] [--skip-build-mcp] [--skip-code-index] [--skip-budget] [--json] [--verbose]
         airepo mcp-diagnose [--repo <path>] [--clients codex,vscode,vs] [--skip-build] [--skip-smoke] [--skip-budget] [--json] [--verbose]
@@ -828,6 +864,7 @@ public static class Program
         --json                        Emit JSON when supported by the command.
         --verbose                     Emit more detail when supported by the command.
         --no-progress                 Disable terminal progress messages and spinner.
+        --budget <tokens>             Approximate context token budget using chars / 4.
         ```
 
         Progress:
@@ -893,9 +930,18 @@ public static class Program
         Context-pack options:
 
         ```text
-        --task <name>                 change-api, change-ui, fix-build, update-package, review-risk, security-review, or test-generation.
+        --task <name>                 change-api, change-ui, fix-build, update-package, review-risk, security-review, test-generation, or changed-files.
         --target <name>               Optional task target used in pack names and selection.
         --limit <number>              Default: 20.
+        ```
+
+        Graph and impact:
+
+        ```text
+        --kind <name>                 Graph kind: project, symbol, or risk. Omit to preview all graph kinds.
+        --since <ref>                 Analyze files changed since a Git ref for impact.
+        --changed-files               Explicitly request changed-files impact mode.
+        --budget <tokens>             Approximate output budget; reports estimatedTokens, budget, truncated, and cuts.
         ```
         """;
     }

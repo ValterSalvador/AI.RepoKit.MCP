@@ -77,6 +77,31 @@ public sealed class GitService
         }
     }
 
+    public IReadOnlyList<string> GetStagedFiles(string repoRoot_)
+    {
+        return this.RunGitLines(repoRoot_, ["diff", "--name-only", "--cached", "--diff-filter=ACMRT"]);
+    }
+
+    public IReadOnlyList<string> GetUnstagedFiles(string repoRoot_)
+    {
+        return this.RunGitLines(repoRoot_, ["diff", "--name-only", "--diff-filter=ACMRT"]);
+    }
+
+    public IReadOnlyList<string> GetUntrackedFiles(string repoRoot_)
+    {
+        return this.RunGitLines(repoRoot_, ["ls-files", "--others", "--exclude-standard"]);
+    }
+
+    public IReadOnlyList<string> GetFilesChangedSince(string repoRoot_, string since_)
+    {
+        if (string.IsNullOrWhiteSpace(since_))
+        {
+            return [];
+        }
+
+        return this.RunGitLines(repoRoot_, ["diff", "--name-only", $"{since_}...HEAD", "--"]);
+    }
+
     public bool IsIgnored(string repoRoot_, string relativePath_)
     {
         string repoRoot = Path.GetFullPath(repoRoot_);
@@ -93,6 +118,35 @@ public sealed class GitService
         catch
         {
             return false;
+        }
+    }
+
+    private IReadOnlyList<string> RunGitLines(string repoRoot_, IReadOnlyList<string> arguments_)
+    {
+        string repoRoot = Path.GetFullPath(repoRoot_);
+        if (!Directory.Exists(repoRoot))
+        {
+            return [];
+        }
+
+        try
+        {
+            ProcessResult result = new ProcessRunner().Run("git", arguments_, repoRoot);
+            if (!result.Success)
+            {
+                return [];
+            }
+
+            return result.StandardOutput
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(path_ => path_.Replace('\\', '/').TrimStart('/'))
+                .Where(path_ => !string.IsNullOrWhiteSpace(path_))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch
+        {
+            return [];
         }
     }
 }

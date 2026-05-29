@@ -426,7 +426,10 @@ try {
         [ordered]@{ Id = 8; Name = "search_context"; Arguments = [ordered]@{ query = "AutoMapper"; limit = 5 }; Budget = 4096; Label = "search_context AutoMapper" },
         [ordered]@{ Id = 9; Name = "get_context"; Arguments = [ordered]@{ kind = "symbols"; detail = "brief"; limit = 5 }; Budget = 8192; Label = "get_context symbols brief" },
         [ordered]@{ Id = 10; Name = "get_context"; Arguments = [ordered]@{ kind = "endpoints"; detail = "brief"; limit = 5 }; Budget = 8192; Label = "get_context endpoints brief" },
-        [ordered]@{ Id = 11; Name = "get_policy"; Arguments = [ordered]@{ topic = "secrets" }; Budget = 4096; Label = "get_policy secrets" }
+        [ordered]@{ Id = 11; Name = "get_context"; Arguments = [ordered]@{ kind = "context-packs"; detail = "brief"; limit = 5 }; Budget = 8192; Label = "get_context context-packs brief" },
+        [ordered]@{ Id = 12; Name = "get_context"; Arguments = [ordered]@{ kind = "changed-files"; detail = "brief"; limit = 5 }; Budget = 8192; Label = "get_context changed-files brief" },
+        [ordered]@{ Id = 13; Name = "get_context"; Arguments = [ordered]@{ kind = "graph"; detail = "brief"; limit = 5 }; Budget = 8192; Label = "get_context graph brief" },
+        [ordered]@{ Id = 14; Name = "get_policy"; Arguments = [ordered]@{ topic = "secrets" }; Budget = 4096; Label = "get_policy secrets" }
     )
 
     foreach ($call in $calls) {
