@@ -1,7 +1,12 @@
+---
+description: Safety rules for scoped repository changes.
+target: vscode
+---
+
 # Safe Change Instructions
 
-Begin with MCP context from `ai_repo_context`: `get_repo_brief`, `get_health`, `get_context` symbols brief, then `search_context`.
+Keep edits scoped to the user request. Preserve unrelated local changes. Do not overwrite unmanaged files without explicit approval.
 
-Before applying changes, state the intended scope and risk. Keep edits narrow. Preserve generated and user-customized files unless explicitly asked to regenerate them.
+Generated AiRepoKit files should stay under the managed-files manifest. Existing unmanaged agent, instruction, and prompt files require manual review instead of overwrite.
 
-Do not read secrets. Do not run app servers, Docker, migrations, SQL, or database commands. Inspect generated outputs only under `.ai/generated`.
+Do not read secrets or local credentials. Do not run app servers, Docker, migrations, SQL, or database commands unless explicitly approved.
