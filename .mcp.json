@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "ai_repo_context": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "${workspaceFolder}/Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll",
+        "--repo",
+        "${workspaceFolder}"
+      ],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

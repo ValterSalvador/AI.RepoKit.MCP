@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.2.0 zero-config C#/.NET repo intelligence with graph, impact, changed-files context packs, deterministic context budgets, improved progress UX, smart repo discovery, auto-profile, setup/detect flows, MCP/client diagnostics, self-check, audit baseline, RoslynLite code-index cache, and task-oriented context packs for lower-token local LLM context.
+Status: v1.3.0 multi-repo/internal rollout support with org scan/report/self-check/setup dry-run/efficiency, readiness and compliance scoring, markdown/json/csv exports, safe external repo defaults, and MCP `get_context` access to persisted org reports.
 
 ## Goals
 
@@ -99,7 +99,7 @@ airepo mcp-diagnose --repo . --clients codex,vscode,vs
 git status --short
 ```
 
-Versionable files include `.ai/` guidance, `.ai/policies/audit-baseline.json`, `Tools/AiContext/`, `Tools/AiContextMcp/`, `.vscode/mcp.json`, `.github/` agent and instruction files, and `AGENTS.md`. Local generated outputs under `.ai/generated/`, local Codex config, build output, release artifacts, and copied standalone executables stay ignored.
+Versionable files include `.ai/` guidance, `.ai/policies/audit-baseline.json`, `Tools/AiContext/`, `Tools/AiContextMcp/`, `.mcp.json`, `.vscode/mcp.json`, `.github/` agent and instruction files, and `AGENTS.md`. Local generated outputs under `.ai/generated/`, local Codex config, build output, release artifacts, and copied standalone executables stay ignored.
 
 ## VS Code Agent Flow
 
@@ -128,6 +128,12 @@ ai-repo review: check this API change for compatibility risk
 ```
 
 Supported optional sub-prefixes are `ai-repo ask:`, `ai-repo plan:`, `ai-repo fix:`, `ai-repo review:`, and `ai-repo test:`. Agents should start with compact calls to `get_repo_brief`, `get_health`, `get_context kind=context-packs detail=brief`, and `search_context` with the user task, keep responses token-efficient, avoid broad file reads, and avoid write, build, server, Docker, migration, SQL, or database commands unless the selected role and user permission allow them. v1.0.0 does not include a CLI prompt translator and does not add MCP tools for these shortcuts.
+
+## Visual Studio Agent Flow
+
+Visual Studio MCP requires Visual Studio 2022 17.14 or later. When you generate client config with `--clients vs`, `airepo` writes a repository-root `.mcp.json` for Visual Studio MCP discovery.
+
+After generation, open the solution if it was closed or reload it if it was already open so Visual Studio can rediscover the MCP server. If Copilot Agent still does not expose the MCP tools, enable them manually in the agent UI and then retry.
 
 ## Release And Versioning
 
@@ -517,7 +523,7 @@ The command validates repository root, `Tools/AiContextMcp`, the generated Relea
 
 Use `--skip-build`, `--skip-smoke`, or `--skip-budget` when you need to isolate config checks or avoid rebuilding while an MCP client has the DLL loaded. Exit code `0` means required diagnostics passed, `2` means required diagnostics failed, and `1` means a fatal diagnostics error occurred.
 
-When VS Code config uses `${workspaceFolder}`, open the workspace at the repository root. If `.vscode/mcp.json` is correct and the smoke test passes but `ai_repo_context` is still not visible in VS Code/Copilot Agent, close and reopen the VS Code workspace or run `Developer: Reload Window`. If the MCP DLL was rebuilt, MCP clients may need a restart or reload before they use the new binary.
+When VS Code config uses `${workspaceFolder}`, open the workspace at the repository root. If `.vscode/mcp.json` is correct and the smoke test passes but `ai_repo_context` is still not visible in VS Code/Copilot Agent, close and reopen the VS Code workspace or run `Developer: Reload Window`. For Visual Studio, use Visual Studio 2022 17.14 or later, keep the generated `.mcp.json` at the repository root, open or reload the solution after generation, and enable MCP tools manually in Copilot Agent if needed. If the MCP DLL was rebuilt, MCP clients may need a restart or reload before they use the new binary.
 
 ## Troubleshooting
 
@@ -717,6 +723,85 @@ get_context kind=impact detail=brief
 get_context kind=changed-files detail=brief
 search_context query="changed-file public-api risk"
 ```
+
+## v1.3 Multi-repo/Internal Rollout
+
+v1.3.0 adds safe organization-level diagnostics for internal adoption across many repositories. Org commands are dry-run/non-mutating by default, continue when one repository fails, and write progress to stderr so `--json` stdout remains parseable.
+
+Recommended 30-repo rollout flow:
+
+```powershell
+cd C:\Repositories
+airepo org scan
+airepo org report --apply
+airepo org self-check --skip-audit --skip-build-mcp --skip-budget
+airepo org efficiency --apply
+```
+
+Commands:
+
+```powershell
+airepo org scan
+airepo org scan --root C:\Repositories --json
+airepo org scan --root C:\Repositories --format markdown
+airepo org scan --root C:\Repositories --format csv
+airepo org scan --root C:\Repositories --output .ai/generated/reports/org-scan.json
+airepo org scan --root C:\Repositories --max-depth 3
+
+airepo org report --root C:\Repositories
+airepo org report --root C:\Repositories --json
+airepo org report --root C:\Repositories --format markdown
+airepo org report --root C:\Repositories --format csv
+airepo org report --root C:\Repositories --apply
+
+airepo org self-check --root C:\Repositories
+airepo org self-check --root C:\Repositories --skip-audit --skip-build-mcp --skip-budget
+airepo org self-check --root C:\Repositories --json
+airepo org self-check --root C:\Repositories --format csv
+
+airepo org setup --root C:\Repositories
+airepo org setup --root C:\Repositories --dry-run
+airepo org setup --root C:\Repositories --format markdown
+
+airepo org efficiency --root C:\Repositories
+airepo org efficiency --root C:\Repositories --json
+airepo org efficiency --root C:\Repositories --format csv
+airepo org efficiency --root C:\Repositories --apply
+```
+
+All `org` commands default to `--max-depth 3` unless you override it. That default applies to `org scan`, `org report`, `org self-check`, `org setup`, and `org efficiency`.
+
+`org scan` detects child repositories by looking for `.git`, `.sln`, `.slnx`, `.csproj`, `package.json`, `pyproject.toml`, `composer.json`, `pom.xml`, Gradle files, `go.mod`, and `Cargo.toml`. Once a repository root is detected, v1.3.0 does not descend into its subfolders for nested repositories. Scans skip large/generated folders such as `bin`, `obj`, `node_modules`, `packages`, `artifacts`, `.ai/generated`, `.vs`, `.git`, and temp folders.
+
+`org report` includes repository profile, confidence, health, readiness score, compliance score, MCP status, agents status, context-pack status, graph status, warnings, recommendations, and next commands. With `--apply`, it writes:
+
+```text
+.ai/generated/reports/org-report.json
+.ai/generated/reports/org-report.md
+.ai/generated/reports/org-report.csv
+```
+
+`org self-check` is safe and non-mutating by default. It skips audit, MCP build, budget, and code-index for every target repository. It does not run target apps, servers, Docker, SQL, migrations, or database commands.
+
+`org setup` is dry-run only in v1.3.0. `org setup --apply` intentionally fails with a clear message because mass setup apply is outside this release.
+
+`org efficiency` reads existing source and generated context metadata without refreshing code-index or context packs. With `--apply`, it writes:
+
+```text
+.ai/generated/reports/org-efficiency.json
+.ai/generated/reports/org-efficiency.md
+.ai/generated/reports/org-efficiency.csv
+```
+
+MCP remains the same five tools. Use `get_context` for org artifacts:
+
+```text
+get_context kind=org-scan detail=brief
+get_context kind=org-report detail=brief
+get_context kind=efficiency detail=brief
+```
+
+If an org artifact does not exist, MCP returns `available=false` with the command to generate it. v1.3.0 does not add `get_org_scan`, `get_org_report`, or `get_efficiency`.
 
 ## v1.0 Efficiency Report
 

@@ -44,6 +44,7 @@ public static class Program
                 "setup" => new SetupCommand().Execute(options),
                 "sanitize" => new SanitizeCommand().Execute(options),
                 "self-check" => new SelfCheckCommand().Execute(options),
+                "org" => new OrgCommand().Execute(options),
                 "mcp-diagnose" or "mcp-doctor" or "diagnose-mcp" => new McpDiagnoseCommand().Execute(options),
                 "efficiency" or "token-report" or "context-efficiency" => new EfficiencyCommand().Execute(options),
                 "--help" or "-h" or "help" or "" => CommandResult.Ok(GetUsage()),
@@ -302,7 +303,9 @@ public static class Program
     private static BootstrapOptions Parse(string[] args_)
     {
         string command = args_.Length > 0 ? args_[0] : string.Empty;
+        string orgSubcommand = string.Empty;
         string? repoPath = null;
+        string rootPath = string.Empty;
         List<ClientKind> clients = [];
         List<string> unknownOptions = [];
         bool includeMcp = false;
@@ -360,6 +363,16 @@ public static class Program
         string kind = string.Empty;
         string since = string.Empty;
         bool changedFiles = false;
+        int maxDepth = 3;
+
+        int firstOptionIndex = 1;
+        if (string.Equals(command, "org", StringComparison.OrdinalIgnoreCase) && args_.Length > 1 && !args_[1].StartsWith("-", StringComparison.Ordinal))
+        {
+            orgSubcommand = args_[1];
+            firstOptionIndex = 2;
+            output = string.Empty;
+            format = "markdown";
+        }
 
         if (args_.Any(arg_ => string.Equals(arg_, "--help", StringComparison.OrdinalIgnoreCase) || string.Equals(arg_, "-h", StringComparison.OrdinalIgnoreCase)))
         {
@@ -371,9 +384,15 @@ public static class Program
             command = "--version";
         }
 
-        for (int index = 1; index < args_.Length; index++)
+        for (int index = firstOptionIndex; index < args_.Length; index++)
         {
             string value = args_[index];
+            if (string.Equals(value, "--root", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                rootPath = args_[++index];
+                continue;
+            }
+
             if (string.Equals(value, "--repo", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
             {
                 repoPath = args_[++index];
@@ -645,6 +664,16 @@ public static class Program
                 continue;
             }
 
+            if (string.Equals(value, "--max-depth", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                if (int.TryParse(args_[++index], out int parsed))
+                {
+                    maxDepth = parsed;
+                }
+
+                continue;
+            }
+
             if (string.Equals(value, "--budget", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
             {
                 if (int.TryParse(args_[++index], out int parsed))
@@ -758,7 +787,16 @@ public static class Program
         string resolvedRepoPath;
         try
         {
-            resolvedRepoPath = command is "--help" or "--version" or "help" or "version" or "" ? Directory.GetCurrentDirectory() : new RepoPathResolver().Resolve(repoPath, command);
+            if (string.Equals(command, "org", StringComparison.OrdinalIgnoreCase))
+            {
+                string orgRoot = string.IsNullOrWhiteSpace(rootPath) ? Directory.GetCurrentDirectory() : rootPath;
+                rootPath = Path.GetFullPath(orgRoot);
+                resolvedRepoPath = rootPath;
+            }
+            else
+            {
+                resolvedRepoPath = command is "--help" or "--version" or "help" or "version" or "" ? Directory.GetCurrentDirectory() : new RepoPathResolver().Resolve(repoPath, command);
+            }
         }
         catch (InvalidOperationException exception)
         {
@@ -766,7 +804,7 @@ public static class Program
             resolvedRepoPath = Directory.GetCurrentDirectory();
         }
 
-        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, string.Empty, budget, kind, since, changedFiles);
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth);
         if (command is "--help" or "--version" or "help" or "version" or "")
         {
             return parsedOptions;
@@ -774,8 +812,13 @@ public static class Program
 
         try
         {
+            if (string.Equals(command, "org", StringComparison.OrdinalIgnoreCase))
+            {
+                return parsedOptions;
+            }
+
             ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
-            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, resolvedDefaults.Summary, budget, kind, since, changedFiles);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth);
         }
         catch
         {
@@ -828,6 +871,11 @@ public static class Program
         airepo self-check [--repo <path>] [--agents] [--context-packs] [--fail-on-accepted] [--skip-audit] [--skip-build-mcp] [--skip-code-index] [--skip-budget] [--json] [--verbose]
         airepo mcp-diagnose [--repo <path>] [--clients codex,vscode,vs] [--skip-build] [--skip-smoke] [--skip-budget] [--json] [--verbose]
         airepo efficiency [--repo <path>] [--profile generic] [--sample-query "architecture services controllers data access"] [--json] [--no-progress] [--verbose] [--refresh|--no-refresh] [--rebuild-index] [--skip-budget]
+        airepo org scan [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--output <path>] [--apply] [--no-progress]
+        airepo org report [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--apply] [--no-progress]
+        airepo org self-check [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--no-progress]
+        airepo org setup [--root <path>] [--max-depth 3] [--dry-run] [--json|--format markdown|json|csv] [--no-progress]
+        airepo org efficiency [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--apply] [--no-progress]
         airepo doctor --repo <path> [--target-framework net10.0] [--profile generic] [--dry-run|--apply]
         airepo validate --repo <path>
         airepo sample --repo <path> [--apply] [--force]
@@ -865,6 +913,8 @@ public static class Program
         --verbose                     Emit more detail when supported by the command.
         --no-progress                 Disable terminal progress messages and spinner.
         --budget <tokens>             Approximate context token budget using chars / 4.
+        --root <path>                 Organization scan root for org commands. If omitted, current directory.
+        --max-depth <number>          Max directory depth for org discovery. Default: 3.
         ```
 
         Progress:
@@ -942,6 +992,13 @@ public static class Program
         --since <ref>                 Analyze files changed since a Git ref for impact.
         --changed-files               Explicitly request changed-files impact mode.
         --budget <tokens>             Approximate output budget; reports estimatedTokens, budget, truncated, and cuts.
+        ```
+
+        Org rollout:
+
+        ```text
+        Org commands are safe by default. They do not modify child repositories unless an explicit --apply is supported and provided. In v1.3.0, org setup is dry-run only. Org self-check skips audit, MCP build, budget, and code-index by default.
+        Export formats: markdown, json, csv. Use --json for parseable stdout.
         ```
         """;
     }

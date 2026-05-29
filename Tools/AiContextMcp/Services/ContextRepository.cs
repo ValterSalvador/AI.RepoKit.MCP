@@ -127,7 +127,54 @@ public sealed class ContextRepository
             return this.ReadImpact(detail_, limit_);
         }
 
+        if (string.Equals(kind_, "org-scan", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.ReadGeneratedReport(".ai/generated/reports/org-scan.json", "Run `airepo org scan --apply` to persist an org scan report.", "airepo org scan --apply", detail_, limit_);
+        }
+
+        if (string.Equals(kind_, "org-report", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.ReadGeneratedReport(".ai/generated/reports/org-report.json", "Run `airepo org report --apply` to persist an org report.", "airepo org report --apply", detail_, limit_);
+        }
+
+        if (string.Equals(kind_, "efficiency", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.ReadGeneratedReport(".ai/generated/reports/org-efficiency.json", "Run `airepo org efficiency --apply` to persist an org efficiency report.", "airepo org efficiency --apply", detail_, limit_);
+        }
+
         return this.ReadContext(kind_, detail_, limit_);
+    }
+
+    private object ReadGeneratedReport(string relativePath_, string message_, string suggestedCommand_, ContextDetail detail_, int? limit_)
+    {
+        JsonObject? report = this.ReadGeneratedJson(relativePath_, ".ai/generated/reports");
+        if (report is null)
+        {
+            return new { available = false, message = message_, suggestedCommand = suggestedCommand_, estimatedSizeBytes = 0, tokenCostHint = "missing" };
+        }
+
+        int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
+        JsonArray repositories = GetArray(report, "Repositories");
+        object data = detail_ == ContextDetail.Brief
+            ? new
+            {
+                available = true,
+                root = GetString(report, "Root"),
+                generatedAtLocal = GetString(report, "GeneratedAtLocal"),
+                repositoryCount = repositories.Count,
+                repositories = repositories.Take(limit).ToArray(),
+                warnings = GetStringArray(report, "Warnings").Take(limit).ToArray(),
+                estimatedSizeBytes = EstimateSize(report),
+                tokenCostHint = "brief"
+            }
+            : new
+            {
+                available = true,
+                report,
+                estimatedSizeBytes = EstimateSize(report),
+                tokenCostHint = "compact"
+            };
+        return data;
     }
 
     private object ReadChangedFiles(ContextDetail detail_, int? limit_)
@@ -480,7 +527,10 @@ public sealed class ContextRepository
                 .Select(path_ => Path.GetRelativePath(this.RepoRoot, path_).Replace('\\', '/'))
                 .Where(path_ => path_.Contains("graph", StringComparison.OrdinalIgnoreCase)
                     || path_.Contains("impact", StringComparison.OrdinalIgnoreCase)
-                    || path_.Contains("changed-files", StringComparison.OrdinalIgnoreCase)));
+                    || path_.Contains("changed-files", StringComparison.OrdinalIgnoreCase)
+                    || path_.Contains("org-scan", StringComparison.OrdinalIgnoreCase)
+                    || path_.Contains("org-report", StringComparison.OrdinalIgnoreCase)
+                    || path_.Contains("org-efficiency", StringComparison.OrdinalIgnoreCase)));
         }
 
         return files.Order(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -560,6 +610,12 @@ public sealed class ContextRepository
                 || fileName.Equals("symbol-inventory.md", StringComparison.OrdinalIgnoreCase),
             "endpoints" => fileName.Equals("endpoint-inventory.json", StringComparison.OrdinalIgnoreCase)
                 || fileName.Equals("endpoint-inventory.md", StringComparison.OrdinalIgnoreCase),
+            "org-scan" => fileName.Equals("org-scan.json", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("org-scan.md", StringComparison.OrdinalIgnoreCase),
+            "org-report" => fileName.Equals("org-report.json", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("org-report.md", StringComparison.OrdinalIgnoreCase),
+            "efficiency" => fileName.Equals("org-efficiency.json", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("org-efficiency.md", StringComparison.OrdinalIgnoreCase),
             _ => true
         };
     }

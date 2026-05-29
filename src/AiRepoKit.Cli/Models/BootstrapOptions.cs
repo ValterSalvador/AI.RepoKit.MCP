@@ -61,7 +61,10 @@ public sealed record BootstrapOptions
         int budget_ = 0,
         string kind_ = "",
         string since_ = "",
-        bool changedFiles_ = false)
+        bool changedFiles_ = false,
+        string rootPath_ = "",
+        string orgSubcommand_ = "",
+        int maxDepth_ = 3)
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -122,6 +125,9 @@ public sealed record BootstrapOptions
         this.Kind = kind_;
         this.Since = since_;
         this.ChangedFiles = changedFiles_;
+        this.RootPath = rootPath_;
+        this.OrgSubcommand = orgSubcommand_;
+        this.MaxDepth = maxDepth_;
     }
 
     public string Command { get; }
@@ -242,6 +248,12 @@ public sealed record BootstrapOptions
 
     public bool ChangedFiles { get; }
 
+    public string RootPath { get; }
+
+    public string OrgSubcommand { get; }
+
+    public int MaxDepth { get; }
+
     public BootstrapOptions With(
         string? command_ = null,
         bool? includeMcp_ = null,
@@ -315,6 +327,9 @@ public sealed record BootstrapOptions
             this.Budget,
             this.Kind,
             this.Since,
-            this.ChangedFiles);
+            this.ChangedFiles,
+            this.RootPath,
+            this.OrgSubcommand,
+            this.MaxDepth);
     }
 }

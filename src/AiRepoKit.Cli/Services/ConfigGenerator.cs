@@ -419,7 +419,7 @@ public sealed class ConfigGenerator
         {
             ClientKind.Codex => ".codex/config.toml",
             ClientKind.Vscode => ".vscode/mcp.json",
-            ClientKind.VisualStudio => ".ai/client-configs/visualstudio-mcp.snippet.json",
+            ClientKind.VisualStudio => ".mcp.json",
             ClientKind.Claude => ".ai/client-configs/claude_desktop_config.snippet.json",
             ClientKind.Cursor => ".ai/client-configs/cursor-mcp.snippet.json",
             ClientKind.Gemini => ".ai/client-configs/gemini-mcp.snippet.json",
@@ -432,6 +432,11 @@ public sealed class ConfigGenerator
         if (client_ == ClientKind.Codex)
         {
             return [".ai/client-configs/codex.config.toml"];
+        }
+
+        if (client_ == ClientKind.VisualStudio)
+        {
+            return [".ai/client-configs/visualstudio-mcp.snippet.json"];
         }
 
         return [];
@@ -463,6 +468,7 @@ public sealed class ConfigGenerator
             new("client-configs/codex.config.toml.tpl", ".codex/config.toml", "client-configs", "Create configuration for Codex."),
             new("client-configs/codex.config.snippet.toml.tpl", ".ai/client-configs/codex.config.toml", "client-configs", "Create versionable Codex snippet."),
             new("client-configs/vscode.mcp.json.tpl", ".vscode/mcp.json", "client-configs", "Create configuration for Vscode."),
+            new("client-configs/visualstudio.mcp.json.tpl", ".mcp.json", "client-configs", "Create configuration for vs."),
             new("client-configs/visualstudio-mcp.snippet.json.tpl", ".ai/client-configs/visualstudio-mcp.snippet.json", "client-configs", "Create configuration for vs."),
             new("client-configs/claude_desktop_config.snippet.json.tpl", ".ai/client-configs/claude_desktop_config.snippet.json", "client-configs", "Create configuration for Claude."),
             new("client-configs/cursor-mcp.snippet.json.tpl", ".ai/client-configs/cursor-mcp.snippet.json", "client-configs", "Create configuration for Cursor."),

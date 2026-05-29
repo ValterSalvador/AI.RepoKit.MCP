@@ -28,6 +28,7 @@ public sealed class SelfCheckCommand
 
             checks.Add(Check("repo-detection", true, IsRepoDetected(analysis), $"Repo exists: {analysis.Profile.Exists}; solutions: {analysis.SolutionFiles.Count + CountRootSlnx(repoPath)}; projects: {analysis.ProjectFiles.Count}."));
             AddRequiredFileChecks(checks, repoPath);
+            AddClientConfigChecks(checks, repoPath, ConfigGenerator.GetSelectedClients(options_));
             progress.CompletePhase("Repository check completed");
 
             if (options_.SkipAudit)
@@ -190,6 +191,29 @@ public sealed class SelfCheckCommand
         ];
     }
 
+    private static void AddClientConfigChecks(List<SelfCheckItem> checks_, string repoPath_, IReadOnlyList<ClientKind> clients_)
+    {
+        if (!clients_.Contains(ClientKind.VisualStudio))
+        {
+            return;
+        }
+
+        string path = Path.Combine(repoPath_, ".mcp.json");
+        if (!File.Exists(path))
+        {
+            checks_.Add(Failed("client-config:vs", true, "Missing .mcp.json for Visual Studio MCP discovery."));
+            return;
+        }
+
+        string content = File.ReadAllText(path);
+        bool passed = IsReadableJson(path)
+            && content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase)
+            && content.Contains("--repo", StringComparison.OrdinalIgnoreCase);
+        checks_.Add(Check("client-config:vs", true, passed, passed
+            ? ".mcp.json contains ai_repo_context and --repo for Visual Studio MCP discovery."
+            : ".mcp.json is not readable JSON or is missing ai_repo_context or --repo."));
+    }
+
     private static void AddGeneratedOutputChecks(List<SelfCheckItem> checks_, string repoPath_)
     {
         string generatedPath = Path.Combine(repoPath_, ".ai", "generated");
@@ -197,6 +221,7 @@ public sealed class SelfCheckCommand
 
         bool bootstrapApplied = Directory.Exists(Path.Combine(repoPath_, "Tools", "AiContextMcp"))
             || Directory.Exists(Path.Combine(repoPath_, "Tools", "AiContext"))
+            || File.Exists(Path.Combine(repoPath_, ".mcp.json"))
             || File.Exists(Path.Combine(repoPath_, ".vscode", "mcp.json"))
             || File.Exists(Path.Combine(repoPath_, ".codex", "config.toml"));
         string manifestPath = Path.Combine(repoPath_, ManagedFilesService.ManifestRelativePath.Replace('/', Path.DirectorySeparatorChar));

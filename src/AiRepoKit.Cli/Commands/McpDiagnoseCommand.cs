@@ -168,20 +168,36 @@ public sealed class McpDiagnoseCommand
 
         if (clients_.Contains(ClientKind.VisualStudio))
         {
-            string path = Path.Combine(repoPath_, ".ai", "client-configs", "visualstudio-mcp.snippet.json");
-            checks_.Add(Check("vs-config", true, File.Exists(path), ".ai/client-configs/visualstudio-mcp.snippet.json exists."));
+            checks_.Add(CheckVisualStudio(repoPath_));
         }
     }
 
     private static McpDiagnosticItem CheckVscode(string repoPath_)
     {
-        string path = Path.Combine(repoPath_, ".vscode", "mcp.json");
-        if (!File.Exists(path))
+        return CheckWorkspaceConfig(
+            Path.Combine(repoPath_, ".vscode", "mcp.json"),
+            "vscode-config",
+            ".vscode/mcp.json",
+            "vscode");
+    }
+
+    private static McpDiagnosticItem CheckVisualStudio(string repoPath_)
+    {
+        return CheckWorkspaceConfig(
+            Path.Combine(repoPath_, ".mcp.json"),
+            "vs-config",
+            ".mcp.json",
+            "vs");
+    }
+
+    private static McpDiagnosticItem CheckWorkspaceConfig(string path_, string checkName_, string displayPath_, string clientName_)
+    {
+        if (!File.Exists(path_))
         {
-            return Failed("vscode-config", true, ".vscode/mcp.json is missing.", "Run bootstrap with --clients vscode --mcp --apply or restore the file.");
+            return Failed(checkName_, true, $"{displayPath_} is missing.", $"Run bootstrap with --clients {clientName_} --mcp --apply or restore the file.");
         }
 
-        string content = File.ReadAllText(path);
+        string content = File.ReadAllText(path_);
         List<string> missing = [];
         if (!content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase))
         {
@@ -201,10 +217,10 @@ public sealed class McpDiagnoseCommand
 
         if (missing.Count > 0)
         {
-            return Failed("vscode-config", true, ".vscode/mcp.json is present but missing: " + string.Join(", ", missing) + ".");
+            return Failed(checkName_, true, displayPath_ + " is present but missing: " + string.Join(", ", missing) + ".");
         }
 
-        return Passed("vscode-config", true, ".vscode/mcp.json contains ai_repo_context, repo argument, and the MCP DLL path or ${workspaceFolder}.", null, UsesWorkspaceFolder(content) ? ["Uses ${workspaceFolder}."] : []);
+        return Passed(checkName_, true, displayPath_ + " contains ai_repo_context, repo argument, and the MCP DLL path or ${workspaceFolder}.", null, UsesWorkspaceFolder(content) ? ["Uses ${workspaceFolder}."] : []);
     }
 
     private static McpDiagnosticItem CheckCodex(string repoPath_)
@@ -572,6 +588,11 @@ public sealed class McpDiagnoseCommand
         if (clients_.Contains(ClientKind.Vscode) && File.Exists(vscodePath) && UsesWorkspaceFolder(File.ReadAllText(vscodePath)))
         {
             hints_.Add("This VS Code config uses ${workspaceFolder}; the workspace must be opened at the repository root.");
+        }
+
+        if (configsPassed && smokePassed && clients_.Contains(ClientKind.VisualStudio))
+        {
+            hints_.Add("Visual Studio MCP requires Visual Studio 2022 17.14 or later. Open or reload the solution after generation, and enable the MCP tools manually in Copilot Agent if they are still disabled.");
         }
 
         if (rebuilt_)
