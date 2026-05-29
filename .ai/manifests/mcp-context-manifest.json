@@ -1,7 +1,7 @@
 ﻿{
     "repoName":  "AI.RepoKit.MCP",
     "mainSolution":  "AI.RepoKit.MCP.sln",
-    "generatedAtLocal":  "2026-05-29 16:28:00 +02:00",
+    "generatedAtLocal":  "2026-05-29 16:52:23 +02:00",
     "targetFramework":  "net10.0",
     "mcpServerName":  "ai_repo_context",
     "mcpProjectRelativePath":  "Tools/AiContextMcp/AiRepo.ContextMcp.csproj",
