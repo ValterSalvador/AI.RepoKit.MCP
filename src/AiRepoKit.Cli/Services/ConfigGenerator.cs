@@ -124,6 +124,7 @@ public sealed class ConfigGenerator
         this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContextMcp", "MCP project root", false);
         this.AddPresencePlan(changes, analysis_, options_, ".codex/config.toml", "Codex configuration", true);
         this.AddPresencePlan(changes, analysis_, options_, ".vscode/mcp.json", "VS Code MCP configuration", true);
+        this.AddPresencePlan(changes, analysis_, options_, ".vs/mcp.json", "Visual Studio local MCP configuration", true);
 
         if (analysis_.SolutionFiles.Count == 0)
         {
@@ -436,7 +437,7 @@ public sealed class ConfigGenerator
 
         if (client_ == ClientKind.VisualStudio)
         {
-            return [".ai/client-configs/visualstudio-mcp.snippet.json"];
+            return [".vs/mcp.json", ".ai/client-configs/visualstudio-mcp.snippet.json"];
         }
 
         return [];
@@ -469,6 +470,7 @@ public sealed class ConfigGenerator
             new("client-configs/codex.config.snippet.toml.tpl", ".ai/client-configs/codex.config.toml", "client-configs", "Create versionable Codex snippet."),
             new("client-configs/vscode.mcp.json.tpl", ".vscode/mcp.json", "client-configs", "Create configuration for Vscode."),
             new("client-configs/visualstudio.mcp.json.tpl", ".mcp.json", "client-configs", "Create configuration for vs."),
+            new("client-configs/visualstudio.local.mcp.json.tpl", ".vs/mcp.json", "client-configs", "Create local configuration for vs."),
             new("client-configs/visualstudio-mcp.snippet.json.tpl", ".ai/client-configs/visualstudio-mcp.snippet.json", "client-configs", "Create configuration for vs."),
             new("client-configs/claude_desktop_config.snippet.json.tpl", ".ai/client-configs/claude_desktop_config.snippet.json", "client-configs", "Create configuration for Claude."),
             new("client-configs/cursor-mcp.snippet.json.tpl", ".ai/client-configs/cursor-mcp.snippet.json", "client-configs", "Create configuration for Cursor."),

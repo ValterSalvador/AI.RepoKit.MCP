@@ -201,11 +201,27 @@ public sealed class McpDiagnoseCommand
 
     private static McpDiagnosticItem CheckVisualStudio(string repoPath_)
     {
-        return CheckWorkspaceConfig(
-            Path.Combine(repoPath_, ".mcp.json"),
-            "vs-config",
-            ".mcp.json",
-            "vs");
+        (bool exists, bool valid, string message, bool usesWorkspaceFolder) rootConfig = CheckVisualStudioConfig(Path.Combine(repoPath_, ".mcp.json"), ".mcp.json");
+        (bool exists, bool valid, string message, bool usesWorkspaceFolder) localConfig = CheckVisualStudioConfig(Path.Combine(repoPath_, ".vs", "mcp.json"), ".vs/mcp.json");
+
+        if (!rootConfig.exists && !localConfig.exists)
+        {
+            return Failed("vs-config", true, "Neither .mcp.json nor .vs/mcp.json was found.", "Run bootstrap with --clients vs --mcp --apply or restore the Visual Studio MCP config.");
+        }
+
+        List<string> messages = [];
+        List<string> details = [];
+        bool hasFailure = false;
+
+        AppendVisualStudioConfigResult(rootConfig, messages, details, ref hasFailure);
+        AppendVisualStudioConfigResult(localConfig, messages, details, ref hasFailure);
+
+        if (hasFailure)
+        {
+            return Failed("vs-config", true, string.Join(" ", messages), null, details);
+        }
+
+        return Passed("vs-config", true, string.Join(" ", messages), null, details);
     }
 
     private static McpDiagnosticItem CheckWorkspaceConfig(string path_, string checkName_, string displayPath_, string clientName_)
@@ -244,6 +260,115 @@ public sealed class McpDiagnoseCommand
         }
 
         return Passed(checkName_, true, displayPath_ + " contains ai_repo_context, repo argument, and the MCP DLL path or ${workspaceFolder}.", null, UsesWorkspaceFolder(content) ? ["Uses ${workspaceFolder}."] : []);
+    }
+
+    private static (bool Exists, bool Valid, string Message, bool UsesWorkspaceFolder) CheckVisualStudioConfig(string path_, string displayPath_)
+    {
+        if (!File.Exists(path_))
+        {
+            return (false, true, displayPath_ + " was not found.", false);
+        }
+
+        string content = File.ReadAllText(path_);
+        if (!IsReadableJson(content))
+        {
+            return (true, false, displayPath_ + " is not readable JSON.", false);
+        }
+
+        using JsonDocument document = JsonDocument.Parse(content);
+        if (!document.RootElement.TryGetProperty("servers", out JsonElement servers)
+            || servers.ValueKind != JsonValueKind.Object)
+        {
+            return (true, false, displayPath_ + " is missing the Visual Studio MCP `servers` object.", false);
+        }
+
+        if (!servers.TryGetProperty("ai_repo_context", out JsonElement server)
+            || server.ValueKind != JsonValueKind.Object)
+        {
+            return (true, false, displayPath_ + " is missing the `ai_repo_context` server entry.", false);
+        }
+
+        List<string> missing = [];
+        if (!server.TryGetProperty("transport", out JsonElement transport)
+            || transport.ValueKind != JsonValueKind.String
+            || !string.Equals(transport.GetString(), "stdio", StringComparison.Ordinal))
+        {
+            missing.Add("transport=stdio");
+        }
+
+        if (!server.TryGetProperty("command", out JsonElement command)
+            || command.ValueKind != JsonValueKind.String
+            || !string.Equals(command.GetString(), "dotnet", StringComparison.Ordinal))
+        {
+            missing.Add("command=dotnet");
+        }
+
+        bool usesWorkspaceFolder = false;
+        bool hasRepoArgument = false;
+        bool hasDllArgument = false;
+        if (!server.TryGetProperty("args", out JsonElement args)
+            || args.ValueKind != JsonValueKind.Array)
+        {
+            missing.Add("args");
+        }
+        else
+        {
+            foreach (JsonElement arg in args.EnumerateArray())
+            {
+                if (arg.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                string? value = arg.GetString();
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                usesWorkspaceFolder |= value.Contains("${workspaceFolder}", StringComparison.OrdinalIgnoreCase);
+                hasRepoArgument |= string.Equals(value, "--repo", StringComparison.Ordinal);
+                hasDllArgument |= value.EndsWith("AiRepo.ContextMcp.dll", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!hasDllArgument)
+            {
+                missing.Add("AiRepo.ContextMcp.dll arg");
+            }
+
+            if (!hasRepoArgument)
+            {
+                missing.Add("--repo");
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            return (true, false, displayPath_ + " is present but missing: " + string.Join(", ", missing) + ".", usesWorkspaceFolder);
+        }
+
+        return (true, true, displayPath_ + " uses the Visual Studio MCP schema with ai_repo_context, command, args, transport=stdio, and --repo.", usesWorkspaceFolder);
+    }
+
+    private static void AppendVisualStudioConfigResult(
+        (bool exists, bool valid, string message, bool usesWorkspaceFolder) result_,
+        List<string> messages_,
+        List<string> details_,
+        ref bool hasFailure_)
+    {
+        if (!result_.exists)
+        {
+            details_.Add(result_.message);
+            return;
+        }
+
+        messages_.Add(result_.message);
+        if (result_.usesWorkspaceFolder)
+        {
+            details_.Add("Uses ${workspaceFolder}.");
+        }
+
+        hasFailure_ |= !result_.valid;
     }
 
     private static McpDiagnosticItem CheckCodex(string repoPath_)

@@ -10,6 +10,7 @@ public sealed class GitIgnoreService
     [
         ".ai/generated/",
         ".dotnet-home/",
+        ".vs/",
         ".codex/config.toml",
         "Tools/AiContextMcp/bin/",
         "Tools/AiContextMcp/obj/",

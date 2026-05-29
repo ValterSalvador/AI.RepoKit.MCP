@@ -247,20 +247,115 @@ public sealed class SelfCheckCommand
             return;
         }
 
-        string path = Path.Combine(repoPath_, ".mcp.json");
-        if (!File.Exists(path))
+        (bool exists, bool valid, string message) rootConfig = CheckVisualStudioConfig(Path.Combine(repoPath_, ".mcp.json"), ".mcp.json");
+        (bool exists, bool valid, string message) localConfig = CheckVisualStudioConfig(Path.Combine(repoPath_, ".vs", "mcp.json"), ".vs/mcp.json");
+        if (!rootConfig.exists && !localConfig.exists)
         {
-            checks_.Add(Failed("client-config:vs", true, "Missing .mcp.json for Visual Studio MCP discovery."));
+            checks_.Add(Failed("client-config:vs", true, "Missing .mcp.json and .vs/mcp.json for Visual Studio MCP discovery."));
             return;
         }
 
-        string content = File.ReadAllText(path);
-        bool passed = IsReadableJson(path)
-            && content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase)
-            && content.Contains("--repo", StringComparison.OrdinalIgnoreCase);
-        checks_.Add(Check("client-config:vs", true, passed, passed
-            ? ".mcp.json contains ai_repo_context and --repo for Visual Studio MCP discovery."
-            : ".mcp.json is not readable JSON or is missing ai_repo_context or --repo."));
+        List<string> messages = [];
+        bool passed = true;
+        AppendVisualStudioConfigResult(rootConfig, messages, ref passed);
+        AppendVisualStudioConfigResult(localConfig, messages, ref passed);
+        checks_.Add(Check("client-config:vs", true, passed, string.Join(" ", messages)));
+    }
+
+    private static (bool Exists, bool Valid, string Message) CheckVisualStudioConfig(string path_, string displayPath_)
+    {
+        if (!File.Exists(path_))
+        {
+            return (false, true, displayPath_ + " was not found.");
+        }
+
+        if (!IsReadableJson(path_))
+        {
+            return (true, false, displayPath_ + " is not readable JSON.");
+        }
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path_));
+        if (!document.RootElement.TryGetProperty("servers", out JsonElement servers)
+            || servers.ValueKind != JsonValueKind.Object)
+        {
+            return (true, false, displayPath_ + " is missing the Visual Studio MCP `servers` object.");
+        }
+
+        if (!servers.TryGetProperty("ai_repo_context", out JsonElement server)
+            || server.ValueKind != JsonValueKind.Object)
+        {
+            return (true, false, displayPath_ + " is missing the `ai_repo_context` server entry.");
+        }
+
+        List<string> missing = [];
+        if (!server.TryGetProperty("transport", out JsonElement transport)
+            || transport.ValueKind != JsonValueKind.String
+            || !string.Equals(transport.GetString(), "stdio", StringComparison.Ordinal))
+        {
+            missing.Add("transport=stdio");
+        }
+
+        if (!server.TryGetProperty("command", out JsonElement command)
+            || command.ValueKind != JsonValueKind.String
+            || !string.Equals(command.GetString(), "dotnet", StringComparison.Ordinal))
+        {
+            missing.Add("command=dotnet");
+        }
+
+        bool hasRepoArgument = false;
+        bool hasDllArgument = false;
+        if (!server.TryGetProperty("args", out JsonElement args)
+            || args.ValueKind != JsonValueKind.Array)
+        {
+            missing.Add("args");
+        }
+        else
+        {
+            foreach (JsonElement arg in args.EnumerateArray())
+            {
+                if (arg.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                string? value = arg.GetString();
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                hasRepoArgument |= string.Equals(value, "--repo", StringComparison.Ordinal);
+                hasDllArgument |= value.EndsWith("AiRepo.ContextMcp.dll", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!hasDllArgument)
+            {
+                missing.Add("AiRepo.ContextMcp.dll arg");
+            }
+
+            if (!hasRepoArgument)
+            {
+                missing.Add("--repo");
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            return (true, false, displayPath_ + " is present but missing: " + string.Join(", ", missing) + ".");
+        }
+
+        return (true, true, displayPath_ + " uses the Visual Studio MCP schema with ai_repo_context, command, args, transport=stdio, and --repo.");
+    }
+
+    private static void AppendVisualStudioConfigResult((bool exists, bool valid, string message) result_, List<string> messages_, ref bool passed_)
+    {
+        if (!result_.exists)
+        {
+            return;
+        }
+
+        messages_.Add(result_.message);
+        passed_ &= result_.valid;
     }
 
     private static void AddGeneratedOutputChecks(List<SelfCheckItem> checks_, string repoPath_)

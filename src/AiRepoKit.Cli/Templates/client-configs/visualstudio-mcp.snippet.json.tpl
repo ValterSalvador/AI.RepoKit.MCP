@@ -1,6 +1,6 @@
 {
   "name": "{{McpServerName}}",
-  "type": "stdio",
+  "transport": "stdio",
   "command": "dotnet",
   "args": [
     "<target-repo>/Tools/AiContextMcp/bin/Release/{{TargetFramework}}/{{McpAssemblyName}}.dll",

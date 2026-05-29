@@ -130,7 +130,7 @@ airepo mcp-diagnose --repo . --clients codex,vscode,vs
 git status --short
 ```
 
-Versionable files include `.ai/` guidance, `.ai/policies/audit-baseline.json`, `Tools/AiContext/`, `Tools/AiContextMcp/`, `.mcp.json`, `.vscode/mcp.json`, `.github/` agent and instruction files, and `AGENTS.md`. Local generated outputs under `.ai/generated/`, local Codex config, build output, release artifacts, and copied standalone executables stay ignored.
+Versionable files include `.ai/` guidance, `.ai/policies/audit-baseline.json`, `Tools/AiContext/`, `Tools/AiContextMcp/`, `.mcp.json`, `.vscode/mcp.json`, `.github/` agent and instruction files, and `AGENTS.md`. Local generated outputs under `.ai/generated/`, local Codex config, local `.vs/mcp.json`, build output, release artifacts, and copied standalone executables stay ignored.
 
 ## VS Code Agent Flow
 
@@ -162,9 +162,14 @@ Supported optional sub-prefixes are `ai-repo ask:`, `ai-repo plan:`, `ai-repo fi
 
 ## Visual Studio Agent Flow
 
-Visual Studio MCP requires Visual Studio 2022 17.14 or later. When you generate client config with `--clients vs`, `airepo` writes a repository-root `.mcp.json` for Visual Studio MCP discovery.
+Visual Studio MCP requires Visual Studio 2022 17.14 or later. When you generate client config with `--clients vs`, `airepo` writes a repository-root `.mcp.json` and, when safe, a local `.vs/mcp.json` with absolute repository and DLL paths for Visual Studio MCP discovery.
 
-After generation, open the solution if it was closed or reload it if it was already open so Visual Studio can rediscover the MCP server. Visual Studio MCP requires Visual Studio 2022 17.14 or later. If Copilot Agent still does not expose the MCP tools, enable them manually in the agent UI and then retry. `airepo mcp-diagnose --quick` now reports stronger client-specific hints for `.mcp.json`, `.vscode/mcp.json`, and `.codex/config.toml`.
+### Visual Studio MCP Troubleshooting
+
+- Visual Studio expects the local MCP server schema to use `"transport": "stdio"`; `"type": "stdio"` is not the Visual Studio shape.
+- After generation, open the solution if it was closed or reload it if it was already open so Visual Studio can rediscover the MCP server.
+- Copilot Agent MCP tools are disabled by default in Visual Studio; enable them manually in the agent UI before retrying.
+- `airepo mcp-diagnose --quick` validates `.mcp.json` and `.vs/mcp.json` with the Visual Studio schema and reports stronger client-specific hints.
 
 ## Performance Recommendations
 

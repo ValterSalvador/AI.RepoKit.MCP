@@ -8,7 +8,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>airepo</ToolCommandName>
     <PackageId>AiRepoKit.Cli</PackageId>
-    <Version>1.4.0</Version>
+    <Version>1.4.1</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 

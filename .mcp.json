@@ -1,7 +1,7 @@
 {
   "servers": {
     "ai_repo_context": {
-      "type": "stdio",
+      "transport": "stdio",
       "command": "dotnet",
       "args": [
         "${workspaceFolder}/Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll",

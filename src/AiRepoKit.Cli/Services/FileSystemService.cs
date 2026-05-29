@@ -99,11 +99,12 @@ public sealed class FileSystemService
         string fileName = Path.GetFileName(normalized);
         string lower = normalized.ToLowerInvariant();
         string lowerFileName = fileName.ToLowerInvariant();
+        bool isVisualStudioMcpConfig = string.Equals(lower, ".vs/mcp.json", StringComparison.Ordinal);
 
         if (lower.StartsWith(".git/", StringComparison.Ordinal)
             || lower.StartsWith("bin/", StringComparison.Ordinal)
             || lower.StartsWith("obj/", StringComparison.Ordinal)
-            || lower.StartsWith(".vs/", StringComparison.Ordinal)
+            || (lower.StartsWith(".vs/", StringComparison.Ordinal) && !isVisualStudioMcpConfig)
             || lower.StartsWith("oracle-data/", StringComparison.Ordinal))
         {
             return true;
@@ -112,7 +113,7 @@ public sealed class FileSystemService
         if (lower.Contains("/bin/", StringComparison.Ordinal)
             || lower.Contains("/obj/", StringComparison.Ordinal)
             || lower.Contains("/.git/", StringComparison.Ordinal)
-            || lower.Contains("/.vs/", StringComparison.Ordinal)
+            || (lower.Contains("/.vs/", StringComparison.Ordinal) && !isVisualStudioMcpConfig)
             || lower.Contains("/migrations/", StringComparison.Ordinal)
             || lower.Contains("/wwwroot/uploads/", StringComparison.Ordinal))
         {
