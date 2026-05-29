@@ -1,0 +1,27 @@
+bin/
+obj/
+.vs/
+.vscode/
+.idea/
+.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+artifacts/
+.tmp/
+*.nupkg
+*.snupkg
+/airepo.exe
+/airepo
+/install-ai-context.cmd
+/install-ai-context.ps1
+
+# AiRepoKit local/generated artifacts
+.ai/generated/
+Tools/AiContextMcp/bin/
+Tools/AiContextMcp/obj/
+.dotnet-home/
+artifacts/
+.tmp/
+.codex/config.toml

@@ -1,0 +1,11 @@
+{
+  "name": "ai_repo_context",
+  "type": "stdio",
+  "command": "dotnet",
+  "args": [
+    "<target-repo>/Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll",
+    "--repo",
+    "<target-repo>"
+  ],
+  "cwd": "<target-repo>"
+}

@@ -1,0 +1,4 @@
+[mcp_servers.ai_repo_context]
+command = "dotnet"
+args = ["<target-repo>/Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll", "--repo", "<target-repo>"]
+cwd = "<target-repo>"

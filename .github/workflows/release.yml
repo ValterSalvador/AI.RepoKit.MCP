@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*.*.*
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    name: Pack NuGet
+    runs-on: windows-2025
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set release version
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build package
+        shell: pwsh
+        run: ./scripts/Build-Release.ps1 -Configuration Release -Version $env:RELEASE_VERSION -SkipWindows -SkipLinux
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget
+          path: artifacts/nuget/AiRepoKit.Cli.*.nupkg
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-2025
+            scriptArgs: -RuntimeIdentifiers win-x64
+            archive: airepo-win-x64.zip
+          - rid: linux-x64
+            os: ubuntu-24.04
+            scriptArgs: -RuntimeIdentifiers linux-x64
+            archive: airepo-linux-x64.tar.gz
+          - rid: linux-arm64
+            os: ubuntu-24.04
+            scriptArgs: -RuntimeIdentifiers linux-arm64
+            archive: airepo-linux-arm64.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set release version
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build standalone
+        shell: pwsh
+        run: ./scripts/Build-Release.ps1 -Configuration Release -Version $env:RELEASE_VERSION ${{ matrix.scriptArgs }}
+
+      - name: Zip Windows artifact
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: Compress-Archive -Path artifacts/publish/win-x64/airepo.exe,artifacts/publish/win-x64/install-ai-context.cmd,artifacts/publish/win-x64/install-ai-context.ps1 -DestinationPath artifacts/${{ matrix.archive }} -Force
+
+      - name: Tar Linux artifact
+        if: matrix.rid != 'win-x64'
+        run: tar -czf artifacts/${{ matrix.archive }} -C artifacts/publish/${{ matrix.rid }} airepo
+
+      - name: Upload standalone
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.rid }}
+          path: artifacts/${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-24.04
+    needs:
+      - pack
+      - publish
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts/release
+
+      - name: Set release version
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Prepare release artifacts
+        shell: pwsh
+        run: |
+          Write-Host "Downloaded artifact tree:"
+          Get-ChildItem artifacts/release -Recurse | Format-Table -AutoSize
+
+          New-Item -ItemType Directory -Path dist-release -Force | Out-Null
+
+          $expectedFiles = @(
+            "AiRepoKit.Cli.$env:RELEASE_VERSION.nupkg",
+            "airepo-win-x64.zip",
+            "airepo-linux-x64.tar.gz",
+            "airepo-linux-arm64.tar.gz"
+          )
+
+          foreach ($fileName in $expectedFiles) {
+            $matches = @(Get-ChildItem artifacts/release -Recurse -File -Filter $fileName)
+            if ($matches.Count -ne 1) {
+              throw "Expected exactly one artifact named '$fileName', found $($matches.Count)."
+            }
+
+            Copy-Item -Path $matches[0].FullName -Destination (Join-Path dist-release $fileName) -Force
+          }
+
+          $files = Get-ChildItem dist-release -File | Sort-Object Name
+          $manifest = [ordered]@{
+            Version = $env:RELEASE_VERSION
+            GeneratedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            Artifacts = @($files | ForEach-Object {
+              [ordered]@{
+                Name = $_.Name
+                Sha256 = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()
+                SizeBytes = $_.Length
+              }
+            })
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path dist-release/release-manifest.json -Encoding UTF8
+
+          $releaseFiles = @(Get-ChildItem dist-release -File)
+          if ($releaseFiles.Count -eq 0) {
+            throw "No files were staged in dist-release."
+          }
+
+          Write-Host "Final release files:"
+          $releaseFiles | Sort-Object Name | Format-Table Name,Length -AutoSize
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $files = @(Get-ChildItem dist-release -File | Sort-Object Name)
+
+          if ($files.Count -eq 0) {
+            throw "No files found in dist-release; refusing to create an empty release."
+          }
+
+          gh release view $tag
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $tag --yes --cleanup-tag=false
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to delete existing release '$tag'."
+            }
+          }
+
+          gh release create $tag @($files.FullName) --title $tag --generate-notes --verify-tag
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create release '$tag'."
+          }
