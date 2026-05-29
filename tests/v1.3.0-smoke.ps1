@@ -10,6 +10,7 @@ dotnet build $project | Out-Host
 
 function Invoke-AiRepo {
     param([string[]]$Arguments)
+
     $output = & dotnet $dll @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) {
         $output | Out-String | Write-Error
@@ -47,6 +48,11 @@ $json = Invoke-AiRepo @('org', 'scan', '--root', $RepoRoot, '--max-depth', '0', 
 $jsonObject = $json | ConvertFrom-Json
 if ($null -eq $jsonObject.Repositories) {
     throw 'org scan --json was not parseable or lacked repositories.'
+}
+
+$mcpConfig = Get-Content (Join-Path $RepoRoot '.mcp.json') -Raw | ConvertFrom-Json
+if ($null -eq $mcpConfig.servers -and $null -eq $mcpConfig.mcpServers) {
+    throw '.mcp.json is not valid JSON or lacks servers/mcpServers.'
 }
 
 $csv = Invoke-AiRepo @('org', 'report', '--root', $RepoRoot, '--max-depth', '0', '--format', 'csv', '--no-progress')

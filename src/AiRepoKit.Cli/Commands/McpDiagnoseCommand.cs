@@ -29,6 +29,7 @@ public sealed class McpDiagnoseCommand
         try
         {
             string repoPath = Path.GetFullPath(options_.RepoPath);
+            string mode = GetMode(options_);
             IReadOnlyList<ClientKind> clients = NormalizeClients(options_.Clients);
             List<McpDiagnosticItem> checks = [];
             List<string> hints = [];
@@ -51,10 +52,11 @@ public sealed class McpDiagnoseCommand
             else
             {
                 progress.StartPhase("Building MCP project");
-                McpDiagnosticItem buildCheck = BuildMcp(repoPath, options_.McpProjectRelativePath);
+                McpBuildResult buildResult = new McpBuildService().Execute(options_);
+                McpDiagnosticItem buildCheck = CreateBuildCheck(buildResult);
                 checks.Add(buildCheck);
-                rebuilt = buildCheck.Status == "Passed";
-                if (buildCheck.Status == "Passed")
+                rebuilt = buildResult.State == "Built";
+                if (buildCheck.Status is "Passed" or "Warning")
                 {
                     progress.CompletePhase("MCP project build completed");
                 }
@@ -64,7 +66,7 @@ public sealed class McpDiagnoseCommand
                 }
             }
 
-            string dllPath = GetMcpDllPath(repoPath);
+            string dllPath = McpBuildService.GetDllPath(repoPath, options_);
             if (options_.SkipSmoke)
             {
                 checks.Add(Skipped("smoke-test", true, "Skipped by --skip-smoke."));
@@ -72,7 +74,7 @@ public sealed class McpDiagnoseCommand
             else
             {
                 progress.StartPhase("Running MCP smoke test");
-                checks.Add(RunSmokeTest(repoPath, dllPath, options_.Verbose));
+                checks.Add(CreateSmokeCheck(new McpSmokeTestService().Run(repoPath, dllPath, options_.Verbose)));
                 McpDiagnosticItem smoke = checks[^1];
                 if (smoke.Status is "Passed" or "Warning")
                 {
@@ -86,9 +88,10 @@ public sealed class McpDiagnoseCommand
 
             DowngradeLockedBuildWhenSmokePassed(checks, options_.Strict);
 
-            if (options_.SkipBudget)
+            if (options_.SkipBudget || string.Equals(mode, "quick", StringComparison.OrdinalIgnoreCase))
             {
-                checks.Add(Skipped("budget", false, "Skipped by --skip-budget."));
+                string reason = options_.SkipBudget ? "Skipped by --skip-budget." : "Skipped in quick mode.";
+                checks.Add(Skipped("budget", false, reason));
             }
             else
             {
@@ -108,8 +111,9 @@ public sealed class McpDiagnoseCommand
             AddClientHints(hints, checks, clients, repoPath, rebuilt);
             int exitCode = checks.Any(check_ => check_.Required && check_.Status == "Failed") ? 2 : 0;
             string status = exitCode == 2 ? "Failed" : checks.Any(check_ => check_.Status == "Warning") ? "Warning" : "Passed";
-            McpDiagnosticResult result = new(status, repoPath, exitCode, clients.Select(GetClientName).ToArray(), checks, hints);
-            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose);
+            CommandTimingReport? timingReport = options_.Timings ? progress.GetTimingReport() : null;
+            McpDiagnosticResult result = new(status, mode, repoPath, exitCode, clients.Select(GetClientName).ToArray(), checks, hints, timingReport);
+            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose, options_.Summary, options_.Timings);
             if (exitCode == 0)
             {
                 progress.CompletePhase("MCP diagnose completed");
@@ -126,14 +130,26 @@ public sealed class McpDiagnoseCommand
             string repoPath = Path.GetFullPath(options_.RepoPath);
             McpDiagnosticResult result = new(
                 "Failed",
+                GetMode(options_),
                 repoPath,
                 1,
                 NormalizeClients(options_.Clients).Select(GetClientName).ToArray(),
                 [Failed("fatal", true, ProcessRunner.Redact(exception.Message))],
-                []);
-            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose);
+                [],
+                options_.Timings ? progress.GetTimingReport() : null);
+            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose, options_.Summary, options_.Timings);
             return CommandResult.Failure(output, 1);
         }
+    }
+
+    private static string GetMode(BootstrapOptions options_)
+    {
+        if (options_.Strict)
+        {
+            return "strict";
+        }
+
+        return options_.Quick ? "quick" : "full";
     }
 
     private static IReadOnlyList<ClientKind> NormalizeClients(IReadOnlyList<ClientKind> clients_)
@@ -156,6 +172,8 @@ public sealed class McpDiagnoseCommand
 
     private static void AddClientChecks(List<McpDiagnosticItem> checks_, string repoPath_, IReadOnlyList<ClientKind> clients_)
     {
+        checks_.Add(BuildClientDiscoverySummary(repoPath_, clients_));
+
         if (clients_.Contains(ClientKind.Vscode))
         {
             checks_.Add(CheckVscode(repoPath_));
@@ -198,6 +216,11 @@ public sealed class McpDiagnoseCommand
         }
 
         string content = File.ReadAllText(path_);
+        if (!IsReadableJson(content))
+        {
+            return Failed(checkName_, true, displayPath_ + " is not readable JSON.");
+        }
+
         List<string> missing = [];
         if (!content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase))
         {
@@ -229,15 +252,47 @@ public sealed class McpDiagnoseCommand
         string snippetPath = Path.Combine(repoPath_, ".ai", "client-configs", "codex.config.toml");
         if (File.Exists(localPath))
         {
-            return Passed("codex-config", true, ".codex/config.toml exists.");
+            string content = File.ReadAllText(localPath);
+            bool valid = content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase)
+                && content.Contains("--repo", StringComparison.OrdinalIgnoreCase);
+            return valid
+                ? Passed("codex-config", true, ".codex/config.toml exists and contains ai_repo_context plus --repo.")
+                : Failed("codex-config", true, ".codex/config.toml exists but is missing ai_repo_context or --repo.");
         }
 
         if (File.Exists(snippetPath))
         {
-            return Warning("codex-config", true, ".codex/config.toml is not present. This file may be local or ignored; .ai/client-configs/codex.config.toml is the versionable snippet.");
+            string content = File.ReadAllText(snippetPath);
+            bool valid = content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase)
+                && content.Contains("--repo", StringComparison.OrdinalIgnoreCase);
+            return valid
+                ? Warning("codex-config", true, ".codex/config.toml is not present. This file may be local or ignored; .ai/client-configs/codex.config.toml is the versionable snippet.")
+                : Failed("codex-config", true, ".ai/client-configs/codex.config.toml exists but is missing ai_repo_context or --repo.");
         }
 
         return Failed("codex-config", true, ".codex/config.toml is missing and .ai/client-configs/codex.config.toml was not found.");
+    }
+
+    private static McpDiagnosticItem BuildClientDiscoverySummary(string repoPath_, IReadOnlyList<ClientKind> clients_)
+    {
+        List<string> states = [];
+        foreach (ClientKind client in clients_)
+        {
+            string primaryPath = ConfigGenerator.GetClientConfigPath(client);
+            bool primaryExists = File.Exists(Path.Combine(repoPath_, primaryPath.Replace('/', Path.DirectorySeparatorChar)));
+            states.Add($"{GetClientName(client)}={(primaryExists ? primaryPath : "missing")}");
+
+            foreach (string extraPath in new ConfigGenerator().GetAdditionalClientConfigPaths(client))
+            {
+                bool extraExists = File.Exists(Path.Combine(repoPath_, extraPath.Replace('/', Path.DirectorySeparatorChar)));
+                if (extraExists)
+                {
+                    states.Add($"{GetClientName(client)}-extra={extraPath}");
+                }
+            }
+        }
+
+        return Passed("client-config-discovery", false, "Discovered client config paths: " + string.Join("; ", states) + ".");
     }
 
     private static void AddDotnetCheck(List<McpDiagnosticItem> checks_)
@@ -297,7 +352,7 @@ public sealed class McpDiagnoseCommand
             build.Name,
             "Warning",
             false,
-            build.Message + " JSON-RPC smoke test passed, so this is non-blocking outside strict validation.",
+            "SkippedLockedSmokePassed. Locked MCP DLL reuse was accepted because JSON-RPC smoke passed.",
             build.Hint,
             build.Details);
     }
@@ -592,12 +647,30 @@ public sealed class McpDiagnoseCommand
 
         if (configsPassed && smokePassed && clients_.Contains(ClientKind.VisualStudio))
         {
-            hints_.Add("Visual Studio MCP requires Visual Studio 2022 17.14 or later. Open or reload the solution after generation, and enable the MCP tools manually in Copilot Agent if they are still disabled.");
+            hints_.Add("Visual Studio MCP requires Visual Studio 2022 17.14 or later. Reload the solution after generation and enable the MCP tools manually in Copilot Agent if they are still disabled.");
+        }
+
+        if (clients_.Contains(ClientKind.Codex))
+        {
+            hints_.Add("Codex-compatible clients may prefer the local .codex/config.toml while the versionable snippet remains under .ai/client-configs/codex.config.toml.");
         }
 
         if (rebuilt_)
         {
             hints_.Add("The MCP DLL was rebuilt; MCP clients may need a restart or reload before they use the new server binary.");
+        }
+    }
+
+    private static bool IsReadableJson(string content_)
+    {
+        try
+        {
+            using JsonDocument _ = JsonDocument.Parse(content_);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -670,13 +743,32 @@ public sealed class McpDiagnoseCommand
             .ToArray();
     }
 
-    private static string WriteMarkdown(McpDiagnosticResult result_, bool verbose_)
+    private static McpDiagnosticItem CreateBuildCheck(McpBuildResult build_)
+    {
+        string message = build_.State switch
+        {
+            "Built" => "Built. Release MCP build passed.",
+            "SkippedCurrent" => "SkippedCurrent. Release MCP build skipped because the output DLL is current.",
+            "SkippedLockedSmokePassed" => "SkippedLockedSmokePassed. Locked MCP DLL reuse was accepted because JSON-RPC smoke passed.",
+            _ => $"Failed. {build_.Message}"
+        };
+        IReadOnlyList<string> details = build_.Process is null ? [] : GetProcessDetails(build_.Process);
+        return new McpDiagnosticItem("mcp-build", build_.State == "Failed" ? "Failed" : build_.State == "SkippedLockedSmokePassed" ? "Warning" : "Passed", build_.State == "Failed", message, build_.Hint, details);
+    }
+
+    private static McpDiagnosticItem CreateSmokeCheck(McpSmokeTestResult result_)
+    {
+        return new McpDiagnosticItem("smoke-test", result_.Status, true, result_.Message, null, result_.Details);
+    }
+
+    private static string WriteMarkdown(McpDiagnosticResult result_, bool verbose_, bool summary_, bool showTimings_)
     {
         StringBuilder builder = new();
         builder.AppendLine("# MCP Diagnose");
         builder.AppendLine();
         builder.AppendLine($"- Repo: `{result_.RepoPath}`");
         builder.AppendLine($"- Clients: `{string.Join(",", result_.Clients)}`");
+        builder.AppendLine($"- Mode: `{result_.Mode}`");
         builder.AppendLine($"- Status: `{result_.Status}`");
         builder.AppendLine($"- ExitCode: `{result_.ExitCode}`");
         builder.AppendLine();
@@ -687,33 +779,7 @@ public sealed class McpDiagnoseCommand
         builder.AppendLine($"- Failed: `{result_.Checks.Count(check_ => check_.Status == "Failed")}`");
         builder.AppendLine($"- Skipped: `{result_.Checks.Count(check_ => check_.Status == "Skipped")}`");
         builder.AppendLine();
-        builder.AppendLine("## Checks");
-        builder.AppendLine();
-        IEnumerable<McpDiagnosticItem> checks = verbose_ ? result_.Checks : result_.Checks.Where(check_ => check_.Status != "Passed");
-        if (!checks.Any())
-        {
-            builder.AppendLine("- All checks passed.");
-        }
-        else
-        {
-            builder.AppendLine("| Status | Required | Check | Message |");
-            builder.AppendLine("| --- | --- | --- | --- |");
-            foreach (McpDiagnosticItem check in checks)
-            {
-                string message = EscapeTable(check.Message);
-                if (!string.IsNullOrWhiteSpace(check.Hint))
-                {
-                    message = $"{message}<br>Hint: {EscapeTable(check.Hint)}";
-                }
-
-                if (verbose_ && check.Details is { Count: > 0 })
-                {
-                    message = $"{message}<br>Details: {EscapeTable(string.Join(" / ", check.Details))}";
-                }
-
-                builder.AppendLine($"| {check.Status} | `{check.Required}` | `{check.Name}` | {message} |");
-            }
-        }
+        AppendChecks(builder, result_.Checks, verbose_, summary_);
 
         if (result_.ClientHints.Count > 0)
         {
@@ -726,7 +792,68 @@ public sealed class McpDiagnoseCommand
             }
         }
 
+        if (showTimings_ && result_.Timings is not null)
+        {
+            AppendTimings(builder, result_.Timings);
+        }
+
         return builder.ToString().TrimEnd();
+    }
+
+    private static void AppendChecks(StringBuilder builder_, IReadOnlyList<McpDiagnosticItem> checks_, bool verbose_, bool summary_)
+    {
+        builder_.AppendLine("## Checks");
+        builder_.AppendLine();
+        IEnumerable<McpDiagnosticItem> checks = summary_ ? checks_.Where(check_ => check_.Status != "Passed") : verbose_ ? checks_ : checks_.Where(check_ => check_.Status != "Passed");
+        if (!checks.Any())
+        {
+            builder_.AppendLine("- All checks passed.");
+            return;
+        }
+
+        if (summary_)
+        {
+            foreach (McpDiagnosticItem check in checks)
+            {
+                builder_.AppendLine($"- [{check.Status}] `{check.Name}`: {check.Message}");
+                if (!string.IsNullOrWhiteSpace(check.Hint))
+                {
+                    builder_.AppendLine($"  - Hint: {check.Hint}");
+                }
+            }
+
+            return;
+        }
+
+        builder_.AppendLine("| Status | Required | Check | Message |");
+        builder_.AppendLine("| --- | --- | --- | --- |");
+        foreach (McpDiagnosticItem check in checks)
+        {
+            string message = EscapeTable(check.Message);
+            if (!string.IsNullOrWhiteSpace(check.Hint))
+            {
+                message = $"{message}<br>Hint: {EscapeTable(check.Hint)}";
+            }
+
+            if (verbose_ && check.Details is { Count: > 0 })
+            {
+                message = $"{message}<br>Details: {EscapeTable(string.Join(" / ", check.Details))}";
+            }
+
+            builder_.AppendLine($"| {check.Status} | `{check.Required}` | `{check.Name}` | {message} |");
+        }
+    }
+
+    private static void AppendTimings(StringBuilder builder_, CommandTimingReport timings_)
+    {
+        builder_.AppendLine();
+        builder_.AppendLine("## Timings");
+        builder_.AppendLine();
+        builder_.AppendLine($"- Total: `{timings_.TotalElapsedMilliseconds} ms`");
+        foreach (CommandPhaseTiming phase in timings_.Phases)
+        {
+            builder_.AppendLine($"- {phase.Name}: `{phase.ElapsedMilliseconds} ms` ({phase.Status})");
+        }
     }
 
     private static string EscapeTable(string value_)

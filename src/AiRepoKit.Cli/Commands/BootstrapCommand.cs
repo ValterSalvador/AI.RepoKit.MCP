@@ -79,20 +79,35 @@ public sealed class BootstrapCommand
                 if (File.Exists(mcpProjectPath))
                 {
                     progress.StartPhase("Building MCP project");
-                    ProcessResult build = new ProcessRunner().Run("dotnet", ["build", options_.McpProjectRelativePath, "-c", "Release"], Path.GetFullPath(options_.RepoPath));
-                    processes.Add(build);
-                    mcpBuildStatus = build.Success ? "Passed" : $"Failed exit {build.ExitCode}";
-                    if (!build.Success)
+                    McpBuildService buildService = new();
+                    McpBuildResult build = buildService.Execute(options_);
+                    if (build.Process is not null)
+                    {
+                        processes.Add(build.Process);
+                    }
+
+                    if (build.State == "Failed" && build.Process is not null && McpBuildFailureDiagnostics.IsLockedDllFailure(build.Process) && !options_.Strict)
+                    {
+                        var smoke = new McpSmokeTestService().Run(options_.RepoPath, build.DllPath, options_.Verbose);
+                        if (smoke.Success)
+                        {
+                            build = McpBuildService.CreateLockedSmokePassed(build);
+                            warnings.Add("Locked MCP DLL build failure was downgraded because JSON-RPC smoke test passed.");
+                        }
+                    }
+
+                    mcpBuildStatus = build.State;
+                    if (build.State == "Failed")
                     {
                         progress.FailPhase("MCP project build failed");
-                        if (McpBuildFailureDiagnostics.IsLockedDllFailure(build))
+                        if (build.Process is not null && McpBuildFailureDiagnostics.IsLockedDllFailure(build.Process))
                         {
                             errors.Add(McpBuildFailureDiagnostics.LockedDllMessage);
                             warnings.Add(McpBuildFailureDiagnostics.LockedDllHint);
                         }
                         else
                         {
-                            errors.Add("MCP build failed.");
+                            errors.Add(build.Message);
                         }
                     }
                     else
@@ -122,7 +137,7 @@ public sealed class BootstrapCommand
         {
             scriptStatuses.Add("All scripts skipped.");
         }
-        else if (options_.IncludeMcp && (mcpBuildStatus == "Passed" || !apply))
+        else if (options_.IncludeMcp && (mcpBuildStatus is "Built" or "SkippedCurrent" or "SkippedLockedSmokePassed" || !apply))
         {
             foreach (ScriptPlan script in scripts)
             {

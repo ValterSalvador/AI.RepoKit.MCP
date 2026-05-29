@@ -22,6 +22,7 @@ public sealed class SelfCheckCommand
         try
         {
             string repoPath = Path.GetFullPath(options_.RepoPath);
+            string mode = GetMode(options_);
             List<SelfCheckItem> checks = [];
             progress.StartPhase("Checking repository");
             RepoAnalysis analysis = new RepoDetector().Analyze(repoPath);
@@ -31,9 +32,9 @@ public sealed class SelfCheckCommand
             AddClientConfigChecks(checks, repoPath, ConfigGenerator.GetSelectedClients(options_));
             progress.CompletePhase("Repository check completed");
 
-            if (options_.SkipAudit)
+            if (ShouldSkipAudit(options_, mode))
             {
-                checks.Add(Skipped("audit", false, "Skipped by --skip-audit."));
+                checks.Add(Skipped("audit", false, options_.SkipAudit ? "Skipped by --skip-audit." : $"Skipped in {mode} mode."));
             }
             else
             {
@@ -50,15 +51,18 @@ public sealed class SelfCheckCommand
                 }
             }
 
-            if (options_.SkipCodeInventory)
+            if (ShouldSkipCodeIndex(options_, mode))
             {
-                checks.Add(Skipped("code-index", false, "Skipped by --skip-code-index."));
-                checks.Add(Skipped("code-index-cache", false, "Skipped because code-index was skipped."));
+                checks.Add(Skipped("code-index", false, options_.SkipCodeInventory ? "Skipped by --skip-code-index." : $"Skipped in {mode} mode."));
+                string cachePath = Path.Combine(repoPath, CodeIndexCacheService.CacheRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                checks.Add(Check("code-index-cache", false, File.Exists(cachePath), File.Exists(cachePath)
+                    ? CodeIndexCacheService.CacheRelativePath + " reused."
+                    : CodeIndexCacheService.CacheRelativePath + " is missing."));
             }
             else
             {
                 progress.StartPhase("Running code index");
-                CommandResult codeIndex = new CodeIndexCommand().Execute(CreateApplyOptions(options_));
+                CommandResult codeIndex = new CodeIndexCommand().Execute(CreateValidationCodeIndexOptions(options_));
                 checks.Add(new SelfCheckItem("code-index", codeIndex.Success ? "Passed" : "Failed", true, $"Exit code {codeIndex.ExitCode}.", codeIndex.ExitCode));
                 string cachePath = Path.Combine(repoPath, CodeIndexCacheService.CacheRelativePath.Replace('/', Path.DirectorySeparatorChar));
                 checks.Add(Check("code-index-cache", true, File.Exists(cachePath), CodeIndexCacheService.CacheRelativePath));
@@ -72,9 +76,9 @@ public sealed class SelfCheckCommand
                 }
             }
 
-            if (options_.SkipBuildMcp)
+            if (ShouldSkipMcpBuild(options_, mode))
             {
-                checks.Add(Skipped("mcp-build", false, "Skipped by --skip-build-mcp."));
+                checks.Add(Skipped("mcp-build", false, options_.SkipBuildMcp ? "Skipped by --skip-build-mcp." : $"Skipped in {mode} mode."));
             }
             else
             {
@@ -83,9 +87,18 @@ public sealed class SelfCheckCommand
                 if (File.Exists(mcpProjectPath))
                 {
                     progress.StartPhase("Building MCP project");
-                    ProcessResult build = new ProcessRunner().Run("dotnet", ["build", options_.McpProjectRelativePath, "-c", "Release"], repoPath);
+                    McpBuildResult build = new McpBuildService().Execute(options_);
+                    if (build.State == "Failed" && build.Process is not null && McpBuildFailureDiagnostics.IsLockedDllFailure(build.Process) && !options_.Strict)
+                    {
+                        var smoke = new McpSmokeTestService().Run(repoPath, build.DllPath, options_.Verbose);
+                        if (smoke.Success)
+                        {
+                            build = McpBuildService.CreateLockedSmokePassed(build);
+                        }
+                    }
+
                     checks.Add(GetMcpBuildCheck(build, options_));
-                    if (build.Success)
+                    if (build.State != "Failed")
                     {
                         progress.CompletePhase("MCP project build completed");
                     }
@@ -101,9 +114,9 @@ public sealed class SelfCheckCommand
                 }
             }
 
-            if (options_.SkipBudget)
+            if (ShouldSkipBudget(options_, mode))
             {
-                checks.Add(Skipped("mcp-budget", false, "Skipped by --skip-budget."));
+                checks.Add(Skipped("mcp-budget", false, options_.SkipBudget ? "Skipped by --skip-budget." : $"Skipped in {mode} mode."));
             }
             else
             {
@@ -145,8 +158,9 @@ public sealed class SelfCheckCommand
                 : checks.Any(check_ => string.Equals(check_.Status, "Warning", StringComparison.OrdinalIgnoreCase))
                     ? "Warning"
                     : "Passed";
-            SelfCheckResult result = new(status, repoPath, exitCode, checks);
-            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose);
+            CommandTimingReport? timingReport = options_.Timings ? progress.GetTimingReport() : null;
+            SelfCheckResult result = new(status, mode, repoPath, exitCode, checks, timingReport);
+            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose, options_.Summary, options_.Timings);
             if (exitCode == 0)
             {
                 progress.CompletePhase("Self-check completed");
@@ -160,10 +174,45 @@ public sealed class SelfCheckCommand
         catch (Exception exception)
         {
             progress.FailPhase("Self-check failed");
-            SelfCheckResult result = new("Failed", Path.GetFullPath(options_.RepoPath), 1, [Failed("fatal", true, ProcessRunner.Redact(exception.Message), 1)]);
-            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose);
+            SelfCheckResult result = new("Failed", GetMode(options_), Path.GetFullPath(options_.RepoPath), 1, [Failed("fatal", true, ProcessRunner.Redact(exception.Message), 1)], options_.Timings ? progress.GetTimingReport() : null);
+            string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose, options_.Summary, options_.Timings);
             return CommandResult.Failure(output, 1);
         }
+    }
+
+    private static string GetMode(BootstrapOptions options_)
+    {
+        if (options_.Strict)
+        {
+            return "strict";
+        }
+
+        if (options_.Full)
+        {
+            return "full";
+        }
+
+        return options_.Quick ? "quick" : "balanced";
+    }
+
+    private static bool ShouldSkipAudit(BootstrapOptions options_, string mode_)
+    {
+        return options_.SkipAudit || mode_ is "balanced" or "quick";
+    }
+
+    private static bool ShouldSkipCodeIndex(BootstrapOptions options_, string mode_)
+    {
+        return options_.SkipCodeInventory || mode_ is "balanced" or "quick";
+    }
+
+    private static bool ShouldSkipMcpBuild(BootstrapOptions options_, string mode_)
+    {
+        return options_.SkipBuildMcp || mode_ is "balanced" or "quick";
+    }
+
+    private static bool ShouldSkipBudget(BootstrapOptions options_, string mode_)
+    {
+        return options_.SkipBudget || mode_ is "balanced" or "quick";
     }
 
     private static void AddRequiredFileChecks(List<SelfCheckItem> checks_, string repoPath_)
@@ -366,55 +415,9 @@ public sealed class SelfCheckCommand
         }
     }
 
-    private static BootstrapOptions CreateApplyOptions(BootstrapOptions options_)
+    private static BootstrapOptions CreateValidationCodeIndexOptions(BootstrapOptions options_)
     {
-        return new BootstrapOptions(
-            options_.Command,
-            options_.RepoPath,
-            options_.Clients,
-            options_.IncludeMcp,
-            true,
-            false,
-            options_.Backup,
-            options_.Force,
-            options_.ForceManaged,
-            options_.Profile,
-            options_.TargetFramework,
-            options_.McpServerName,
-            options_.ToolCommandName,
-            options_.McpProjectName,
-            options_.McpNamespace,
-            options_.McpAssemblyName,
-            options_.McpProjectRelativePath,
-            options_.SkipBuildMcp,
-            options_.SkipAiContext,
-            options_.SkipCodeInventory,
-            options_.SkipSecurityScan,
-            options_.SkipBudget,
-            options_.SkipSmoke,
-            options_.SkipScripts,
-            options_.MaxFiles,
-            options_.MaxItems,
-            options_.IncludePrivateMembers,
-            false,
-            false,
-            options_.Output,
-            options_.Format,
-            options_.Verbose,
-            options_.AuditJson,
-            options_.IncludeSource,
-            false,
-            false,
-            false,
-            false,
-            options_.SkipAudit,
-            options_.IncludeAgents,
-            options_.Task,
-            options_.Target,
-            options_.Limit,
-            options_.RequireContextPacks,
-            options_.UnknownOptions,
-            options_.NoProgress);
+        return options_.With(command_: "code-index", apply_: true, dryRun_: false, validationOnly_: true);
     }
 
     private static bool IsRepoDetected(RepoAnalysis analysis_)
@@ -447,23 +450,19 @@ public sealed class SelfCheckCommand
         return new SelfCheckItem(name_, "Skipped", required_, message_, 0);
     }
 
-    private static SelfCheckItem GetMcpBuildCheck(ProcessResult build_, BootstrapOptions options_)
+    private static SelfCheckItem GetMcpBuildCheck(McpBuildResult build_, BootstrapOptions options_)
     {
-        if (!build_.Success && McpBuildFailureDiagnostics.IsLockedDllFailure(build_))
+        if (build_.State == "SkippedLockedSmokePassed")
         {
-            if (!options_.Strict)
-            {
-                CommandResult diagnose = new McpDiagnoseCommand().Execute(options_.With(command_: "mcp-diagnose", skipBuildMcp_: true));
-                if (diagnose.Success)
-                {
-                    return new SelfCheckItem("mcp-build", "Warning", false, McpBuildFailureDiagnostics.LockedDllMessage + " JSON-RPC diagnostics passed, so this is non-blocking outside strict validation.", build_.ExitCode, McpBuildFailureDiagnostics.LockedDllHint);
-                }
-            }
-
-            return new SelfCheckItem("mcp-build", "Failed", true, McpBuildFailureDiagnostics.LockedDllMessage, build_.ExitCode, McpBuildFailureDiagnostics.LockedDllHint);
+            return new SelfCheckItem("mcp-build", "Warning", false, "SkippedLockedSmokePassed. Locked MCP DLL reuse was accepted because JSON-RPC smoke passed.", 0, build_.Hint);
         }
 
-        return new SelfCheckItem("mcp-build", build_.Success ? "Passed" : "Failed", true, GetProcessMessage(build_), build_.ExitCode);
+        return build_.State switch
+        {
+            "Built" => new SelfCheckItem("mcp-build", "Passed", true, "Built. Release MCP build passed.", 0),
+            "SkippedCurrent" => new SelfCheckItem("mcp-build", "Passed", true, "SkippedCurrent. Release MCP build skipped because the output DLL is current.", 0),
+            _ => new SelfCheckItem("mcp-build", "Failed", true, build_.Message, build_.Process?.ExitCode ?? 2, build_.Hint)
+        };
     }
 
     private static string GetProcessMessage(ProcessResult process_)
@@ -480,12 +479,13 @@ public sealed class SelfCheckCommand
         return string.IsNullOrWhiteSpace(output) ? $"Exit code {process_.ExitCode}." : $"Exit code {process_.ExitCode}. {output}";
     }
 
-    private static string WriteMarkdown(SelfCheckResult result_, bool verbose_)
+    private static string WriteMarkdown(SelfCheckResult result_, bool verbose_, bool summary_, bool showTimings_)
     {
         StringBuilder builder = new();
         builder.AppendLine("# Self Check");
         builder.AppendLine();
         builder.AppendLine($"- Repo: `{result_.RepoPath}`");
+        builder.AppendLine($"- Mode: `{result_.Mode}`");
         builder.AppendLine($"- Status: `{result_.Status}`");
         builder.AppendLine($"- ExitCode: `{result_.ExitCode}`");
         builder.AppendLine();
@@ -498,10 +498,21 @@ public sealed class SelfCheckCommand
         builder.AppendLine();
         builder.AppendLine("## Checks");
         builder.AppendLine();
-        IEnumerable<SelfCheckItem> checks = verbose_ ? result_.Checks : result_.Checks.Where(check_ => check_.Status != "Passed");
+        IEnumerable<SelfCheckItem> checks = summary_ ? result_.Checks.Where(check_ => check_.Status != "Passed") : verbose_ ? result_.Checks : result_.Checks.Where(check_ => check_.Status != "Passed");
         if (!checks.Any())
         {
             builder.AppendLine("- All checks passed.");
+        }
+        else if (summary_)
+        {
+            foreach (SelfCheckItem check in checks)
+            {
+                builder.AppendLine($"- [{check.Status}] `{check.Name}`: {check.Message}");
+                if (!string.IsNullOrWhiteSpace(check.Hint))
+                {
+                    builder.AppendLine($"  - Hint: {check.Hint}");
+                }
+            }
         }
         else
         {
@@ -523,6 +534,18 @@ public sealed class SelfCheckCommand
         builder.AppendLine("## MCP Diagnostics");
         builder.AppendLine();
         builder.AppendLine("- Run `airepo mcp-diagnose` for MCP/client diagnostics.");
+
+        if (showTimings_ && result_.Timings is not null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Timings");
+            builder.AppendLine();
+            builder.AppendLine($"- Total: `{result_.Timings.TotalElapsedMilliseconds} ms`");
+            foreach (CommandPhaseTiming phase in result_.Timings.Phases)
+            {
+                builder.AppendLine($"- {phase.Name}: `{phase.ElapsedMilliseconds} ms` ({phase.Status})");
+            }
+        }
 
         return builder.ToString().TrimEnd();
     }

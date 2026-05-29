@@ -35,7 +35,9 @@ public sealed record BootstrapOptions
         string output_,
         string format_,
         bool verbose_,
+        bool summary_,
         bool auditJson_,
+        bool timings_,
         bool includeSource_,
         bool createAuditBaseline_,
         bool updateAuditBaseline_,
@@ -57,6 +59,8 @@ public sealed record BootstrapOptions
         string sanitizeTerm_ = "",
         string sanitizeReplacement_ = "",
         bool strict_ = false,
+        bool quick_ = false,
+        bool full_ = false,
         string defaultsSummary_ = "",
         int budget_ = 0,
         string kind_ = "",
@@ -64,7 +68,8 @@ public sealed record BootstrapOptions
         bool changedFiles_ = false,
         string rootPath_ = "",
         string orgSubcommand_ = "",
-        int maxDepth_ = 3)
+        int maxDepth_ = 3,
+        bool validationOnly_ = false)
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -98,7 +103,9 @@ public sealed record BootstrapOptions
         this.Output = output_;
         this.Format = format_;
         this.Verbose = verbose_;
+        this.Summary = summary_;
         this.AuditJson = auditJson_;
+        this.Timings = timings_;
         this.IncludeSource = includeSource_;
         this.CreateAuditBaseline = createAuditBaseline_;
         this.UpdateAuditBaseline = updateAuditBaseline_;
@@ -120,6 +127,8 @@ public sealed record BootstrapOptions
         this.SanitizeTerm = sanitizeTerm_;
         this.SanitizeReplacement = sanitizeReplacement_;
         this.Strict = strict_;
+        this.Quick = quick_;
+        this.Full = full_;
         this.DefaultsSummary = defaultsSummary_;
         this.Budget = budget_;
         this.Kind = kind_;
@@ -128,6 +137,7 @@ public sealed record BootstrapOptions
         this.RootPath = rootPath_;
         this.OrgSubcommand = orgSubcommand_;
         this.MaxDepth = maxDepth_;
+        this.ValidationOnly = validationOnly_;
     }
 
     public string Command { get; }
@@ -194,7 +204,11 @@ public sealed record BootstrapOptions
 
     public bool Verbose { get; }
 
+    public bool Summary { get; }
+
     public bool AuditJson { get; }
+
+    public bool Timings { get; }
 
     public bool IncludeSource { get; }
 
@@ -238,6 +252,10 @@ public sealed record BootstrapOptions
 
     public bool Strict { get; }
 
+    public bool Quick { get; }
+
+    public bool Full { get; }
+
     public string DefaultsSummary { get; }
 
     public int Budget { get; }
@@ -254,6 +272,8 @@ public sealed record BootstrapOptions
 
     public int MaxDepth { get; }
 
+    public bool ValidationOnly { get; }
+
     public BootstrapOptions With(
         string? command_ = null,
         bool? includeMcp_ = null,
@@ -266,7 +286,8 @@ public sealed record BootstrapOptions
         bool? skipAudit_ = null,
         bool? includeAgents_ = null,
         string? task_ = null,
-        bool? requireContextPacks_ = null)
+        bool? requireContextPacks_ = null,
+        bool? validationOnly_ = null)
     {
         return new BootstrapOptions(
             command_ ?? this.Command,
@@ -301,7 +322,9 @@ public sealed record BootstrapOptions
             this.Output,
             this.Format,
             this.Verbose,
+            this.Summary,
             this.AuditJson,
+            this.Timings,
             this.IncludeSource,
             this.CreateAuditBaseline,
             this.UpdateAuditBaseline,
@@ -323,6 +346,8 @@ public sealed record BootstrapOptions
             this.SanitizeTerm,
             this.SanitizeReplacement,
             this.Strict,
+            this.Quick,
+            this.Full,
             this.DefaultsSummary,
             this.Budget,
             this.Kind,
@@ -330,6 +355,7 @@ public sealed record BootstrapOptions
             this.ChangedFiles,
             this.RootPath,
             this.OrgSubcommand,
-            this.MaxDepth);
+            this.MaxDepth,
+            validationOnly_ ?? this.ValidationOnly);
     }
 }

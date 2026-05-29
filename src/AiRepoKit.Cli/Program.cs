@@ -342,7 +342,9 @@ public static class Program
         string target = string.Empty;
         int limit = 20;
         bool verbose = false;
+        bool summary = false;
         bool auditJson = false;
+        bool timings = false;
         bool includeSource = false;
         bool createAuditBaseline = false;
         bool updateAuditBaseline = false;
@@ -359,6 +361,8 @@ public static class Program
         string sanitizeTerm = string.Empty;
         string sanitizeReplacement = string.Empty;
         bool strict = false;
+        bool quick = false;
+        bool full = false;
         int budget = 0;
         string kind = string.Empty;
         string since = string.Empty;
@@ -568,6 +572,18 @@ public static class Program
                 continue;
             }
 
+            if (string.Equals(value, "--quick", StringComparison.OrdinalIgnoreCase))
+            {
+                quick = true;
+                continue;
+            }
+
+            if (string.Equals(value, "--full", StringComparison.OrdinalIgnoreCase))
+            {
+                full = true;
+                continue;
+            }
+
             if (string.Equals(value, "--skip-smoke", StringComparison.OrdinalIgnoreCase))
             {
                 skipSmoke = true;
@@ -661,6 +677,18 @@ public static class Program
             if (string.Equals(value, "--verbose", StringComparison.OrdinalIgnoreCase))
             {
                 verbose = true;
+                continue;
+            }
+
+            if (string.Equals(value, "--summary", StringComparison.OrdinalIgnoreCase))
+            {
+                summary = true;
+                continue;
+            }
+
+            if (string.Equals(value, "--timings", StringComparison.OrdinalIgnoreCase))
+            {
+                timings = true;
                 continue;
             }
 
@@ -804,7 +832,7 @@ public static class Program
             resolvedRepoPath = Directory.GetCurrentDirectory();
         }
 
-        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth);
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth);
         if (command is "--help" or "--version" or "help" or "version" or "")
         {
             return parsedOptions;
@@ -818,7 +846,7 @@ public static class Program
             }
 
             ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
-            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth);
         }
         catch
         {
@@ -858,18 +886,18 @@ public static class Program
 
         ```text
         airepo bootstrap --repo <path> --clients codex,vscode,vs [--mcp] [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
-        airepo setup [--repo <path>] [--apply] [--profile name] [--clients codex,vscode,vs] [--strict]
+        airepo setup [--repo <path>] [--apply] [--profile name] [--clients codex,vscode,vs] [--strict] [--summary] [--timings]
         airepo detect [--repo <path>] [--json]
         airepo sanitize [--repo <path>] --term <term> --replacement <value> [--apply --backup]
         airepo init --repo <path> --clients codex,vscode,vs --mcp [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
         airepo plan --repo <path> [--clients codex,vscode,vs] [--mcp] [--agents] [--profile generic]
-        airepo code-index [--repo <path>] [--apply] [--max-files 3000] [--max-items 10000] [--include-private-members] [--format json|markdown|all] [--no-cache|--rebuild-cache|--rebuild-index]
+        airepo code-index [--repo <path>] [--apply] [--max-files 3000] [--max-items 10000] [--include-private-members] [--format json|markdown|all] [--no-cache|--rebuild-cache|--rebuild-index] [--summary] [--timings]
         airepo context-pack [--repo <path>] [--task change-api|change-ui|fix-build|update-package|review-risk|security-review|test-generation|changed-files] [--target name] [--apply] [--format json|markdown|all] [--limit 20] [--budget 12000] [--skip-code-index|--rebuild-index]
         airepo graph [--repo <path>] [--kind project|symbol|risk] [--format json|markdown|all] [--apply] [--limit 20] [--budget 12000]
         airepo impact [--repo <path>] [--changed-files] [--target name] [--since origin/main] [--format json|markdown|all] [--apply] [--limit 20] [--budget 12000]
         airepo audit [--repo <path>] [--include-source] [--create-baseline] [--update-baseline] [--baseline] [--fail-on-accepted] [--json] [--verbose]
-        airepo self-check [--repo <path>] [--agents] [--context-packs] [--fail-on-accepted] [--skip-audit] [--skip-build-mcp] [--skip-code-index] [--skip-budget] [--json] [--verbose]
-        airepo mcp-diagnose [--repo <path>] [--clients codex,vscode,vs] [--skip-build] [--skip-smoke] [--skip-budget] [--json] [--verbose]
+        airepo self-check [--repo <path>] [--agents] [--context-packs] [--quick|--full|--strict] [--fail-on-accepted] [--skip-audit] [--skip-build-mcp] [--skip-code-index] [--skip-budget] [--json] [--verbose] [--summary] [--timings]
+        airepo mcp-diagnose [--repo <path>] [--clients codex,vscode,vs] [--quick|--strict] [--skip-build] [--skip-smoke] [--skip-budget] [--json] [--verbose] [--summary] [--timings]
         airepo efficiency [--repo <path>] [--profile generic] [--sample-query "architecture services controllers data access"] [--json] [--no-progress] [--verbose] [--refresh|--no-refresh] [--rebuild-index] [--skip-budget]
         airepo org scan [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--output <path>] [--apply] [--no-progress]
         airepo org report [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--apply] [--no-progress]
@@ -908,9 +936,13 @@ public static class Program
         --forbidden-term <term>       Fail self-check when a forbidden term is found.
         --term <term>                 Term for sanitize.
         --replacement <value>         Replacement for sanitize.
-        --strict                      Treat locked MCP build failures as blocking in setup.
+        --quick                       Use fast validation where supported.
+        --full                        Use broader validation where supported.
+        --strict                      Use strict validation where supported and treat locked MCP build failures as blocking in setup.
         --json                        Emit JSON when supported by the command.
         --verbose                     Emit more detail when supported by the command.
+        --summary                     Emit a compact human-readable summary where supported.
+        --timings                     Show elapsed ms per phase and total duration where supported.
         --no-progress                 Disable terminal progress messages and spinner.
         --budget <tokens>             Approximate context token budget using chars / 4.
         --root <path>                 Organization scan root for org commands. If omitted, current directory.

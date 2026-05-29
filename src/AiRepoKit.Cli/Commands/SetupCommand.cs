@@ -28,7 +28,7 @@ public sealed class SetupCommand
         {
             progress.StartPhase("Running bootstrap");
             phases.Add("bootstrap");
-            CommandResult bootstrap = new BootstrapCommand().Execute(baseOptions.With(command_: "bootstrap", apply_: true, dryRun_: false, backup_: true));
+            CommandResult bootstrap = new BootstrapCommand().Execute(CreateBootstrapOptions(baseOptions, options_));
             results.Add(bootstrap);
             progress.CompletePhase("Bootstrap phase completed");
             if (!bootstrap.Success)
@@ -68,7 +68,7 @@ public sealed class SetupCommand
 
             phases.Add("self-check");
             progress.StartPhase("Running self-check");
-            CommandResult selfCheck = new SelfCheckCommand().Execute(baseOptions.With(command_: "self-check", requireContextPacks_: true));
+            CommandResult selfCheck = new SelfCheckCommand().Execute(CreateSetupSelfCheckOptions(baseOptions, options_));
             results.Add(selfCheck);
             if (!selfCheck.Success)
             {
@@ -78,7 +78,7 @@ public sealed class SetupCommand
 
             phases.Add("mcp-diagnose");
             progress.StartPhase("Running MCP diagnostics");
-            CommandResult diagnose = new McpDiagnoseCommand().Execute(baseOptions.With(command_: "mcp-diagnose"));
+            CommandResult diagnose = new McpDiagnoseCommand().Execute(CreateSetupMcpDiagnoseOptions(baseOptions, options_));
             results.Add(diagnose);
             if (!diagnose.Success)
             {
@@ -90,7 +90,7 @@ public sealed class SetupCommand
         {
             phases.Add("preview self-check");
             progress.StartPhase("Running preview self-check");
-            CommandResult previewSelfCheck = new SelfCheckCommand().Execute(baseOptions.With(command_: "self-check", skipBuildMcp_: true, skipCodeInventory_: true, skipBudget_: true, skipAudit_: true, requireContextPacks_: true));
+            CommandResult previewSelfCheck = new SelfCheckCommand().Execute(CreateSetupSelfCheckOptions(baseOptions, options_));
             results.Add(previewSelfCheck);
             if (!previewSelfCheck.Success)
             {
@@ -99,7 +99,7 @@ public sealed class SetupCommand
             progress.CompletePhase("Preview self-check completed");
             phases.Add("preview mcp-diagnose");
             progress.StartPhase("Running preview MCP diagnostics");
-            CommandResult previewMcp = new McpDiagnoseCommand().Execute(baseOptions.With(command_: "mcp-diagnose", skipBuildMcp_: true));
+            CommandResult previewMcp = new McpDiagnoseCommand().Execute(CreateSetupMcpDiagnoseOptions(baseOptions, options_));
             results.Add(previewMcp);
             if (!previewMcp.Success)
             {
@@ -109,8 +109,39 @@ public sealed class SetupCommand
         }
 
         bool success = errors.Count == 0;
-        string markdown = WriteReport(options_, detection, apply, phases, results, warnings, errors, plan.Markdown);
+        CommandTimingReport? timingReport = options_.Timings ? progress.GetTimingReport() : null;
+        string markdown = WriteReport(options_, detection, apply, phases, results, warnings, errors, plan.Markdown, timingReport);
         return new CommandResult(success, markdown, success ? 0 : 1);
+    }
+
+    private static BootstrapOptions CreateBootstrapOptions(BootstrapOptions baseOptions_, BootstrapOptions setupOptions_)
+    {
+        if (setupOptions_.Strict)
+        {
+            return baseOptions_.With(command_: "bootstrap", apply_: true, dryRun_: false, backup_: true);
+        }
+
+        return baseOptions_.With(command_: "bootstrap", apply_: true, dryRun_: false, backup_: true, skipBudget_: true);
+    }
+
+    private static BootstrapOptions CreateSetupSelfCheckOptions(BootstrapOptions baseOptions_, BootstrapOptions setupOptions_)
+    {
+        if (setupOptions_.Strict)
+        {
+            return baseOptions_.With(command_: "self-check", requireContextPacks_: true);
+        }
+
+        return baseOptions_.With(command_: "self-check", skipBuildMcp_: true, skipCodeInventory_: true, skipBudget_: true, skipAudit_: true, requireContextPacks_: true);
+    }
+
+    private static BootstrapOptions CreateSetupMcpDiagnoseOptions(BootstrapOptions baseOptions_, BootstrapOptions setupOptions_)
+    {
+        if (setupOptions_.Strict)
+        {
+            return baseOptions_.With(command_: "mcp-diagnose");
+        }
+
+        return baseOptions_.With(command_: "mcp-diagnose", skipBuildMcp_: true, skipBudget_: true);
     }
 
     private static void RunOptionalContextPack(BootstrapOptions options_, string task_, List<CommandResult> results_, List<string> warnings_)
@@ -148,7 +179,8 @@ public sealed class SetupCommand
         IReadOnlyList<CommandResult> results_,
         IReadOnlyList<string> warnings_,
         IReadOnlyList<string> errors_,
-        string planMarkdown_)
+        string planMarkdown_,
+        CommandTimingReport? timings_)
     {
         StringBuilder builder = new();
         builder.AppendLine(apply_ ? "# Setup Apply" : "# Setup Preview");
@@ -174,15 +206,31 @@ public sealed class SetupCommand
             builder.AppendLine($"- {title.TrimStart('#', ' ')}: exit `{result.ExitCode}`");
         }
 
-        builder.AppendLine();
-        builder.AppendLine("## Planned Changes Summary");
-        AppendSummary(builder, planMarkdown_);
-        builder.AppendLine();
+        if (!options_.Summary)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Planned Changes Summary");
+            AppendSummary(builder, planMarkdown_);
+            builder.AppendLine();
+        }
+
         builder.AppendLine("## Warnings");
         AppendMessages(builder, warnings_);
         builder.AppendLine();
         builder.AppendLine("## Errors");
         AppendMessages(builder, errors_);
+        if (options_.Timings && timings_ is not null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Timings");
+            builder.AppendLine();
+            builder.AppendLine($"- Total: `{timings_.TotalElapsedMilliseconds} ms`");
+            foreach (CommandPhaseTiming phase in timings_.Phases)
+            {
+                builder.AppendLine($"- {phase.Name}: `{phase.ElapsedMilliseconds} ms` ({phase.Status})");
+            }
+        }
+
         return builder.ToString().TrimEnd();
     }
 

@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.3.0 multi-repo/internal rollout support with org scan/report/self-check/setup dry-run/efficiency, readiness and compliance scoring, markdown/json/csv exports, safe external repo defaults, and MCP `get_context` access to persisted org reports.
+Status: v1.4.0 performance and MCP client compatibility hardening with quick/full/strict validation modes, reduced repeated setup work, cache-aware code-index reuse, summary/timing output, and stronger Visual Studio, VS Code, and Codex diagnostics.
 
 ## Goals
 
@@ -50,12 +50,13 @@ GitHub Releases are the distribution channel. NuGet.org publishing is not enable
 Start with zero-config setup from the target repository root:
 
 ```powershell
-airepo setup
-airepo setup --apply
+airepo setup --summary
+airepo setup --apply --summary --timings
 airepo self-check
+airepo mcp-diagnose --quick
 ```
 
-`setup` without `--apply` detects the repository, infers defaults, plans changes, and previews validation. `setup --apply` bootstraps managed files, refreshes the code index, generates baseline context packs (`changed-files`, `review-risk`, and `test-generation` when possible), generates a graph baseline when possible, runs `self-check`, and runs MCP diagnostics when possible. No changed files is a warning, not a blocking setup failure. It does not commit, push, run Docker, run migrations, run SQL, start target services, or call cloud services.
+`setup` without `--apply` detects the repository, infers defaults, plans changes, and previews validation. `setup --apply` bootstraps managed files, refreshes the code index, generates baseline context packs (`changed-files`, `review-risk`, and `test-generation` when possible), generates a graph baseline when possible, runs a faster setup-friendly self-check path, and runs MCP diagnostics with fewer repeated expensive phases in non-strict runs. No changed files is a warning, not a blocking setup failure. It does not commit, push, run Docker, run migrations, run SQL, start target services, or call cloud services.
 
 Start with explicit read-only and generated-output checks when you need tighter control:
 
@@ -78,6 +79,36 @@ If `--repo` is omitted, `airepo` resolves upward from the current directory and 
 Use `--profile demo` for a broad demonstration profile that combines common .NET, web, migration, security, and desktop guidance without targeting a specific internal project. `vs` is the preferred Visual Studio client name; `visualstudio` remains accepted only as a legacy alias.
 
 Long-running CLI commands show terminal progress when running interactively. Progress and spinner output is written to stderr, never stdout. `--json` disables progress automatically so JSON stdout stays parseable. Use `--no-progress` to disable progress output, and `--verbose` to keep existing detailed reports plus additional phase detail where supported.
+
+## Daily Workflow
+
+For normal day-to-day work, prefer the faster modes and compact reports:
+
+```powershell
+airepo self-check --quick --summary
+airepo mcp-diagnose --quick --summary
+airepo setup --summary --timings
+```
+
+Default `self-check` now reports mode `balanced`, which is intended for routine validation without repeating every expensive phase. Use `--summary` to keep human output short and actionable, and `--timings` when you want phase-by-phase elapsed milliseconds plus total duration.
+
+## Full And Strict Validation
+
+Use explicit modes when you want broader or release-grade validation:
+
+```powershell
+airepo self-check --full --timings
+airepo self-check --strict --timings
+airepo mcp-diagnose --strict --timings
+```
+
+- `self-check --quick` skips audit, MCP build, budget, and full code-index work unless you explicitly request those checks separately.
+- `self-check --full` keeps the broader validation path.
+- `self-check --strict` is release-oriented and treats locked MCP DLL build failures conservatively.
+- `mcp-diagnose --quick` focuses on config validation plus the JSON-RPC smoke path.
+- `mcp-diagnose --strict` validates more aggressively and avoids non-strict build shortcuts.
+
+Long details stay in JSON or markdown exports when needed; default human-readable output avoids large embedded JSON blocks.
 
 ## Real Repository Flow
 
@@ -133,7 +164,15 @@ Supported optional sub-prefixes are `ai-repo ask:`, `ai-repo plan:`, `ai-repo fi
 
 Visual Studio MCP requires Visual Studio 2022 17.14 or later. When you generate client config with `--clients vs`, `airepo` writes a repository-root `.mcp.json` for Visual Studio MCP discovery.
 
-After generation, open the solution if it was closed or reload it if it was already open so Visual Studio can rediscover the MCP server. If Copilot Agent still does not expose the MCP tools, enable them manually in the agent UI and then retry.
+After generation, open the solution if it was closed or reload it if it was already open so Visual Studio can rediscover the MCP server. Visual Studio MCP requires Visual Studio 2022 17.14 or later. If Copilot Agent still does not expose the MCP tools, enable them manually in the agent UI and then retry. `airepo mcp-diagnose --quick` now reports stronger client-specific hints for `.mcp.json`, `.vscode/mcp.json`, and `.codex/config.toml`.
+
+## Performance Recommendations
+
+- Use `airepo self-check --quick --summary` during active development.
+- Use `airepo mcp-diagnose --quick` after bootstrap or when a client stops seeing MCP tools.
+- Use `airepo setup --apply --summary --timings` to confirm which phases dominate setup time.
+- Reserve `--strict` for release validation, tag readiness, or when diagnosing build-lock issues.
+- Reused code-index cache entries and skipped-current MCP builds are reported explicitly so you can tell when expensive work was avoided.
 
 ## Release And Versioning
 
@@ -150,10 +189,10 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.0.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.4.0
 artifacts/publish/win-x64/airepo.exe --help
-artifacts/publish/win-x64/airepo.exe self-check --repo . --agents --profile dotnet --skip-build-mcp
-artifacts/publish/win-x64/airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs --skip-build
+artifacts/publish/win-x64/airepo.exe self-check --repo . --strict --timings
+artifacts/publish/win-x64/airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs --strict --timings
 artifacts/publish/win-x64/airepo.exe audit --repo .
 git status --short
 ```

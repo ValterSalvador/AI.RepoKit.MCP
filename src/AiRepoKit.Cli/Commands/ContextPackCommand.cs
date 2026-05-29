@@ -128,6 +128,8 @@ public sealed class ContextPackCommand
             false,
             false,
             false,
+            false,
+            false,
             "review-risk",
             string.Empty,
             20,
