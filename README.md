@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.0 stable release hardening; terminal progress UX; MCP/client diagnostics; profile-driven VS Code agent, instruction, and prompt generation; self-check; managed agent instructions; audit baseline; RoslynLite code-index cache; and task-oriented context packs for lower-token local LLM context.
+Status: v1.1.0 zero-config C#/.NET repo intelligence; smart repo discovery; auto-profile; setup/detect flows; MCP/client diagnostics; profile-driven VS Code agent, instruction, and prompt generation; self-check; managed agent instructions; audit baseline; RoslynLite code-index cache; and task-oriented context packs for lower-token local LLM context.
 
 ## Goals
 
@@ -47,7 +47,17 @@ GitHub Releases are the distribution channel. NuGet.org publishing is not enable
 
 ## Recommended Safe First Run
 
-Start with read-only and generated-output checks before writing repository files:
+Start with zero-config setup from the target repository root:
+
+```powershell
+airepo setup
+airepo setup --apply
+airepo self-check
+```
+
+`setup` without `--apply` detects the repository, infers defaults, plans changes, and previews validation. `setup --apply` bootstraps managed files, refreshes the code index, generates baseline context packs (`review-risk` and `test-generation` when possible), runs `self-check`, and runs MCP diagnostics when possible. It does not commit, push, run Docker, run migrations, run SQL, start target services, or call cloud services.
+
+Start with explicit read-only and generated-output checks when you need tighter control:
 
 ```powershell
 airepo audit --repo .
@@ -59,6 +69,8 @@ airepo self-check --repo . --agents --profile dotnet --skip-build-mcp
 airepo mcp-diagnose --repo . --clients codex,vscode,vs --skip-build
 git status --short
 ```
+
+If `--repo` is omitted, `airepo` resolves upward from the current directory and prefers the nearest Git root. If no `.git` root exists, it uses repository markers such as `.sln`, `.slnx`, `Directory.Build.props`, `package.json`, `pyproject.toml`, `requirements.txt`, and `composer.json`. If `--profile` is omitted, `airepo` uses auto-profile and falls back to `generic` on low confidence. Explicit `--repo`, `--profile`, and `--clients` always win over inferred defaults. Managed files still require `--apply`; dangerous writes remain opt-in.
 
 Use `--profile demo` for a broad demonstration profile that combines common .NET, web, migration, security, and desktop guidance without targeting a specific internal project. `vs` is the preferred Visual Studio client name; `visualstudio` remains accepted only as a legacy alias.
 
@@ -335,6 +347,12 @@ artifacts/publish/linux-arm64/airepo doctor --repo .
 ## Commands
 
 ```powershell
+airepo setup
+airepo setup --apply
+airepo detect
+airepo detect --json
+airepo sanitize --term <term> --replacement <value>
+airepo sanitize --term <term> --replacement <value> --apply --backup
 airepo sample --repo <path>
 airepo sample --repo <path> --apply
 airepo sample --repo <path> --apply --force
@@ -358,6 +376,7 @@ airepo audit --repo <path>
 airepo audit --repo <path> --json
 airepo self-check --repo <path>
 airepo self-check --repo <path> --agents
+airepo self-check --repo <path> --forbidden-term <term>
 airepo --help
 airepo --version
 ```
@@ -465,6 +484,10 @@ airepo self-check --repo . --skip-build-mcp --skip-code-index --skip-budget --sk
 ```
 
 Exit code `0` means no required checks failed, `2` means at least one required check failed, and `1` means a fatal self-check error occurred. `--agents` makes the optional generated agent and instruction files required for the check. If `.ai/generated/context-packs/` exists, self-check validates readable JSON files. `--context-packs` makes at least one context pack required.
+
+Generated artifacts are regenerable local outputs under `.ai/generated/`, build output folders, and local client/runtime cache files. Managed files are repository files generated from AiRepoKit templates and tracked in `.ai/generated/reports/managed-files.json`; updating managed files still requires `--apply`, and overwriting existing managed files requires the normal backup/force rules.
+
+Use `self-check --forbidden-term <term>` to fail validation when a forbidden term is present in safe, text-based repository files. Use `sanitize --term <term> --replacement <value>` for a dry-run replacement report; `sanitize --apply` requires `--backup` and only edits managed/generated files, never rewrites Git history.
 
 ## MCP Diagnostics
 

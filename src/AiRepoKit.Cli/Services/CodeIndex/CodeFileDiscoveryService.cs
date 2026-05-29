@@ -47,6 +47,28 @@ public sealed class CodeFileDiscoveryService
     {
         string repoRoot = Path.GetFullPath(repoRoot_);
         List<string> files = [];
+        IReadOnlyList<string> gitFiles = new GitService().GetVisibleFiles(repoRoot);
+        if (gitFiles.Count > 0)
+        {
+            foreach (string relativePath in gitFiles
+                         .Where(path_ => path_.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                         .Order(StringComparer.OrdinalIgnoreCase))
+            {
+                if (this.IsIgnoredFile(relativePath) || this.IsIgnoredDirectory(Path.GetDirectoryName(relativePath)?.Replace('\\', '/') ?? string.Empty))
+                {
+                    continue;
+                }
+
+                files.Add(relativePath);
+                if (files.Count >= maxFiles_)
+                {
+                    return new CodeFileDiscoveryResult(files, DirectoryIgnoreEntries, FileIgnoreEntries, true);
+                }
+            }
+
+            return new CodeFileDiscoveryResult(files, DirectoryIgnoreEntries, FileIgnoreEntries, false);
+        }
+
         Stack<string> pending = new();
         pending.Push(repoRoot);
         bool truncated = false;

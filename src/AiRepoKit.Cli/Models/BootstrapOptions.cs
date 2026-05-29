@@ -51,7 +51,13 @@ public sealed record BootstrapOptions
         bool noProgress_ = false,
         bool refresh_ = false,
         bool noRefresh_ = false,
-        string sampleQuery_ = "")
+        string sampleQuery_ = "",
+        bool profileExplicit_ = false,
+        IReadOnlyList<string>? forbiddenTerms_ = null,
+        string sanitizeTerm_ = "",
+        string sanitizeReplacement_ = "",
+        bool strict_ = false,
+        string defaultsSummary_ = "")
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -102,6 +108,12 @@ public sealed record BootstrapOptions
         this.Refresh = refresh_;
         this.NoRefresh = noRefresh_;
         this.SampleQuery = sampleQuery_;
+        this.ProfileExplicit = profileExplicit_;
+        this.ForbiddenTerms = forbiddenTerms_ ?? [];
+        this.SanitizeTerm = sanitizeTerm_;
+        this.SanitizeReplacement = sanitizeReplacement_;
+        this.Strict = strict_;
+        this.DefaultsSummary = defaultsSummary_;
     }
 
     public string Command { get; }
@@ -201,4 +213,88 @@ public sealed record BootstrapOptions
     public bool NoRefresh { get; }
 
     public string SampleQuery { get; }
+
+    public bool ProfileExplicit { get; }
+
+    public IReadOnlyList<string> ForbiddenTerms { get; }
+
+    public string SanitizeTerm { get; }
+
+    public string SanitizeReplacement { get; }
+
+    public bool Strict { get; }
+
+    public string DefaultsSummary { get; }
+
+    public BootstrapOptions With(
+        string? command_ = null,
+        bool? includeMcp_ = null,
+        bool? apply_ = null,
+        bool? dryRun_ = null,
+        bool? backup_ = null,
+        bool? skipBuildMcp_ = null,
+        bool? skipCodeInventory_ = null,
+        bool? skipBudget_ = null,
+        bool? skipAudit_ = null,
+        bool? includeAgents_ = null,
+        string? task_ = null,
+        bool? requireContextPacks_ = null)
+    {
+        return new BootstrapOptions(
+            command_ ?? this.Command,
+            this.RepoPath,
+            this.Clients,
+            includeMcp_ ?? this.IncludeMcp,
+            apply_ ?? this.Apply,
+            dryRun_ ?? this.DryRun,
+            backup_ ?? this.Backup,
+            this.Force,
+            this.ForceManaged,
+            this.Profile,
+            this.TargetFramework,
+            this.McpServerName,
+            this.ToolCommandName,
+            this.McpProjectName,
+            this.McpNamespace,
+            this.McpAssemblyName,
+            this.McpProjectRelativePath,
+            skipBuildMcp_ ?? this.SkipBuildMcp,
+            this.SkipAiContext,
+            skipCodeInventory_ ?? this.SkipCodeInventory,
+            this.SkipSecurityScan,
+            skipBudget_ ?? this.SkipBudget,
+            this.SkipSmoke,
+            this.SkipScripts,
+            this.MaxFiles,
+            this.MaxItems,
+            this.IncludePrivateMembers,
+            this.NoCache,
+            this.RebuildCache,
+            this.Output,
+            this.Format,
+            this.Verbose,
+            this.AuditJson,
+            this.IncludeSource,
+            this.CreateAuditBaseline,
+            this.UpdateAuditBaseline,
+            this.ShowAuditBaseline,
+            this.FailOnAccepted,
+            skipAudit_ ?? this.SkipAudit,
+            includeAgents_ ?? this.IncludeAgents,
+            task_ ?? this.Task,
+            this.Target,
+            this.Limit,
+            requireContextPacks_ ?? this.RequireContextPacks,
+            this.UnknownOptions,
+            this.NoProgress,
+            this.Refresh,
+            this.NoRefresh,
+            this.SampleQuery,
+            this.ProfileExplicit,
+            this.ForbiddenTerms,
+            this.SanitizeTerm,
+            this.SanitizeReplacement,
+            this.Strict,
+            this.DefaultsSummary);
+    }
 }

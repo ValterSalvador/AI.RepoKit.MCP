@@ -83,7 +83,7 @@ public sealed class SelfCheckCommand
                 {
                     progress.StartPhase("Building MCP project");
                     ProcessResult build = new ProcessRunner().Run("dotnet", ["build", options_.McpProjectRelativePath, "-c", "Release"], repoPath);
-                    checks.Add(GetMcpBuildCheck(build));
+                    checks.Add(GetMcpBuildCheck(build, options_));
                     if (build.Success)
                     {
                         progress.CompletePhase("MCP project build completed");
@@ -131,6 +131,7 @@ public sealed class SelfCheckCommand
             progress.StartPhase("Checking generated outputs");
             AddGeneratedOutputChecks(checks, repoPath);
             AddContextPackChecks(checks, repoPath, options_.RequireContextPacks);
+            AddForbiddenTermChecks(checks, repoPath, options_.ForbiddenTerms);
             AddGitIgnoreCheck(checks, repoPath);
             AddAgentChecks(checks, repoPath, options_.IncludeAgents, options_.Profile);
             progress.CompletePhase("Generated output checks completed");
@@ -249,6 +250,25 @@ public sealed class SelfCheckCommand
         checks_.Add(Check("gitignore-airepokit-section", true, hasSection, ".gitignore contains AiRepoKit section."));
     }
 
+    private static void AddForbiddenTermChecks(List<SelfCheckItem> checks_, string repoPath_, IReadOnlyList<string> terms_)
+    {
+        if (terms_.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<ForbiddenTermFinding> findings = new ForbiddenTermScanner().Scan(repoPath_, terms_);
+        if (findings.Count == 0)
+        {
+            checks_.Add(Check("forbidden-term", true, true, $"Forbidden terms not found: {string.Join(", ", terms_)}."));
+            return;
+        }
+
+        int generated = findings.Count(finding_ => finding_.GeneratedArtifact);
+        int managed = findings.Count(finding_ => finding_.ManagedFile);
+        checks_.Add(Failed("forbidden-term", true, $"Forbidden term findings: {findings.Count}; managed: {managed}; generated/cache: {generated}. Regenerate generated artifacts or run sanitize for managed files."));
+    }
+
     private static void AddAgentChecks(List<SelfCheckItem> checks_, string repoPath_, bool required_, string profileName_)
     {
         ConfigGenerator configGenerator = new();
@@ -354,10 +374,19 @@ public sealed class SelfCheckCommand
         return new SelfCheckItem(name_, "Skipped", required_, message_, 0);
     }
 
-    private static SelfCheckItem GetMcpBuildCheck(ProcessResult build_)
+    private static SelfCheckItem GetMcpBuildCheck(ProcessResult build_, BootstrapOptions options_)
     {
         if (!build_.Success && McpBuildFailureDiagnostics.IsLockedDllFailure(build_))
         {
+            if (!options_.Strict)
+            {
+                CommandResult diagnose = new McpDiagnoseCommand().Execute(options_.With(command_: "mcp-diagnose", skipBuildMcp_: true));
+                if (diagnose.Success)
+                {
+                    return new SelfCheckItem("mcp-build", "Warning", false, McpBuildFailureDiagnostics.LockedDllMessage + " JSON-RPC diagnostics passed, so this is non-blocking outside strict validation.", build_.ExitCode, McpBuildFailureDiagnostics.LockedDllHint);
+                }
+            }
+
             return new SelfCheckItem("mcp-build", "Failed", true, McpBuildFailureDiagnostics.LockedDllMessage, build_.ExitCode, McpBuildFailureDiagnostics.LockedDllHint);
         }
 

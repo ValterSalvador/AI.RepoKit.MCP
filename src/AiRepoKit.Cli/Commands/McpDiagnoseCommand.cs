@@ -84,6 +84,8 @@ public sealed class McpDiagnoseCommand
                 }
             }
 
+            DowngradeLockedBuildWhenSmokePassed(checks, options_.Strict);
+
             if (options_.SkipBudget)
             {
                 checks.Add(Skipped("budget", false, "Skipped by --skip-budget."));
@@ -256,6 +258,32 @@ public sealed class McpDiagnoseCommand
 
         ProcessResult result = new ProcessRunner().Run("powershell", ["-ExecutionPolicy", "Bypass", "-File", script, "-RepoRoot", repoPath_], repoPath_);
         return new McpDiagnosticItem("budget", result.Success ? "Passed" : "Failed", false, result.Success ? "MeasureMcpResponseBudget.ps1 passed." : GetProcessMessage(result), null, GetProcessDetails(result));
+    }
+
+    private static void DowngradeLockedBuildWhenSmokePassed(List<McpDiagnosticItem> checks_, bool strict_)
+    {
+        if (strict_)
+        {
+            return;
+        }
+
+        int buildIndex = checks_.FindIndex(check_ => check_.Name == "mcp-build"
+            && check_.Status == "Failed"
+            && check_.Message.Contains(McpBuildFailureDiagnostics.LockedDllMessage, StringComparison.OrdinalIgnoreCase));
+        bool smokePassed = checks_.Any(check_ => check_.Name == "smoke-test" && check_.Status is "Passed" or "Warning");
+        if (buildIndex < 0 || !smokePassed)
+        {
+            return;
+        }
+
+        McpDiagnosticItem build = checks_[buildIndex];
+        checks_[buildIndex] = new McpDiagnosticItem(
+            build.Name,
+            "Warning",
+            false,
+            build.Message + " JSON-RPC smoke test passed, so this is non-blocking outside strict validation.",
+            build.Hint,
+            build.Details);
     }
 
     private static McpDiagnosticItem RunSmokeTest(string repoPath_, string dllPath_, bool verbose_)

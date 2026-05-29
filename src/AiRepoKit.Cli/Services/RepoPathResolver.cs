@@ -6,29 +6,32 @@ public sealed class RepoPathResolver
     {
         if (!string.IsNullOrWhiteSpace(repoPath_))
         {
-            return Path.GetFullPath(repoPath_);
+            return this.ResolveRoot(Path.GetFullPath(repoPath_), command_) ?? Path.GetFullPath(repoPath_);
         }
 
-        string baseDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        if (this.LooksLikeTargetRepository(baseDirectory, command_))
+        string currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
+        string? currentRoot = this.ResolveRoot(currentDirectory, command_);
+        if (!string.IsNullOrWhiteSpace(currentRoot))
         {
-            return baseDirectory;
+            return currentRoot;
         }
 
         string? processPath = Environment.ProcessPath;
         if (!string.IsNullOrWhiteSpace(processPath))
         {
             string executableDirectory = Path.GetFullPath(Path.GetDirectoryName(processPath) ?? string.Empty);
-            if (this.LooksLikeTargetRepository(executableDirectory, command_))
+            string? executableRoot = this.ResolveRoot(executableDirectory, command_);
+            if (!string.IsNullOrWhiteSpace(executableRoot))
             {
-                return executableDirectory;
+                return executableRoot;
             }
         }
 
-        string currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
-        if (this.LooksLikeTargetRepository(currentDirectory, command_))
+        string baseDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        string? baseRoot = this.ResolveRoot(baseDirectory, command_);
+        if (!string.IsNullOrWhiteSpace(baseRoot))
         {
-            return currentDirectory;
+            return baseRoot;
         }
 
         if (string.Equals(command_, "efficiency", StringComparison.OrdinalIgnoreCase)
@@ -38,7 +41,42 @@ public sealed class RepoPathResolver
             return currentDirectory;
         }
 
-        throw new InvalidOperationException("Could not find a target repository from the executable folder or current directory. Pass --repo <path>.");
+        throw new InvalidOperationException("Could not find a target repository from the current directory or executable folder. Pass --repo <path>.");
+    }
+
+    public string? ResolveRoot(string startPath_, string command_)
+    {
+        string startPath = Path.GetFullPath(startPath_);
+        if (string.Equals(command_, "sample", StringComparison.OrdinalIgnoreCase)
+            && Directory.Exists(startPath)
+            && !Directory.EnumerateFileSystemEntries(startPath).Any())
+        {
+            return startPath;
+        }
+
+        string? gitRoot = new GitService().TryGetRepoRoot(startPath);
+        if (!string.IsNullOrWhiteSpace(gitRoot))
+        {
+            return gitRoot;
+        }
+
+        DirectoryInfo? current = new(startPath);
+        if (!Directory.Exists(startPath))
+        {
+            current = Directory.GetParent(startPath);
+        }
+
+        while (current is not null)
+        {
+            if (this.LooksLikeTargetRepository(current.FullName, command_))
+            {
+                return Path.GetFullPath(current.FullName);
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
     }
 
     public bool LooksLikeTargetRepository(string path_, string command_)
@@ -59,6 +97,13 @@ public sealed class RepoPathResolver
             || Directory.Exists(Path.Combine(path_, ".git"))
             || Directory.Exists(Path.Combine(path_, ".ai"))
             || Directory.Exists(Path.Combine(path_, "Tools", "AiContextMcp"))
+            || File.Exists(Path.Combine(path_, "Directory.Build.props"))
+            || File.Exists(Path.Combine(path_, "Directory.Build.targets"))
+            || File.Exists(Path.Combine(path_, "package.json"))
+            || File.Exists(Path.Combine(path_, "tsconfig.json"))
+            || File.Exists(Path.Combine(path_, "pyproject.toml"))
+            || File.Exists(Path.Combine(path_, "requirements.txt"))
+            || File.Exists(Path.Combine(path_, "composer.json"))
             || this.HasRootOrImmediateProject(path_);
     }
 

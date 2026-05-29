@@ -22,6 +22,10 @@ public sealed class ReportWriter
         builder.AppendLine($"- Repository signals: `{FormatList(analysis_.RepositorySignals)}`");
         builder.AppendLine($"- Profile: `{options_.Profile}`");
         builder.AppendLine($"- Selected clients: `{string.Join(", ", ConfigGenerator.GetSelectedClients(options_).Select(ConfigGenerator.GetClientDisplayName))}`");
+        if (!string.IsNullOrWhiteSpace(options_.DefaultsSummary))
+        {
+            builder.AppendLine($"- Defaults: `{options_.DefaultsSummary}`");
+        }
         builder.AppendLine();
         builder.AppendLine("## Existing Infrastructure");
         builder.AppendLine();
@@ -151,6 +155,10 @@ public sealed class ReportWriter
         builder.AppendLine($"- Target framework: `{options_.TargetFramework}`");
         builder.AppendLine($"- Profile: `{options_.Profile}`");
         builder.AppendLine($"- Selected clients: `{string.Join(", ", ConfigGenerator.GetSelectedClients(options_).Select(ConfigGenerator.GetClientDisplayName))}`");
+        if (!string.IsNullOrWhiteSpace(options_.DefaultsSummary))
+        {
+            builder.AppendLine($"- Defaults: `{options_.DefaultsSummary}`");
+        }
         builder.AppendLine($"- Mode: `{(options_.Apply && !options_.DryRun ? "apply" : "dry-run")}`");
         builder.AppendLine($"- TemplatesRoot: `{templatesRoot_}`");
         builder.AppendLine($"- TemplatesFound: `{templatesFound_}`");

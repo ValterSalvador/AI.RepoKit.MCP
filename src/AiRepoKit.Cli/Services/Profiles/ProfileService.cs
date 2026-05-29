@@ -135,6 +135,36 @@ public sealed class ProfileService
             ["Do not run SQL, migrations, or database commands without explicit approval."],
             ["SQL generation", "connection strings", "transactions", "data access boundaries"]);
 
+        ProfileDefinition wpf = new(
+            "wpf",
+            ["legacy-dotnet"],
+            [],
+            [],
+            [],
+            ["fix-build", "review-risk"],
+            ["Preserve XAML resources, bindings, and UI-thread assumptions."],
+            ["XAML", "resources", "designer files", "UI thread access"]);
+
+        ProfileDefinition sourceGenerator = new(
+            "source-generator",
+            ["dotnet"],
+            ["source-generator-specialist"],
+            ["source-generator"],
+            ["analyze-source-generator"],
+            ["fix-build", "review-risk", "test-generation"],
+            ["Keep generator output deterministic and avoid inspecting generated outputs outside approved paths."],
+            ["incremental generator caching", "generated API shape", "diagnostics"]);
+
+        ProfileDefinition enterpriseDotnet = new(
+            "enterprise-dotnet",
+            ["dotnet"],
+            ["migration-architect", "security-reviewer"],
+            [],
+            ["migration-plan", "review-risk"],
+            ["fix-build", "review-risk", "security-review"],
+            ["Prefer incremental, compatibility-preserving changes across shared build configuration."],
+            ["shared props", "large solution boundaries", "package governance"]);
+
         ProfileDefinition demo = new(
             "demo",
             ["dotnet", "aspnet-core", "legacy-dotnet", "winforms"],
@@ -145,7 +175,7 @@ public sealed class ProfileService
             ["Use this profile as a broad demonstration model before tailoring guidance to a specific repository type."],
             ["generated code", "legacy interop", "API contracts", "configuration", "build scripts"]);
 
-        ProfileDefinition[] definitions = [generic, dotnet, aspnetCore, legacyDotnet, winforms, oracleDatalayer, demo];
+        ProfileDefinition[] definitions = [generic, dotnet, aspnetCore, legacyDotnet, winforms, oracleDatalayer, wpf, sourceGenerator, enterpriseDotnet, demo];
         return definitions.ToDictionary(item_ => item_.Name, StringComparer.OrdinalIgnoreCase);
     }
 }

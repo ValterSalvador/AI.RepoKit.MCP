@@ -38,6 +38,9 @@ public static class Program
                 "code-index" => new CodeIndexCommand().Execute(options),
                 "context-pack" => new ContextPackCommand().Execute(options),
                 "audit" => new AuditCommand().Execute(options),
+                "detect" => new DetectCommand().Execute(options),
+                "setup" => new SetupCommand().Execute(options),
+                "sanitize" => new SanitizeCommand().Execute(options),
                 "self-check" => new SelfCheckCommand().Execute(options),
                 "mcp-diagnose" or "mcp-doctor" or "diagnose-mcp" => new McpDiagnoseCommand().Execute(options),
                 "efficiency" or "token-report" or "context-efficiency" => new EfficiencyCommand().Execute(options),
@@ -308,6 +311,7 @@ public static class Program
         bool force = false;
         bool forceManaged = false;
         string profile = ProfileService.DefaultProfileName;
+        bool profileExplicit = false;
         string targetFramework = "net10.0";
         string mcpServerName = "ai_repo_context";
         string toolCommandName = "airepo";
@@ -346,6 +350,10 @@ public static class Program
         bool refresh = false;
         bool noRefresh = false;
         string sampleQuery = "architecture services controllers data access";
+        List<string> forbiddenTerms = [];
+        string sanitizeTerm = string.Empty;
+        string sanitizeReplacement = string.Empty;
+        bool strict = false;
 
         if (args_.Any(arg_ => string.Equals(arg_, "--help", StringComparison.OrdinalIgnoreCase) || string.Equals(arg_, "-h", StringComparison.OrdinalIgnoreCase)))
         {
@@ -413,6 +421,7 @@ public static class Program
             if (string.Equals(value, "--profile", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
             {
                 profile = args_[++index];
+                profileExplicit = true;
                 continue;
             }
 
@@ -505,6 +514,32 @@ public static class Program
             if (string.Equals(value, "--sample-query", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
             {
                 sampleQuery = args_[++index];
+                continue;
+            }
+
+            if (string.Equals(value, "--forbidden-term", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                forbiddenTerms.Add(args_[++index]);
+                continue;
+            }
+
+            if (string.Equals(value, "--term", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                sanitizeTerm = args_[++index];
+                continue;
+            }
+
+            if ((string.Equals(value, "--replacement", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(value, "--replace-with", StringComparison.OrdinalIgnoreCase))
+                && index + 1 < args_.Length)
+            {
+                sanitizeReplacement = args_[++index];
+                continue;
+            }
+
+            if (string.Equals(value, "--strict", StringComparison.OrdinalIgnoreCase))
+            {
+                strict = true;
                 continue;
             }
 
@@ -681,7 +716,7 @@ public static class Program
 
         ProfileService profileService = new();
         profile = profileService.NormalizeProfileName(profile);
-        if (!profileService.IsSupported(profile))
+        if (profileExplicit && !profileService.IsSupported(profile))
         {
             unknownOptions.Add($"Unsupported profile `{profile}`. Supported profiles: {string.Join(", ", profileService.GetSupportedProfileNames())}");
         }
@@ -697,7 +732,21 @@ public static class Program
             resolvedRepoPath = Directory.GetCurrentDirectory();
         }
 
-        return new BootstrapOptions(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery);
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict);
+        if (command is "--help" or "--version" or "help" or "version" or "")
+        {
+            return parsedOptions;
+        }
+
+        try
+        {
+            ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, auditJson, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, resolvedDefaults.Summary);
+        }
+        catch
+        {
+            return parsedOptions;
+        }
     }
 
     private static IEnumerable<ClientKind> ParseClients(string value_)
@@ -732,6 +781,9 @@ public static class Program
 
         ```text
         airepo bootstrap --repo <path> --clients codex,vscode,vs [--mcp] [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
+        airepo setup [--repo <path>] [--apply] [--profile name] [--clients codex,vscode,vs] [--strict]
+        airepo detect [--repo <path>] [--json]
+        airepo sanitize [--repo <path>] --term <term> --replacement <value> [--apply --backup]
         airepo init --repo <path> --clients codex,vscode,vs --mcp [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
         airepo plan --repo <path> [--clients codex,vscode,vs] [--mcp] [--agents] [--profile generic]
         airepo code-index [--repo <path>] [--apply] [--max-files 3000] [--max-items 10000] [--include-private-members] [--format json|markdown|all] [--no-cache|--rebuild-cache|--rebuild-index]
@@ -759,16 +811,20 @@ public static class Program
         Common options:
 
         ```text
-        --repo <path>                 Target repository. If omitted, airepo resolves from the executable folder or current directory.
+        --repo <path>                 Target repository. If omitted, airepo resolves upward from the current directory, preferring .git.
         --dry-run                     Plan only. This is the default for init, bootstrap, and sample.
         --apply                       Write planned files.
         --backup                      Back up existing managed files before overwrite.
         --force                       Overwrite without backup when allowed.
         --force-managed               Update managed files even when local edits are detected.
-        --profile <name>              Agent/profile set: generic, dotnet, aspnet-core, legacy-dotnet, winforms, oracle-datalayer, demo.
+        --profile <name>              Agent/profile set. If omitted, airepo auto-detects a profile and falls back to generic on low confidence.
         --mcp                         Include repository-local MCP scaffold and client config.
         --agents                      Include versionable agent, instruction, and prompt files.
         --context-packs               Require context packs during self-check.
+        --forbidden-term <term>       Fail self-check when a forbidden term is found.
+        --term <term>                 Term for sanitize.
+        --replacement <value>         Replacement for sanitize.
+        --strict                      Treat locked MCP build failures as blocking in setup.
         --json                        Emit JSON when supported by the command.
         --verbose                     Emit more detail when supported by the command.
         --no-progress                 Disable terminal progress messages and spinner.
