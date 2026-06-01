@@ -219,9 +219,11 @@ if ($smoke.Status -eq 'Failed') {
 }
 
 if (-not $SkipV143) {
-    & (Join-Path $RepoRoot 'tests/v1.4.3-smoke.ps1') -RepoRoot $RepoRoot -SkipV142
-    if ($LASTEXITCODE -ne 0) {
-        throw 'v1.4.3 smoke test failed.'
+    $v143Smoke = Join-Path $RepoRoot 'tests/v1.4.3-smoke.ps1'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $v143Smoke -RepoRoot $RepoRoot -SkipV142
+    $v143ExitCode = $LASTEXITCODE
+    if ($v143ExitCode -ne 0) {
+        throw "v1.4.3 smoke test failed with exit code $v143ExitCode."
     }
 }
 

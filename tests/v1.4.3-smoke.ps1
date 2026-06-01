@@ -114,9 +114,11 @@ foreach ($asset in $expectedAssets) {
 }
 
 if (-not $SkipV142) {
-    & (Join-Path $RepoRoot "tests/v1.4.2-smoke.ps1") -RepoRoot $RepoRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "v1.4.2 smoke test failed."
+    $v142Smoke = Join-Path $RepoRoot "tests/v1.4.2-smoke.ps1"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $v142Smoke -RepoRoot $RepoRoot
+    $v142ExitCode = $LASTEXITCODE
+    if ($v142ExitCode -ne 0) {
+        throw "v1.4.2 smoke test failed with exit code $v142ExitCode."
     }
 }
 
