@@ -16,7 +16,11 @@
 
     [switch]$NoCommit,
 
-    [switch]$NoPush
+    [switch]$NoPush,
+
+    [switch]$UploadAssets,
+
+    [string]$ReleaseRepo = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,6 +53,50 @@ function GetGitOutput([string[]]$arguments) {
     return $output
 }
 
+function Convert-GitRemoteToRepo([string]$remoteUrl) {
+    if ([string]::IsNullOrWhiteSpace($remoteUrl)) {
+        return $null
+    }
+
+    $remoteUrl = $remoteUrl.Trim()
+    $patterns = @(
+        "github\.com[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$",
+        "^[^:/]+/(?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$",
+        "^(?<owner>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$"
+    )
+
+    foreach ($pattern in $patterns) {
+        $match = [regex]::Match($remoteUrl, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($match.Success) {
+            return "$($match.Groups["owner"].Value)/$($match.Groups["repo"].Value)"
+        }
+    }
+
+    return $null
+}
+
+function Resolve-ReleaseRepo {
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseRepo)) {
+        return $ReleaseRepo.Trim()
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:AIREPO_RELEASE_REPO)) {
+        return $env:AIREPO_RELEASE_REPO.Trim()
+    }
+
+    $remote = GetGitOutput @("config", "--get", "remote.origin.url")
+    return Convert-GitRemoteToRepo ([string]$remote)
+}
+
+function Get-UploadAssetsCommand([string]$PlainVersion, [string]$ResolvedReleaseRepo) {
+    $command = "powershell -ExecutionPolicy Bypass -File scripts/Upload-ReleaseAssets.ps1 -Version $PlainVersion"
+    if (-not [string]::IsNullOrWhiteSpace($ResolvedReleaseRepo)) {
+        $command += " -Repo $ResolvedReleaseRepo"
+    }
+
+    return $command
+}
+
 function StopRepoMcpProcesses {
     if ($NoAutoStopMcpLocks) {
         return
@@ -72,6 +120,7 @@ function StopRepoMcpProcesses {
 
 $tag = if ($Version.StartsWith("v")) { $Version } else { "v$Version" }
 $plainVersion = $tag.TrimStart("v")
+$resolvedReleaseRepo = Resolve-ReleaseRepo
 
 if ([string]::IsNullOrWhiteSpace($CommitMessage)) {
     $CommitMessage = "chore: release $tag"
@@ -213,6 +262,11 @@ if ($finalStatus) {
 if ($NoCommit -or $NoPush) {
     Step "Skipping tag because NoCommit or NoPush was requested"
     Write-Host "[OK] Validation completed without tag." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Build release assets:"
+    Write-Host "powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version $plainVersion"
+    Write-Host "Upload release assets after creating ${tag}:"
+    Write-Host (Get-UploadAssetsCommand $plainVersion $resolvedReleaseRepo)
     exit 0
 }
 
@@ -227,4 +281,19 @@ RunNative "git" @("ls-remote", "origin", "refs/tags/$tag")
 
 Write-Host ""
 Write-Host "[OK] Release tag created and pushed: $tag" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "Build release assets:"
+Write-Host "powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version $plainVersion"
+Write-Host "Upload release assets:"
+Write-Host (Get-UploadAssetsCommand $plainVersion $resolvedReleaseRepo)
+
+if ($UploadAssets) {
+    if ([string]::IsNullOrWhiteSpace($resolvedReleaseRepo)) {
+        Fail "UploadAssets requires a release repository. Pass -ReleaseRepo <owner>/<repo>, set AIREPO_RELEASE_REPO, or configure git remote origin."
+    }
+
+    Step "Uploading release assets"
+    RunNative "powershell" @("-ExecutionPolicy", "Bypass", "-File", "scripts/Upload-ReleaseAssets.ps1", "-Version", $plainVersion, "-Repo", $resolvedReleaseRepo)
+}
 

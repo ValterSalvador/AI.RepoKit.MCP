@@ -215,7 +215,7 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.4.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.4.3
 artifacts/publish/win-x64/airepo.exe --help
 artifacts/publish/win-x64/airepo.exe self-check --repo . --strict --timings
 artifacts/publish/win-x64/airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs --strict --timings
@@ -232,7 +232,7 @@ git status --short
 - Profile guidance is explicit, especially `--profile dotnet` and `--profile demo`.
 - MCP diagnostics pass without changing MCP tools or protocol.
 - Generated outputs under `.ai/generated/` are ignored and reproducible.
-- Release artifacts include standalone executables, local `.nupkg`, wrapper files, and `artifacts/release-manifest.json`.
+- Release artifacts include standalone executables, local `.nupkg`, updater packages, and `artifacts/release/release-manifest.json`.
 - Releases are created from `vX.Y.Z` tags through GitHub Releases only.
 - NuGet.org publishing remains disabled.
 
@@ -285,7 +285,7 @@ By default, the release script uses the current `<Version>` from `src/AiRepoKit.
 To override the version explicitly:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.0.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.4.3
 ```
 
 Linux:
@@ -296,19 +296,19 @@ bash scripts/build-release.sh
 
 The release scripts run `airepo audit` before packaging unless `-SkipAudit` or `--skip-audit` is provided. The audit blocks on high-severity local path, explicit personal or sandbox development names, and likely secret findings.
 
-The release scripts generate:
+The PowerShell release script writes final GitHub Release assets under `artifacts/release`:
 
 ```text
-artifacts/nuget/AiRepoKit.Cli.<version>.nupkg
-artifacts/publish/win-x64/airepo.exe
-artifacts/publish/win-x64/install-ai-context.cmd
-artifacts/publish/win-x64/install-ai-context.ps1
-artifacts/publish/linux-x64/airepo
-artifacts/publish/linux-arm64/airepo
-artifacts/release-manifest.json
+artifacts/release/AiRepoKit.Cli.<version>.nupkg
+artifacts/release/airepo-win-x64.zip
+artifacts/release/airepo-linux-x64.tar.gz
+artifacts/release/airepo-linux-arm64.tar.gz
+artifacts/release/airepo-updater-win.zip
+artifacts/release/airepo-updater-unix.tar.gz
+artifacts/release/release-manifest.json
 ```
 
-Windows and Linux use different binaries. Use `airepo.exe` on Windows and `airepo` on Ubuntu/Linux. The standalone binaries are self-contained, so the target machine does not need the .NET runtime installed.
+The script also keeps compatibility outputs under `artifacts/nuget`, `artifacts/publish/<rid>`, and `artifacts/release-manifest.json`. Windows and Linux use different binaries. Use `airepo.exe` on Windows and `airepo` on Ubuntu/Linux. The standalone binaries are self-contained, so the target machine does not need the .NET runtime installed.
 
 ## CI/Release
 
@@ -328,16 +328,86 @@ AiRepoKit.Cli.X.Y.Z.nupkg
 airepo-win-x64.zip
 airepo-linux-x64.tar.gz
 airepo-linux-arm64.tar.gz
+airepo-updater-win.zip
+airepo-updater-unix.tar.gz
 release-manifest.json
 ```
 
 GitHub Releases are internal distribution only. NuGet.org publishing is not enabled. The `.nupkg` is attached to the GitHub Release for download or local source installation only.
+
+After building assets locally, upload them only when explicitly ready:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/Upload-ReleaseAssets.ps1 -Version 1.4.3 -Repo <owner>/<repo>
+```
+
+The upload script requires an installed and authenticated GitHub CLI and runs:
+
+```powershell
+gh release upload v1.4.3 artifacts/release/* --clobber
+```
 
 To use the Windows executable from a GitHub Release, open the release for the tag, download `airepo-win-x64.zip`, extract it, and run:
 
 ```powershell
 .\airepo.exe --version
 .\airepo.exe doctor
+```
+
+## Install And Update Workflows
+
+To update the current repository from a checked-out `AI.RepoKit.MCP` source tree, run the Windows updater from the repository root:
+
+```powershell
+scripts\airepo-update.cmd --source local
+```
+
+To update another repository from the local source tree:
+
+```powershell
+scripts\airepo-update.cmd --repo <target-repo> --source local
+```
+
+To scan many repositories first, run a dry-run. Add `--apply` only when the list is correct:
+
+```powershell
+scripts\airepo-update.cmd --root <repositories-root> --all
+scripts\airepo-update.cmd --root <repositories-root> --all --apply
+```
+
+Use `--source github` when the update should download `AiRepoKit.Cli.<version>.nupkg` from the GitHub Release instead of packing the local checkout:
+
+```powershell
+scripts\airepo-update.cmd --version 1.4.3 --source github --release-repo <owner>/<repo>
+scripts\airepo-update.cmd --repo <target-repo> --version 1.4.3 --source github --release-repo <owner>/<repo>
+```
+
+To use downloaded updater assets on Windows, download `airepo-updater-win.zip`, extract it anywhere, and run from the extracted folder:
+
+```powershell
+.\airepo-update.cmd --repo <target-repo> --version 1.4.3 --source github --release-repo <owner>/<repo>
+.\airepo-update.cmd --root <repositories-root> --all --apply --version 1.4.3 --source github --release-repo <owner>/<repo>
+```
+
+On Linux or macOS, download `airepo-updater-unix.tar.gz`, extract it, and run:
+
+```bash
+tar -xzf airepo-updater-unix.tar.gz
+chmod +x airepo-update.sh
+./airepo-update.sh --repo /path/to/repo --version 1.4.3
+./airepo-update.sh --root /path/to/repos --all --apply --version 1.4.3
+```
+
+To use the downloaded standalone executable, download the platform asset, extract it, and run from the target repository or pass `--repo`:
+
+```powershell
+.\airepo.exe --version
+.\airepo.exe setup --repo . --clients codex,vscode,vs --mcp --agents --profile auto --no-progress
+```
+
+```bash
+./airepo --version
+./airepo setup --repo . --clients codex,vscode,vs --mcp --agents --profile auto --no-progress
 ```
 
 ## Use Standalone Executables
@@ -796,7 +866,7 @@ v1.3.0 adds safe organization-level diagnostics for internal adoption across man
 Recommended 30-repo rollout flow:
 
 ```powershell
-cd C:\Repositories
+cd <repositories-root>
 airepo org scan
 airepo org report --apply
 airepo org self-check --skip-audit --skip-build-mcp --skip-budget
@@ -807,31 +877,31 @@ Commands:
 
 ```powershell
 airepo org scan
-airepo org scan --root C:\Repositories --json
-airepo org scan --root C:\Repositories --format markdown
-airepo org scan --root C:\Repositories --format csv
-airepo org scan --root C:\Repositories --output .ai/generated/reports/org-scan.json
-airepo org scan --root C:\Repositories --max-depth 3
+airepo org scan --root <repositories-root> --json
+airepo org scan --root <repositories-root> --format markdown
+airepo org scan --root <repositories-root> --format csv
+airepo org scan --root <repositories-root> --output .ai/generated/reports/org-scan.json
+airepo org scan --root <repositories-root> --max-depth 3
 
-airepo org report --root C:\Repositories
-airepo org report --root C:\Repositories --json
-airepo org report --root C:\Repositories --format markdown
-airepo org report --root C:\Repositories --format csv
-airepo org report --root C:\Repositories --apply
+airepo org report --root <repositories-root>
+airepo org report --root <repositories-root> --json
+airepo org report --root <repositories-root> --format markdown
+airepo org report --root <repositories-root> --format csv
+airepo org report --root <repositories-root> --apply
 
-airepo org self-check --root C:\Repositories
-airepo org self-check --root C:\Repositories --skip-audit --skip-build-mcp --skip-budget
-airepo org self-check --root C:\Repositories --json
-airepo org self-check --root C:\Repositories --format csv
+airepo org self-check --root <repositories-root>
+airepo org self-check --root <repositories-root> --skip-audit --skip-build-mcp --skip-budget
+airepo org self-check --root <repositories-root> --json
+airepo org self-check --root <repositories-root> --format csv
 
-airepo org setup --root C:\Repositories
-airepo org setup --root C:\Repositories --dry-run
-airepo org setup --root C:\Repositories --format markdown
+airepo org setup --root <repositories-root>
+airepo org setup --root <repositories-root> --dry-run
+airepo org setup --root <repositories-root> --format markdown
 
-airepo org efficiency --root C:\Repositories
-airepo org efficiency --root C:\Repositories --json
-airepo org efficiency --root C:\Repositories --format csv
-airepo org efficiency --root C:\Repositories --apply
+airepo org efficiency --root <repositories-root>
+airepo org efficiency --root <repositories-root> --json
+airepo org efficiency --root <repositories-root> --format csv
+airepo org efficiency --root <repositories-root> --apply
 ```
 
 All `org` commands default to `--max-depth 3` unless you override it. That default applies to `org scan`, `org report`, `org self-check`, `org setup`, and `org efficiency`.
