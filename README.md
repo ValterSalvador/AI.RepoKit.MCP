@@ -100,6 +100,7 @@ Use explicit modes when you want broader or release-grade validation:
 airepo self-check --full --timings
 airepo self-check --strict --timings
 airepo mcp-diagnose --strict --timings
+airepo mcp-diagnose --strict-stdio --timings
 ```
 
 - `self-check --quick` skips audit, MCP build, budget, and full code-index work unless you explicitly request those checks separately.
@@ -107,8 +108,28 @@ airepo mcp-diagnose --strict --timings
 - `self-check --strict` is release-oriented and treats locked MCP DLL build failures conservatively.
 - `mcp-diagnose --quick` focuses on config validation plus the JSON-RPC smoke path.
 - `mcp-diagnose --strict` validates more aggressively and avoids non-strict build shortcuts.
+- `mcp-diagnose --strict-stdio` can be combined with `--quick` or `--strict`; it fails when the MCP server writes unexpected stderr during stdio JSON-RPC and reports stderr line and byte counts.
 
 Long details stay in JSON or markdown exports when needed; default human-readable output avoids large embedded JSON blocks.
+
+## MCP Strict Stdio And Policy
+
+The repository-local MCP server is read-only and stdio-only. During normal MCP operation stdout is reserved for JSON-RPC and stderr is silent by default. MCP logs are written to `%TEMP%/ai-repo-context-mcp.log` unless a client explicitly passes `--log-file <path>`. Passing `--debug` or `--verbose` enables stderr logging for local troubleshooting only.
+
+Recoverable MCP tool failures return structured payloads instead of JSON-RPC protocol errors:
+
+```json
+{
+  "ok": false,
+  "code": "CONTEXT_NOT_FOUND",
+  "message": "Context artifact was not generated.",
+  "suggestedCommand": "airepo context-pack --apply",
+  "safeToRun": true,
+  "details": {}
+}
+```
+
+Use `get_health area=capabilities` to inspect supported context kinds, generated artifact availability, read-only mode, budgets, and cheap client config detection. Use `get_policy` to confirm the safety envelope: no file writes, command execution, database access, or network access; restricted paths stay denied and secret values stay redacted.
 
 ## Real Repository Flow
 
@@ -166,10 +187,10 @@ Visual Studio MCP requires Visual Studio 2022 17.14 or later. When you generate 
 
 ### Visual Studio MCP Troubleshooting
 
-- Visual Studio expects the local MCP server schema to use `"transport": "stdio"`; `"type": "stdio"` is not the Visual Studio shape.
+- Current generated Visual Studio configs prefer `"type": "stdio"`; diagnostics accept either `"type": "stdio"` or the older `"transport": "stdio"` so existing configs continue to validate.
 - After generation, open the solution if it was closed or reload it if it was already open so Visual Studio can rediscover the MCP server.
 - Copilot Agent MCP tools are disabled by default in Visual Studio; enable them manually in the agent UI before retrying.
-- `airepo mcp-diagnose --quick` validates `.mcp.json` and `.vs/mcp.json` with the Visual Studio schema and reports stronger client-specific hints.
+- `airepo mcp-diagnose --quick --strict-stdio` validates `.mcp.json` and `.vs/mcp.json`, checks stdio behavior, and reports stronger client-specific hints.
 
 ## Performance Recommendations
 

@@ -13,10 +13,20 @@ public sealed class ContextBudget
 
     public ContextBudgetOptions Options { get; }
 
-    public ToolEnvelope<T> Envelope<T>(T data_, bool redactedOnly_)
+    public object Envelope<T>(T data_, bool redactedOnly_)
     {
         string json = JsonSerializer.Serialize(data_);
         int size = Encoding.UTF8.GetByteCount(json);
+        if (size > this.Options.CombinedBytes)
+        {
+            return ToolError.Create(
+                "BUDGET_EXCEEDED",
+                "MCP response exceeded the configured combined response budget.",
+                string.Empty,
+                true,
+                new { estimatedSizeBytes = size, budgetBytes = this.Options.CombinedBytes });
+        }
+
         string hint = size <= this.Options.CompactBytes ? "compact" : size <= this.Options.FullBytes ? "full" : "high";
         return new ToolEnvelope<T>(data_, size, hint, false, false, redactedOnly_);
     }

@@ -16,7 +16,7 @@ public sealed class McpSmokeTestService
         "search_context"
     ];
 
-    public McpSmokeTestResult Run(string repoPath_, string dllPath_, bool verbose_)
+    public McpSmokeTestResult Run(string repoPath_, string dllPath_, bool verbose_, bool strictStdio_ = false)
     {
         if (!File.Exists(dllPath_))
         {
@@ -114,12 +114,14 @@ public sealed class McpSmokeTestService
 
             IReadOnlyList<string> toolNames = GetToolNames(tools.RootElement);
             string[] missing = ExpectedTools.Where(tool_ => !toolNames.Contains(tool_, StringComparer.Ordinal)).ToArray();
-            List<string> optionalWarnings = [];
+            List<string> toolCallWarnings = [];
             if (missing.Length == 0)
             {
-                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 3, "context-packs");
-                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 4, "changed-files");
-                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 5, "graph");
+                AddCoreToolCall(process, stdoutLines, toolCallWarnings, 3, "get_repo_brief", new { detail = "brief" });
+                AddCoreToolCall(process, stdoutLines, toolCallWarnings, 4, "get_health", new { area = "capabilities" });
+                AddCoreToolCall(process, stdoutLines, toolCallWarnings, 5, "get_policy", new { topic = "all" });
+                AddCoreToolCall(process, stdoutLines, toolCallWarnings, 6, "get_context", new { kind = "changed-files", detail = "brief", limit = 5 });
+                AddCoreToolCall(process, stdoutLines, toolCallWarnings, 7, "search_context", new { query = "MCP", limit = 3 });
             }
 
             process.StandardInput.Close();
@@ -130,10 +132,15 @@ public sealed class McpSmokeTestService
                 return new McpSmokeTestResult("Failed", "MCP smoke test did not list expected tools: " + string.Join(", ", missing) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames), toolNames);
             }
 
-            string message = "MCP initialize and tools/list passed. Expected tools listed: " + string.Join(", ", ExpectedTools) + ".";
-            if (optionalWarnings.Count > 0)
+            string message = "MCP initialize, tools/list, and minimal core tool calls passed. Expected tools listed: " + string.Join(", ", ExpectedTools) + ".";
+            if (toolCallWarnings.Count > 0)
             {
-                return new McpSmokeTestResult("Warning", message + " Optional context-kind checks returned warnings: " + string.Join("; ", optionalWarnings) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames), toolNames);
+                return new McpSmokeTestResult("Warning", message + " Core tool calls returned warnings: " + string.Join("; ", toolCallWarnings) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames), toolNames);
+            }
+
+            if (strictStdio_ && stderrLines.Count > 0)
+            {
+                return new McpSmokeTestResult("Failed", message + $" strict stdio failed because stderr contained {stderrLines.Count} line(s) and {GetByteCount(stderrLines)} byte(s).", GetSmokeDetails(stdoutLines, stderrLines, true, toolNames), toolNames);
             }
 
             if (stderrLines.Count > 0)
@@ -167,7 +174,7 @@ public sealed class McpSmokeTestService
         process_.StandardInput.Flush();
     }
 
-    private static void AddOptionalContextCall(Process process_, List<string> stdoutLines_, List<string> stderrLines_, List<string> warnings_, int id_, string kind_)
+    private static void AddCoreToolCall(Process process_, List<string> stdoutLines_, List<string> warnings_, int id_, string name_, object arguments_)
     {
         try
         {
@@ -178,28 +185,19 @@ public sealed class McpSmokeTestService
                 method = "tools/call",
                 @params = new
                 {
-                    name = "get_context",
-                    arguments = new
-                    {
-                        kind = kind_,
-                        detail = "brief",
-                        limit = 5
-                    }
+                    name = name_,
+                    arguments = arguments_
                 }
             });
             using JsonDocument response = WaitForResponse(stdoutLines_, id_, TimeSpan.FromSeconds(20));
             if (response.RootElement.TryGetProperty("error", out _))
             {
-                warnings_.Add($"get_context kind={kind_} returned a JSON-RPC error");
+                warnings_.Add($"{name_} returned a JSON-RPC error");
             }
         }
         catch (Exception exception)
         {
-            warnings_.Add($"get_context kind={kind_}: {ProcessRunner.Redact(exception.Message)}");
-            lock (stderrLines_)
-            {
-                stderrLines_.Add($"optional context smoke warning for {kind_}");
-            }
+            warnings_.Add($"{name_}: {ProcessRunner.Redact(exception.Message)}");
         }
     }
 
@@ -282,11 +280,17 @@ public sealed class McpSmokeTestService
 
         details.Add($"stdout JSON-RPC line count: {stdoutLines_.Count}");
         details.Add($"stderr line count: {stderrLines_.Count}");
+        details.Add($"stderr byte count: {GetByteCount(stderrLines_)}");
         if (verbose_)
         {
             details.AddRange(stderrLines_.TakeLast(5).Select(line_ => "stderr: " + line_));
         }
 
         return details;
+    }
+
+    private static int GetByteCount(IReadOnlyList<string> lines_)
+    {
+        return Encoding.UTF8.GetByteCount(string.Join(Environment.NewLine, lines_));
     }
 }

@@ -9,6 +9,23 @@ public sealed record ContextRepositoryOptions(string RepoRoot);
 
 public sealed class ContextRepository
 {
+    private static readonly string[] SupportedContextKinds =
+    [
+        "all",
+        "packages",
+        "security",
+        "symbols",
+        "endpoints",
+        "context-pack",
+        "context-packs",
+        "changed-files",
+        "graph",
+        "impact",
+        "org-scan",
+        "org-report",
+        "efficiency"
+    ];
+
     private readonly ContextRepositoryOptions _options;
     private readonly SecretRedactor _redactor;
     private ContextManifest? _manifest;
@@ -55,6 +72,54 @@ public sealed class ContextRepository
             .ToArray();
     }
 
+    public IReadOnlyList<string> SupportedKinds()
+    {
+        return SupportedContextKinds;
+    }
+
+    public IReadOnlyList<string> GeneratedArtifactPaths()
+    {
+        return
+        [
+            ".ai/generated/inventories/symbol-inventory.json",
+            ".ai/generated/inventories/endpoint-inventory.json",
+            ".ai/generated/context-packs/changed-files.json",
+            ".ai/generated/graphs",
+            ".ai/generated/reports/impact-report.json",
+            ".ai/generated/reports/org-scan.json",
+            ".ai/generated/reports/org-report.json",
+            ".ai/generated/reports/org-efficiency.json"
+        ];
+    }
+
+    public object GetGeneratedArtifactStatus()
+    {
+        IReadOnlyList<string> artifacts = this.GeneratedArtifactPaths();
+        return new
+        {
+            available = artifacts.Where(this.ArtifactExists).ToArray(),
+            missing = artifacts.Where(path_ => !this.ArtifactExists(path_)).ToArray()
+        };
+    }
+
+    public object GetClientConfigStatus()
+    {
+        string[] paths =
+        [
+            ".codex/config.toml",
+            ".vscode/mcp.json",
+            ".mcp.json",
+            ".vs/mcp.json",
+            ".ai/client-configs/codex.config.toml",
+            ".ai/client-configs/visualstudio-mcp.snippet.json"
+        ];
+        return paths.Select(path_ => new
+        {
+            path = path_,
+            exists = File.Exists(Path.Combine(this.RepoRoot, path_.Replace('/', Path.DirectorySeparatorChar)))
+        }).ToArray();
+    }
+
     public IReadOnlyDictionary<string, string> ReadContext(ContextDetail detail_)
     {
         return this.ReadContext(null, detail_, null);
@@ -96,6 +161,16 @@ public sealed class ContextRepository
 
     public object ReadContextObject(string? kind_, ContextDetail detail_, int? limit_, string? task_ = null, string? target_ = null)
     {
+        if (!this.IsSupportedContextKind(kind_))
+        {
+            return ToolError.Create(
+                "INVALID_CONTEXT_KIND",
+                "Requested context kind is not supported.",
+                string.Empty,
+                true,
+                new { requestedKind = kind_, supportedKinds = this.SupportedKinds() });
+        }
+
         if (string.Equals(kind_, "symbols", StringComparison.OrdinalIgnoreCase))
         {
             return this.ReadSymbols(detail_, limit_);
@@ -142,7 +217,18 @@ public sealed class ContextRepository
             return this.ReadGeneratedReport(".ai/generated/reports/org-efficiency.json", "Run `airepo org efficiency --apply` to persist an org efficiency report.", "airepo org efficiency --apply", detail_, limit_);
         }
 
-        return this.ReadContext(kind_, detail_, limit_);
+        IReadOnlyDictionary<string, string> context = this.ReadContext(kind_, detail_, limit_);
+        if (context.Count == 0)
+        {
+            return ToolError.Create(
+                "CONTEXT_NOT_FOUND",
+                "No matching repository context files were found.",
+                "airepo bootstrap --mcp --apply",
+                true,
+                new { requestedKind = string.IsNullOrWhiteSpace(kind_) ? "all" : kind_ });
+        }
+
+        return context;
     }
 
     private object ReadGeneratedReport(string relativePath_, string message_, string suggestedCommand_, ContextDetail detail_, int? limit_)
@@ -150,7 +236,12 @@ public sealed class ContextRepository
         JsonObject? report = this.ReadGeneratedJson(relativePath_, ".ai/generated/reports");
         if (report is null)
         {
-            return new { available = false, message = message_, suggestedCommand = suggestedCommand_, estimatedSizeBytes = 0, tokenCostHint = "missing" };
+            return ToolError.Create(
+                relativePath_.Contains("org-", StringComparison.OrdinalIgnoreCase) ? "ORG_REPORT_NOT_GENERATED" : "CONTEXT_NOT_FOUND",
+                message_,
+                suggestedCommand_,
+                true,
+                new { artifact = relativePath_ });
         }
 
         int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
@@ -182,7 +273,12 @@ public sealed class ContextRepository
         JsonObject? pack = this.ReadGeneratedJson(".ai/generated/context-packs/changed-files.json", ".ai/generated/context-packs");
         if (pack is null)
         {
-            return new { available = false, message = "Run `airepo context-pack --task changed-files --apply` to generate changed-files context.", suggestedCommand = "airepo context-pack --task changed-files --apply", estimatedSizeBytes = 0, tokenCostHint = "missing" };
+            return ToolError.Create(
+                "CONTEXT_PACK_NOT_GENERATED",
+                "Changed-files context pack was not generated.",
+                "airepo context-pack --task changed-files --apply",
+                true,
+                new { artifact = ".ai/generated/context-packs/changed-files.json" });
         }
 
         int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
@@ -220,7 +316,12 @@ public sealed class ContextRepository
         string directory = Path.Combine(this.RepoRoot, ".ai", "generated", "graphs");
         if (!Directory.Exists(directory))
         {
-            return new { available = false, graphs = Array.Empty<object>(), message = "Run `airepo graph --apply` to generate graph artifacts.", suggestedCommand = "airepo graph --apply", estimatedSizeBytes = 0, tokenCostHint = "missing" };
+            return ToolError.Create(
+                "GRAPH_NOT_GENERATED",
+                "Graph artifacts were not generated.",
+                "airepo graph --apply",
+                true,
+                new { artifactRoot = ".ai/generated/graphs" });
         }
 
         int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
@@ -270,7 +371,12 @@ public sealed class ContextRepository
         JsonObject? impact = this.ReadGeneratedJson(".ai/generated/reports/impact-report.json", ".ai/generated/reports");
         if (impact is null)
         {
-            return new { available = false, message = "Run `airepo impact --apply` to persist an impact report.", suggestedCommand = "airepo impact --apply", estimatedSizeBytes = 0, tokenCostHint = "missing" };
+            return ToolError.Create(
+                "CONTEXT_NOT_FOUND",
+                "Impact report was not generated.",
+                "airepo impact --apply",
+                true,
+                new { artifact = ".ai/generated/reports/impact-report.json" });
         }
 
         int limit = Math.Clamp(limit_ ?? this.Budget().Options.ArrayDefaultLimit, 1, this.Budget().Options.ArrayHardLimit);
@@ -298,7 +404,12 @@ public sealed class ContextRepository
         string directory = Path.Combine(this.RepoRoot, ".ai", "generated", "context-packs");
         if (!Directory.Exists(directory))
         {
-            return new { available = false, packs = Array.Empty<object>(), estimatedSizeBytes = 0, tokenCostHint = "missing" };
+            return ToolError.Create(
+                "CONTEXT_PACK_NOT_GENERATED",
+                "Context pack artifacts were not generated.",
+                "airepo context-pack --apply",
+                true,
+                new { artifactRoot = ".ai/generated/context-packs" });
         }
 
         List<object> packs = [];
@@ -378,7 +489,12 @@ public sealed class ContextRepository
         JsonObject? inventory = this.ReadFirstJsonObject(".ai/generated/inventories/symbol-inventory.json", ".ai/symbol-inventory.json");
         if (inventory is null)
         {
-            return new { available = false, sourceFiles = Array.Empty<string>(), estimatedSizeBytes = 0, tokenCostHint = "missing" };
+            return ToolError.Create(
+                "CONTEXT_NOT_FOUND",
+                "Symbol inventory was not generated.",
+                "airepo code-index --apply",
+                true,
+                new { artifact = ".ai/generated/inventories/symbol-inventory.json" });
         }
 
         JsonArray symbols = GetArray(inventory, "Symbols");
@@ -417,7 +533,12 @@ public sealed class ContextRepository
         JsonObject? inventory = this.ReadFirstJsonObject(".ai/generated/inventories/endpoint-inventory.json", ".ai/endpoint-inventory.json");
         if (inventory is null)
         {
-            return new { available = false, sourceFiles = Array.Empty<string>(), estimatedSizeBytes = 0, tokenCostHint = "missing" };
+            return ToolError.Create(
+                "CONTEXT_NOT_FOUND",
+                "Endpoint inventory was not generated.",
+                "airepo code-index --apply",
+                true,
+                new { artifact = ".ai/generated/inventories/endpoint-inventory.json" });
         }
 
         JsonArray endpoints = GetArray(inventory, "Endpoints");
@@ -534,6 +655,18 @@ public sealed class ContextRepository
         }
 
         return files.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private bool ArtifactExists(string relativePath_)
+    {
+        string fullPath = Path.Combine(this.RepoRoot, relativePath_.Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(fullPath) || Directory.Exists(fullPath);
+    }
+
+    private bool IsSupportedContextKind(string? kind_)
+    {
+        return string.IsNullOrWhiteSpace(kind_)
+            || SupportedContextKinds.Contains(kind_, StringComparer.OrdinalIgnoreCase);
     }
 
     private bool TryResolveAllowedFile(string relativePath_, out string fullPath_)

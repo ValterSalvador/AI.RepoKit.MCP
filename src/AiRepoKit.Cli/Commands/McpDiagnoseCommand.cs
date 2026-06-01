@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using AiRepoKit.Cli.Models;
@@ -13,15 +12,6 @@ public sealed class McpDiagnoseCommand
     {
         WriteIndented = true
     };
-
-    private static readonly string[] ExpectedTools =
-    [
-        "get_repo_brief",
-        "get_health",
-        "get_policy",
-        "get_context",
-        "search_context"
-    ];
 
     public CommandResult Execute(BootstrapOptions options_)
     {
@@ -74,7 +64,7 @@ public sealed class McpDiagnoseCommand
             else
             {
                 progress.StartPhase("Running MCP smoke test");
-                checks.Add(CreateSmokeCheck(new McpSmokeTestService().Run(repoPath, dllPath, options_.Verbose)));
+                checks.Add(CreateSmokeCheck(new McpSmokeTestService().Run(repoPath, dllPath, options_.Verbose, options_.StrictStdio)));
                 McpDiagnosticItem smoke = checks[^1];
                 if (smoke.Status is "Passed" or "Warning")
                 {
@@ -86,7 +76,7 @@ public sealed class McpDiagnoseCommand
                 }
             }
 
-            DowngradeLockedBuildWhenSmokePassed(checks, options_.Strict);
+            DowngradeLockedBuildWhenSmokePassed(checks, options_.Strict || options_.StrictStdio);
 
             if (options_.SkipBudget || string.Equals(mode, "quick", StringComparison.OrdinalIgnoreCase))
             {
@@ -289,11 +279,15 @@ public sealed class McpDiagnoseCommand
         }
 
         List<string> missing = [];
-        if (!server.TryGetProperty("transport", out JsonElement transport)
-            || transport.ValueKind != JsonValueKind.String
-            || !string.Equals(transport.GetString(), "stdio", StringComparison.Ordinal))
+        bool hasStdioTransport = server.TryGetProperty("transport", out JsonElement transport)
+            && transport.ValueKind == JsonValueKind.String
+            && string.Equals(transport.GetString(), "stdio", StringComparison.Ordinal);
+        bool hasStdioType = server.TryGetProperty("type", out JsonElement type)
+            && type.ValueKind == JsonValueKind.String
+            && string.Equals(type.GetString(), "stdio", StringComparison.Ordinal);
+        if (!hasStdioTransport && !hasStdioType)
         {
-            missing.Add("transport=stdio");
+            missing.Add("type=stdio or transport=stdio");
         }
 
         if (!server.TryGetProperty("command", out JsonElement command)
@@ -347,7 +341,7 @@ public sealed class McpDiagnoseCommand
             return (true, false, displayPath_ + " is present but missing: " + string.Join(", ", missing) + ".", usesWorkspaceFolder);
         }
 
-        return (true, true, displayPath_ + " uses the Visual Studio MCP schema with ai_repo_context, command, args, transport=stdio, and --repo.", usesWorkspaceFolder);
+        return (true, true, displayPath_ + " uses the Visual Studio MCP schema with ai_repo_context, command, args, stdio transport/type, and --repo.", usesWorkspaceFolder);
     }
 
     private static void AppendVisualStudioConfigResult(
@@ -480,279 +474,6 @@ public sealed class McpDiagnoseCommand
             "SkippedLockedSmokePassed. Locked MCP DLL reuse was accepted because JSON-RPC smoke passed.",
             build.Hint,
             build.Details);
-    }
-
-    private static McpDiagnosticItem RunSmokeTest(string repoPath_, string dllPath_, bool verbose_)
-    {
-        if (!File.Exists(dllPath_))
-        {
-            return Failed("smoke-test", true, "MCP Release DLL is missing.");
-        }
-
-        List<string> stdoutLines = [];
-        List<string> stderrLines = [];
-
-        using Process process = new();
-        process.StartInfo.FileName = "dotnet";
-        process.StartInfo.WorkingDirectory = repoPath_;
-        process.StartInfo.RedirectStandardInput = true;
-        process.StartInfo.RedirectStandardOutput = true;
-        process.StartInfo.RedirectStandardError = true;
-        process.StartInfo.UseShellExecute = false;
-        process.StartInfo.CreateNoWindow = true;
-        process.StartInfo.StandardOutputEncoding = Encoding.UTF8;
-        process.StartInfo.StandardErrorEncoding = Encoding.UTF8;
-        process.StartInfo.ArgumentList.Add(dllPath_);
-        process.StartInfo.ArgumentList.Add("--repo");
-        process.StartInfo.ArgumentList.Add(repoPath_);
-
-        try
-        {
-            process.OutputDataReceived += (_, eventArgs_) =>
-            {
-                if (eventArgs_.Data is not null)
-                {
-                    lock (stdoutLines)
-                    {
-                        stdoutLines.Add(ProcessRunner.Redact(eventArgs_.Data));
-                    }
-                }
-            };
-            process.ErrorDataReceived += (_, eventArgs_) =>
-            {
-                if (eventArgs_.Data is not null)
-                {
-                    lock (stderrLines)
-                    {
-                        stderrLines.Add(ProcessRunner.Redact(eventArgs_.Data));
-                    }
-                }
-            };
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            WriteJson(process, new
-            {
-                jsonrpc = "2.0",
-                id = 1,
-                method = "initialize",
-                @params = new
-                {
-                    protocolVersion = "2024-11-05",
-                    capabilities = new { },
-                    clientInfo = new
-                    {
-                        name = "airepo-mcp-diagnose",
-                        version = "1.0.0"
-                    }
-                }
-            });
-
-            using JsonDocument initialize = WaitForResponse(stdoutLines, 1, TimeSpan.FromSeconds(20));
-            if (initialize.RootElement.TryGetProperty("error", out _))
-            {
-                return Failed("smoke-test", true, "MCP initialize returned a JSON-RPC error.", null, GetSmokeDetails(stdoutLines, stderrLines, verbose_));
-            }
-
-            WriteJson(process, new
-            {
-                jsonrpc = "2.0",
-                method = "notifications/initialized",
-                @params = new { }
-            });
-
-            WriteJson(process, new
-            {
-                jsonrpc = "2.0",
-                id = 2,
-                method = "tools/list",
-                @params = new { }
-            });
-
-            using JsonDocument tools = WaitForResponse(stdoutLines, 2, TimeSpan.FromSeconds(20));
-            if (tools.RootElement.TryGetProperty("error", out _))
-            {
-                return Failed("smoke-test", true, "MCP tools/list returned a JSON-RPC error.", null, GetSmokeDetails(stdoutLines, stderrLines, verbose_));
-            }
-
-            IReadOnlyList<string> toolNames = GetToolNames(tools.RootElement);
-            string[] missing = ExpectedTools.Where(tool_ => !toolNames.Contains(tool_, StringComparer.Ordinal)).ToArray();
-            List<string> optionalWarnings = [];
-            if (missing.Length == 0)
-            {
-                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 3, "context-packs");
-                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 4, "changed-files");
-                AddOptionalContextCall(process, stdoutLines, stderrLines, optionalWarnings, 5, "graph");
-            }
-
-            process.StandardInput.Close();
-            process.WaitForExit(2000);
-
-            if (missing.Length > 0)
-            {
-                return Failed("smoke-test", true, "MCP smoke test did not list expected tools: " + string.Join(", ", missing) + ".", null, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames));
-            }
-
-            string message = "MCP initialize and tools/list passed. Expected tools listed: " + string.Join(", ", ExpectedTools) + ".";
-            if (optionalWarnings.Count > 0)
-            {
-                return Warning("smoke-test", true, message + " Optional context-kind checks returned warnings: " + string.Join("; ", optionalWarnings) + ".", null, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames));
-            }
-
-            if (stderrLines.Count > 0)
-            {
-                return Warning("smoke-test", true, message + $" stderr contained {stderrLines.Count} log line(s), but stdout was valid JSON-RPC.", null, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames));
-            }
-
-            return Passed("smoke-test", true, message, null, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames));
-        }
-        catch (Exception exception)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.StandardInput.Close();
-                    process.WaitForExit(2000);
-                }
-            }
-            catch
-            {
-            }
-
-            return Failed("smoke-test", true, ProcessRunner.Redact(exception.Message), null, GetSmokeDetails(stdoutLines, stderrLines, verbose_));
-        }
-    }
-
-    private static void WriteJson(Process process_, object value_)
-    {
-        process_.StandardInput.WriteLine(JsonSerializer.Serialize(value_));
-        process_.StandardInput.Flush();
-    }
-
-    private static void AddOptionalContextCall(Process process_, List<string> stdoutLines_, List<string> stderrLines_, List<string> warnings_, int id_, string kind_)
-    {
-        try
-        {
-            WriteJson(process_, new
-            {
-                jsonrpc = "2.0",
-                id = id_,
-                method = "tools/call",
-                @params = new
-                {
-                    name = "get_context",
-                    arguments = new
-                    {
-                        kind = kind_,
-                        detail = "brief",
-                        limit = 5
-                    }
-                }
-            });
-            using JsonDocument response = WaitForResponse(stdoutLines_, id_, TimeSpan.FromSeconds(20));
-            if (response.RootElement.TryGetProperty("error", out _))
-            {
-                warnings_.Add($"get_context kind={kind_} returned a JSON-RPC error");
-            }
-        }
-        catch (Exception exception)
-        {
-            warnings_.Add($"get_context kind={kind_}: {ProcessRunner.Redact(exception.Message)}");
-            lock (stderrLines_)
-            {
-                stderrLines_.Add($"optional context smoke warning for {kind_}");
-            }
-        }
-    }
-
-    private static JsonDocument WaitForResponse(List<string> stdoutLines_, int id_, TimeSpan timeout_)
-    {
-        DateTime deadline = DateTime.UtcNow.Add(timeout_);
-        int index = 0;
-        while (DateTime.UtcNow < deadline)
-        {
-            List<string> snapshot;
-            lock (stdoutLines_)
-            {
-                snapshot = stdoutLines_.ToList();
-            }
-
-            while (index < snapshot.Count)
-            {
-                string line = snapshot[index++];
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                JsonDocument document;
-                try
-                {
-                    document = JsonDocument.Parse(line);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (document.RootElement.TryGetProperty("id", out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.GetInt32() == id_)
-                {
-                    return document;
-                }
-
-                document.Dispose();
-            }
-
-            Thread.Sleep(50);
-        }
-
-        throw new TimeoutException($"Timed out waiting for JSON-RPC response id {id_}.");
-    }
-
-    private static IReadOnlyList<string> GetToolNames(JsonElement root_)
-    {
-        JsonElement current = root_;
-        if (current.TryGetProperty("result", out JsonElement result))
-        {
-            current = result;
-        }
-
-        if (!current.TryGetProperty("tools", out JsonElement tools) || tools.ValueKind != JsonValueKind.Array)
-        {
-            return [];
-        }
-
-        List<string> names = [];
-        foreach (JsonElement tool in tools.EnumerateArray())
-        {
-            if (tool.TryGetProperty("name", out JsonElement name) && name.ValueKind == JsonValueKind.String)
-            {
-                names.Add(name.GetString() ?? string.Empty);
-            }
-        }
-
-        return names;
-    }
-
-    private static IReadOnlyList<string> GetSmokeDetails(List<string> stdoutLines_, List<string> stderrLines_, bool verbose_, IReadOnlyList<string>? tools_ = null)
-    {
-        List<string> details = [];
-        if (tools_ is not null)
-        {
-            details.Add("Tools: " + string.Join(", ", tools_));
-        }
-
-        details.Add($"stdout JSON-RPC line count: {stdoutLines_.Count}");
-        details.Add($"stderr line count: {stderrLines_.Count}");
-        if (verbose_)
-        {
-            details.AddRange(stderrLines_.TakeLast(5).Select(line_ => "stderr: " + line_));
-        }
-
-        return details;
     }
 
     private static void AddClientHints(List<string> hints_, List<McpDiagnosticItem> checks_, IReadOnlyList<ClientKind> clients_, string repoPath_, bool rebuilt_)
