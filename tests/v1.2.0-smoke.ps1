@@ -45,8 +45,15 @@ if ($graphApply -notmatch 'project-graph.json') {
 }
 
 $vsPlan = Invoke-AiRepo @('plan', '--clients', 'vs', '--mcp', '--no-progress')
-if ($vsPlan -notmatch '\.mcp\.json' -or $vsPlan -notmatch 'visualstudio-mcp\.snippet\.json' -or $vsPlan -match '\.vs[\\/]mcp\.json') {
-    throw 'plan --clients vs did not report the expected Visual Studio MCP files.'
+$expectedVisualStudioPlanFiles = @(
+    '\.mcp\.json',
+    '\.vs[\\/]mcp\.json',
+    '\.ai[\\/]client-configs[\\/]visualstudio-mcp\.snippet\.json'
+)
+foreach ($expectedVisualStudioPlanFile in $expectedVisualStudioPlanFiles) {
+    if ($vsPlan -notmatch $expectedVisualStudioPlanFile) {
+        throw 'plan --clients vs did not report the expected Visual Studio MCP files.'
+    }
 }
 
 $diagnose = Invoke-AiRepo @('mcp-diagnose', '--skip-build', '--skip-budget', '--no-progress')
