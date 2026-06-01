@@ -110,7 +110,7 @@ jobs:
             throw "No files found in artifacts/release; refusing to upload an empty release."
           }
 
-          $null = & gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          cmd /c "gh release view ""$tag"" --repo ""%GITHUB_REPOSITORY%"" >NUL 2>NUL"
           $releaseViewExitCode = $LASTEXITCODE
           if ($releaseViewExitCode -eq 0) {
             Write-Host "GitHub Release '$tag' already exists."
