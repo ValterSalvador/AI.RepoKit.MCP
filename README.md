@@ -202,14 +202,13 @@ Visual Studio MCP requires Visual Studio 2022 17.14 or later. When you generate 
 
 ## Release And Versioning
 
-Tag releases with full SemVer tags:
+Use `Validate-And-Tag.ps1` for release validation and tagging:
 
 ```powershell
-git tag vX.Y.Z
-git push origin vX.Y.Z
+powershell -ExecutionPolicy Bypass -File scripts/Validate-And-Tag.ps1 -Version X.Y.Z
 ```
 
-GitHub Actions strips the leading `v` and uses the tag version for the NuGet package, standalone executables, archives, and `release-manifest.json`. GitHub Releases only are enabled. NuGet.org publishing is intentionally not enabled.
+Pushing a `vX.Y.Z` tag starts the GitHub Actions release workflow. The workflow strips the leading `v`, builds the NuGet package, standalone executables, updater packages, and `release-manifest.json`, then publishes those files to the GitHub Release for the tag. GitHub Releases only are enabled. NuGet.org publishing is intentionally not enabled.
 
 For a local release validation build:
 
@@ -314,14 +313,20 @@ The script also keeps compatibility outputs under `artifacts/nuget`, `artifacts/
 
 GitHub Actions runs CI on `push` and `pull_request` for Windows and Ubuntu. CI restores, builds in Release, packs the local tool package, uploads the generated `.nupkg`, and runs basic Windows smoke checks for `--version`, `doctor`, and `plan`.
 
-Releases are created by pushing a full SemVer tag that matches `v*.*.*`, for example:
+Release assets are published automatically by `.github/workflows/release.yml` when a `v*` tag is pushed. The workflow can also be started manually with `workflow_dispatch` and an optional `version` input.
+
+The normal release flow is:
+
+1. Run `Validate-And-Tag.ps1`:
 
 ```powershell
-git tag vX.Y.Z
-git push origin vX.Y.Z
+powershell -ExecutionPolicy Bypass -File scripts/Validate-And-Tag.ps1 -Version X.Y.Z
 ```
 
-The release workflow removes the leading `v` from the tag and uses that version for the NuGet package, standalone artifacts, and release manifest. Local release scripts use the `.csproj` version by default, but GitHub Actions SemVer tags continue to use the tag version. A `vX.Y.Z` tag produces:
+2. Wait for the GitHub Actions release workflow to finish.
+3. Open the GitHub Release for `vX.Y.Z` and validate that all expected assets are attached.
+
+The release workflow removes the leading `v` from the tag and uses that version for the NuGet package, standalone artifacts, updater packages, and release manifest. Local release scripts use the `.csproj` version by default, but GitHub Actions tags continue to use the tag version. A `vX.Y.Z` tag publishes:
 
 ```text
 AiRepoKit.Cli.X.Y.Z.nupkg
@@ -335,13 +340,14 @@ release-manifest.json
 
 GitHub Releases are internal distribution only. NuGet.org publishing is not enabled. The `.nupkg` is attached to the GitHub Release for download or local source installation only.
 
-After building assets locally, upload them only when explicitly ready:
+Manual upload remains available as a fallback if the GitHub Actions release workflow must be bypassed. Build assets locally first, then upload them only when explicitly ready:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.4.3
 powershell -ExecutionPolicy Bypass -File scripts/Upload-ReleaseAssets.ps1 -Version 1.4.3 -Repo <owner>/<repo>
 ```
 
-The upload script requires an installed and authenticated GitHub CLI and runs:
+The fallback upload script requires an installed and authenticated GitHub CLI and runs:
 
 ```powershell
 gh release upload v1.4.3 artifacts/release/* --clobber
