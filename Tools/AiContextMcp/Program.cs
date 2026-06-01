@@ -2,6 +2,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
+using AiRepo.ContextMcp.Prompts;
+using AiRepo.ContextMcp.Resources;
 using AiRepo.ContextMcp.Services;
 using AiRepo.ContextMcp.Tools;
 
@@ -50,7 +52,11 @@ try
     builder.Services.AddSingleton(new ContextRepositoryOptions(Path.GetFullPath(repoRoot)));
     builder.Services.AddSingleton<SecretRedactor>();
     builder.Services.AddSingleton<ContextRepository>();
-    builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<RepositoryContextTools>();
+    builder.Services.AddMcpServer()
+        .WithStdioServerTransport()
+        .WithTools<RepositoryContextTools>()
+        .WithResources<RepositoryContextResources>()
+        .WithPrompts<RepositoryContextPrompts>();
     await builder.Build().RunAsync();
 }
 catch (Exception exception)

@@ -7,8 +7,39 @@ namespace {{McpNamespace}}.Services;
 
 public sealed record ContextRepositoryOptions(string RepoRoot);
 
+public sealed record RepositoryResourceDescriptor(string Uri, string Name, string Description, string MimeType);
+
+public sealed record RepositoryPromptDescriptor(string Name, string Description);
+
 public sealed class ContextRepository
 {
+    private static readonly RepositoryResourceDescriptor[] ResourceDescriptors =
+    [
+        new("repo://brief", "Repository brief", "Compact repository overview and generated inventory summary.", "application/json"),
+        new("repo://health", "MCP health", "Server capability, artifact, client, strict stdio, and budget summary.", "application/json"),
+        new("repo://policy", "MCP policy", "Read-only safety policy, allowed root, restricted paths, and logging defaults.", "application/json"),
+        new("repo://context/changed-files", "Changed files context", "Bounded changed-files context pack for local review.", "application/json"),
+        new("repo://context/review-risk", "Review risk context", "Bounded review-risk context pack when generated.", "application/json"),
+        new("repo://context/test-generation", "Test generation context", "Bounded test-generation context pack when generated.", "application/json"),
+        new("repo://graph/dependencies", "Dependency graph", "Bounded generated dependency graph summary.", "application/json"),
+        new("repo://impact/current", "Current impact", "Bounded generated impact report summary.", "application/json"),
+        new("repo://org/report", "Organization report", "Bounded generated organization report summary.", "application/json")
+    ];
+
+    private static readonly RepositoryPromptDescriptor[] PromptDescriptors =
+    [
+        new("ai-repo.help", "Compact AI.RepoKit MCP help and low-token workflow reference."),
+        new("ai-repo.tutorial-en", "Short English tutorial for using ai_repo_context efficiently."),
+        new("ai-repo.tutorial-pt", "Tutorial curto em portugues para usar ai_repo_context com eficiencia."),
+        new("ai-repo.token-efficiency-check", "Estimate MCP payload tokens versus broad file inspection and report savings."),
+        new("ai-repo.review-risk", "Review changed code using MCP context before direct file inspection."),
+        new("ai-repo.changed-files-review", "Review the current changed-files context with focused follow-up searches."),
+        new("ai-repo.generate-tests", "Plan and generate tests from bounded context first."),
+        new("ai-repo.before-commit", "Run a low-token pre-commit readiness check."),
+        new("ai-repo.implementation-plan", "Create an implementation plan from MCP context before editing."),
+        new("ai-repo.release-check", "Check release readiness without tagging, pushing, uploading, or releasing.")
+    ];
+
     private static readonly string[] SupportedContextKinds =
     [
         "all",
@@ -77,6 +108,28 @@ public sealed class ContextRepository
         return SupportedContextKinds;
     }
 
+    public IReadOnlyList<RepositoryResourceDescriptor> KnownResources()
+    {
+        return ResourceDescriptors;
+    }
+
+    public IReadOnlyList<RepositoryPromptDescriptor> KnownPrompts()
+    {
+        return PromptDescriptors;
+    }
+
+    public IReadOnlyList<string> ToolNames()
+    {
+        return
+        [
+            "get_repo_brief",
+            "get_health",
+            "get_policy",
+            "get_context",
+            "search_context"
+        ];
+    }
+
     public IReadOnlyList<string> GeneratedArtifactPaths()
     {
         return
@@ -118,6 +171,110 @@ public sealed class ContextRepository
             path = path_,
             exists = File.Exists(Path.Combine(this.RepoRoot, path_.Replace('/', Path.DirectorySeparatorChar)))
         }).ToArray();
+    }
+
+    public object ReadResourceObject(string uri_)
+    {
+        object data = uri_ switch
+        {
+            "repo://brief" => new
+            {
+                this.GetManifest().RepoName,
+                this.GetManifest().MainSolution,
+                this.GetManifest().SchemaVersion,
+                Detail = "brief",
+                Inventory = this.GetInventorySummary("resource: repo://brief"),
+                AllowedFiles = this.AllowedFiles().Take(this.Budget().Options.ArrayDefaultLimit).ToArray()
+            },
+            "repo://health" => this.GetCapabilities(),
+            "repo://policy" => this.GetPolicyObject("all"),
+            "repo://context/changed-files" => this.ReadContextObject("changed-files", ContextDetail.Brief, this.Budget().Options.ArrayDefaultLimit),
+            "repo://context/review-risk" => this.ReadContextObject("context-packs", ContextDetail.Brief, this.Budget().Options.ArrayDefaultLimit, "review-risk"),
+            "repo://context/test-generation" => this.ReadContextObject("context-packs", ContextDetail.Brief, this.Budget().Options.ArrayDefaultLimit, "test-generation"),
+            "repo://graph/dependencies" => this.ReadContextObject("graph", ContextDetail.Brief, this.Budget().Options.ArrayDefaultLimit, null, "dependencies"),
+            "repo://impact/current" => this.ReadContextObject("impact", ContextDetail.Brief, this.Budget().Options.ArrayDefaultLimit),
+            "repo://org/report" => this.ReadContextObject("org-report", ContextDetail.Brief, this.Budget().Options.ArrayDefaultLimit),
+            _ => ToolError.Create(
+                "RESOURCE_NOT_FOUND",
+                "Requested MCP resource URI is not supported.",
+                string.Empty,
+                true,
+                new { requestedUri = uri_, resourceUris = this.KnownResources().Select(resource_ => resource_.Uri).ToArray() })
+        };
+
+        return data is ToolError ? data : this.Budget().Envelope(data, true);
+    }
+
+    public object GetCapabilities(string serverVersion_ = "unknown")
+    {
+        return new
+        {
+            ok = true,
+            serverVersion = serverVersion_,
+            toolVersion = serverVersion_,
+            repoRoot = this.RepoRoot,
+            toolsAvailable = this.ToolNames(),
+            supportedContextKinds = this.SupportedKinds(),
+            generatedArtifacts = this.GetGeneratedArtifactStatus(),
+            supportedPolicies = new[] { "read-only", "strict-stdio", "secrets-redaction", "bounded-responses" },
+            readOnlyMode = true,
+            maxRecommendedDetail = "brief",
+            defaultTokenBudgets = this.Budget().Options,
+            supportedClients = this.GetClientConfigStatus(),
+            transport = "stdio",
+            strictStdio = new
+            {
+                stdoutReservedForMcp = true,
+                stderrDefault = false,
+                stderrWhen = "--debug or --verbose",
+                logFileDefault = Path.Combine(Path.GetTempPath(), "ai-repo-context-mcp.log")
+            },
+            resources = true,
+            prompts = true,
+            resourcesSupported = true,
+            promptsSupported = true,
+            resourceUris = this.KnownResources().Select(resource_ => resource_.Uri).ToArray(),
+            promptNames = this.KnownPrompts().Select(prompt_ => prompt_.Name).ToArray()
+        };
+    }
+
+    public object GetPolicyObject(string topic_)
+    {
+        ContextBudget budget = this.Budget();
+        ContextManifest manifest = this.GetManifest();
+        return new
+        {
+            topic = topic_,
+            serverMode = "read-only",
+            fileWrite = false,
+            commandExecution = false,
+            databaseAccess = false,
+            networkAccess = false,
+            secretsRedaction = true,
+            allowedRoots = new[] { this.RepoRoot },
+            deniedPaths = manifest.RestrictedPaths,
+            generatedArtifactPaths = this.GeneratedArtifactPaths(),
+            safeSuggestedCommands = new
+            {
+                maySuggest = true,
+                mayExecute = false,
+                requireUserPermission = true
+            },
+            readOnlyFirst = true,
+            stdioOnly = true,
+            stdoutReservedForMcp = true,
+            logs = new
+            {
+                defaultPath = Path.Combine(Path.GetTempPath(), "ai-repo-context-mcp.log"),
+                stderrDefault = false,
+                stderrWhen = "--debug or --verbose"
+            },
+            secretsExposed = false,
+            secretValuesReturned = false,
+            redactedOnly = true,
+            budgets = budget.Options,
+            restrictedPaths = manifest.RestrictedPaths
+        };
     }
 
     public IReadOnlyDictionary<string, string> ReadContext(ContextDetail detail_)
@@ -989,4 +1146,3 @@ public sealed class ContextRepository
         return value_[..max_];
     }
 }
-

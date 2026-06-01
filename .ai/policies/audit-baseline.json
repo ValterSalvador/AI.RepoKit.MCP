@@ -1,0 +1,30 @@
+{
+  "Version": "1",
+  "GeneratedAtLocal": "2026-06-01T00:00:00+02:00",
+  "Entries": [
+    {
+      "Id": "finding-6d9e3a7b4158727cb7b8affb13bb44584816b4fb619ca3945003f7faad27dfa0",
+      "Category": "PortugueseText",
+      "File": "Tools/AiContextMcp/Prompts/RepositoryContextPrompts.cs",
+      "Line": 50,
+      "PreviewHash": "94c03b8f8fcec0d47d5a97d4f2304737fea7c684c058cfb460b473b71073c37b",
+      "Status": "accepted",
+      "Reason": "Intentional Portuguese ai-repo.tutorial-pt prompt text.",
+      "ExpiresOn": null,
+      "CreatedAtLocal": "2026-06-01T00:00:00+02:00",
+      "UpdatedAtLocal": "2026-06-01T00:00:00+02:00"
+    },
+    {
+      "Id": "finding-2bcbef9732fe1aea37166fb32343576102c3d70a8e4a87dfe06654b2eb7bfabc",
+      "Category": "PortugueseText",
+      "File": "src/AiRepoKit.Cli/Templates/ai-context-mcp/Prompts/RepositoryContextPrompts.cs.tpl",
+      "Line": 50,
+      "PreviewHash": "94c03b8f8fcec0d47d5a97d4f2304737fea7c684c058cfb460b473b71073c37b",
+      "Status": "accepted",
+      "Reason": "Intentional Portuguese ai-repo.tutorial-pt prompt text.",
+      "ExpiresOn": null,
+      "CreatedAtLocal": "2026-06-01T00:00:00+02:00",
+      "UpdatedAtLocal": "2026-06-01T00:00:00+02:00"
+    }
+  ]
+}

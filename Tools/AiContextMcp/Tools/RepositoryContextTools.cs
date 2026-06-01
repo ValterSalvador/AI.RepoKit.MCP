@@ -51,23 +51,7 @@ public sealed class RepositoryContextTools
     {
         ContextManifest manifest = this._repository.GetManifest();
         object data = string.Equals(area, "capabilities", StringComparison.OrdinalIgnoreCase)
-            ? (object)new
-            {
-                ok = true,
-                serverVersion = GetServerVersion(),
-                toolVersion = GetServerVersion(),
-                repoRoot = this._repository.RepoRoot,
-                supportedContextKinds = this._repository.SupportedKinds(),
-                generatedArtifacts = this._repository.GetGeneratedArtifactStatus(),
-                supportedPolicies = new[] { "read-only", "strict-stdio", "secrets-redaction", "bounded-responses" },
-                readOnlyMode = true,
-                maxRecommendedDetail = "brief",
-                defaultTokenBudgets = this._repository.Budget().Options,
-                supportedClients = this._repository.GetClientConfigStatus(),
-                transport = "stdio",
-                resources = false,
-                prompts = false
-            }
+            ? this._repository.GetCapabilities(GetServerVersion())
             : new
         {
             ok = true,
@@ -77,8 +61,10 @@ public sealed class RepositoryContextTools
             allowedFileCount = this._repository.AllowedFiles().Count,
             transport = "stdio",
             http = false,
-            resources = false,
-            prompts = false,
+            resources = true,
+            prompts = true,
+            resourcesSupported = true,
+            promptsSupported = true,
             persistence = false
         };
         return this._repository.Budget().Envelope(data, true);
@@ -97,40 +83,7 @@ public sealed class RepositoryContextTools
     public object GetPolicy(string topic = "all")
     {
         ContextBudget budget = this._repository.Budget();
-        ContextManifest manifest = this._repository.GetManifest();
-        object data = new
-        {
-            topic,
-            serverMode = "read-only",
-            fileWrite = false,
-            commandExecution = false,
-            databaseAccess = false,
-            networkAccess = false,
-            secretsRedaction = true,
-            allowedRoots = new[] { this._repository.RepoRoot },
-            deniedPaths = manifest.RestrictedPaths,
-            generatedArtifactPaths = this._repository.GeneratedArtifactPaths(),
-            safeSuggestedCommands = new
-            {
-                maySuggest = true,
-                mayExecute = false,
-                requireUserPermission = true
-            },
-            readOnlyFirst = true,
-            stdioOnly = true,
-            stdoutReservedForMcp = true,
-            logs = new
-            {
-                defaultPath = Path.Combine(Path.GetTempPath(), "ai-repo-context-mcp.log"),
-                stderrDefault = false,
-                stderrWhen = "--debug or --verbose"
-            },
-            secretsExposed = false,
-            secretValuesReturned = false,
-            redactedOnly = true,
-            budgets = budget.Options,
-            restrictedPaths = manifest.RestrictedPaths
-        };
+        object data = this._repository.GetPolicyObject(topic);
         return budget.Envelope(data, true);
     }
 

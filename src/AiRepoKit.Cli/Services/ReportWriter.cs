@@ -165,7 +165,7 @@ public sealed class ReportWriter
         builder.AppendLine($"- TemplatesAvailable: `{templatesAvailable_}`");
         builder.AppendLine($"- Essential .ai templates: `{TemplateExists(templatesRoot_, "ai/README.md.tpl") && TemplateExists(templatesRoot_, "ai/manifests/mcp-context-manifest.json.tpl")}`");
         builder.AppendLine($"- Essential tools-ai-context templates: `{TemplateExists(templatesRoot_, "tools-ai-context/UpdateAiContext.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/UpdateCodeInventory.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/CheckSecrets.ps1.tpl")}`");
-        builder.AppendLine($"- Essential ai-context-mcp templates: `{TemplateExists(templatesRoot_, "ai-context-mcp/Program.cs.tpl") && TemplateExists(templatesRoot_, "ai-context-mcp/Tools/RepositoryContextTools.cs.tpl")}`");
+        builder.AppendLine($"- Essential ai-context-mcp templates: `{TemplateExists(templatesRoot_, "ai-context-mcp/Program.cs.tpl") && TemplateExists(templatesRoot_, "ai-context-mcp/Tools/RepositoryContextTools.cs.tpl") && TemplateExists(templatesRoot_, "ai-context-mcp/Resources/RepositoryContextResources.cs.tpl") && TemplateExists(templatesRoot_, "ai-context-mcp/Prompts/RepositoryContextPrompts.cs.tpl")}`");
         builder.AppendLine($"- Essential client-configs templates: `{TemplateExists(templatesRoot_, "client-configs/codex.config.toml.tpl") && TemplateExists(templatesRoot_, "client-configs/vscode.mcp.json.tpl")}`");
         if (!string.IsNullOrWhiteSpace(templatesError_))
         {

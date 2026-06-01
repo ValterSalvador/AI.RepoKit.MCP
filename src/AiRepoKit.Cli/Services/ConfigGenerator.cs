@@ -55,7 +55,9 @@ public sealed class ConfigGenerator
         new("ai-context-mcp/Services/ContextBudget.cs.tpl", "Tools/AiContextMcp/Services/ContextBudget.cs", "ai-context-mcp", "Create context budget service."),
         new("ai-context-mcp/Services/ContextRepository.cs.tpl", "Tools/AiContextMcp/Services/ContextRepository.cs", "ai-context-mcp", "Create context repository service."),
         new("ai-context-mcp/Services/SecretRedactor.cs.tpl", "Tools/AiContextMcp/Services/SecretRedactor.cs", "ai-context-mcp", "Create secret redactor service."),
-        new("ai-context-mcp/Tools/RepositoryContextTools.cs.tpl", "Tools/AiContextMcp/Tools/RepositoryContextTools.cs", "ai-context-mcp", "Create MCP tools.")
+        new("ai-context-mcp/Tools/RepositoryContextTools.cs.tpl", "Tools/AiContextMcp/Tools/RepositoryContextTools.cs", "ai-context-mcp", "Create MCP tools."),
+        new("ai-context-mcp/Resources/RepositoryContextResources.cs.tpl", "Tools/AiContextMcp/Resources/RepositoryContextResources.cs", "ai-context-mcp", "Create MCP resources."),
+        new("ai-context-mcp/Prompts/RepositoryContextPrompts.cs.tpl", "Tools/AiContextMcp/Prompts/RepositoryContextPrompts.cs", "ai-context-mcp", "Create MCP prompts.")
     ];
 
     private static readonly IReadOnlyList<ProfileTemplatePlanItem> AgentTemplates =

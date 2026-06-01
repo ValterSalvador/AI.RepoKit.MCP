@@ -116,6 +116,37 @@ Long details stay in JSON or markdown exports when needed; default human-readabl
 
 The repository-local MCP server is read-only and stdio-only. During normal MCP operation stdout is reserved for JSON-RPC and stderr is silent by default. MCP logs are written to `%TEMP%/ai-repo-context-mcp.log` unless a client explicitly passes `--log-file <path>`. Passing `--debug` or `--verbose` enables stderr logging for local troubleshooting only.
 
+## MCP Resources And Prompts
+
+v1.5.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and adds read-only Resources and reusable Prompts for lower-token discovery.
+
+Resource URIs:
+
+- `repo://brief`
+- `repo://health`
+- `repo://policy`
+- `repo://context/changed-files`
+- `repo://context/review-risk`
+- `repo://context/test-generation`
+- `repo://graph/dependencies`
+- `repo://impact/current`
+- `repo://org/report`
+
+Prompt names:
+
+- `ai-repo.help`
+- `ai-repo.tutorial-en`
+- `ai-repo.tutorial-pt`
+- `ai-repo.token-efficiency-check`
+- `ai-repo.review-risk`
+- `ai-repo.changed-files-review`
+- `ai-repo.generate-tests`
+- `ai-repo.before-commit`
+- `ai-repo.implementation-plan`
+- `ai-repo.release-check`
+
+Recommended low-token agent flow: call `get_repo_brief`, `get_health area=capabilities`, `get_policy`, `get_context kind=changed-files detail=brief`, then use `search_context` only for focused queries. MCP clients that support resources can read `repo://brief`, `repo://health`, and task resources before direct file inspection. Use `prompts/get ai-repo.help` for built-in help, tutorial prompts for onboarding, and `ai-repo.token-efficiency-check` before broad file reads.
+
 Recoverable MCP tool failures return structured payloads instead of JSON-RPC protocol errors:
 
 ```json

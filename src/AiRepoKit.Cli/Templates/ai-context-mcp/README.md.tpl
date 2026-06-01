@@ -1,6 +1,6 @@
-# {{McpProjectName}}
+# AiRepo.ContextMcp
 
-Generic read-only MCP context server for a local repository. It uses the stable `ModelContextProtocol` package and stdio transport.
+Generic read-only MCP context server for a local repository. It uses the stable `ModelContextProtocol` package and stdio transport. v1.5.0 keeps the compact tool surface and adds MCP Resources and Prompts for discoverability.
 
 ## Transport
 
@@ -25,7 +25,46 @@ The server policy is read-only: no file writes, command execution, database acce
 
 ## Capabilities
 
-Use `get_health area=capabilities` to get server/tool version, repository root, supported context kinds, generated artifact availability, missing generated artifacts, supported policies, read-only mode, recommended detail level, default budgets, and cheap client config detection.
+Use `get_health area=capabilities` to get server/tool version, repository root, available tools, supported context kinds, generated artifact availability, missing generated artifacts, supported policies, read-only mode, recommended detail level, default budgets, cheap client config detection, resource URIs, prompt names, and strict stdio defaults.
+
+## Tools
+
+- `get_repo_brief`
+- `get_health`
+- `get_policy`
+- `get_context`
+- `search_context`
+
+## Resources
+
+Resources are read-only, redacted, budget-aware content entrypoints exposed through `resources/list` and `resources/read`.
+
+- `repo://brief`
+- `repo://health`
+- `repo://policy`
+- `repo://context/changed-files`
+- `repo://context/review-risk`
+- `repo://context/test-generation`
+- `repo://graph/dependencies`
+- `repo://impact/current`
+- `repo://org/report`
+
+## Prompts
+
+Prompts are short reusable workflows exposed through `prompts/list` and `prompts/get`.
+
+- `ai-repo.help`
+- `ai-repo.tutorial-en`
+- `ai-repo.tutorial-pt`
+- `ai-repo.token-efficiency-check`
+- `ai-repo.review-risk`
+- `ai-repo.changed-files-review`
+- `ai-repo.generate-tests`
+- `ai-repo.before-commit`
+- `ai-repo.implementation-plan`
+- `ai-repo.release-check`
+
+Operational prompts instruct agents to start with `get_repo_brief`, `get_health area=capabilities`, `get_policy`, `get_context kind=changed-files detail=brief`, and focused `search_context` calls before direct file inspection.
 
 ## Structured Errors
 
@@ -45,5 +84,5 @@ Recoverable missing or oversized artifacts return structured tool payloads inste
 ## Build
 
 ```powershell
-dotnet build {{McpProjectRelativePath}} -c Release
+dotnet build Tools/AiContextMcp/AiRepo.ContextMcp.csproj -c Release
 ```
