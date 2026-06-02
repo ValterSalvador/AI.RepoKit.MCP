@@ -105,9 +105,13 @@ public sealed class CodeIndexCommand
             builder.AppendLine($"- Files scanned: `{result_.SymbolInventory.TotalFilesScanned}`");
             builder.AppendLine($"- Files indexed: `{result_.FilesIndexed}`");
             builder.AppendLine($"- Files reused: `{result_.FilesReused}`");
+            builder.AppendLine($"- Fast-path reused files: `{result_.FastPathReusedFiles}`");
+            builder.AppendLine($"- Hash validations: `{result_.HashValidatedFiles}`");
+            builder.AppendLine($"- Parsed files: `{result_.ParsedFiles}`");
             builder.AppendLine($"- Files removed from cache: `{result_.FilesRemovedFromCache}`");
             builder.AppendLine($"- Index reuse: `{GetReuseSummary(result_)}`");
             builder.AppendLine($"- Cache used: `{result_.CacheUsed}`");
+            builder.AppendLine($"- Cache invalidation reason: `{GetCacheInvalidationReason(result_)}`");
             builder.AppendLine($"- Cache path: `{result_.CachePath}`");
             builder.AppendLine($"- Symbols: `{result_.SymbolInventory.TotalSymbols}`");
             builder.AppendLine($"- Endpoints: `{result_.EndpointInventory.TotalEndpoints}`");
@@ -179,6 +183,11 @@ public sealed class CodeIndexCommand
         }
 
         return result_.FilesReused > 0 ? "partial-cache-reuse" : "fresh-index";
+    }
+
+    private static string GetCacheInvalidationReason(CodeIndexResult result_)
+    {
+        return string.IsNullOrWhiteSpace(result_.CacheInvalidationReason) ? "none" : result_.CacheInvalidationReason;
     }
 
     private void AppendMessages(StringBuilder builder_, IReadOnlyList<string> messages_)

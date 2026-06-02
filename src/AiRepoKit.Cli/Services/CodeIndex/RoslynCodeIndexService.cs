@@ -26,21 +26,44 @@ public sealed class RoslynCodeIndexService
         int filesRemovedFromCache = loadResult.Cache?.Files.Count(file_ => !discoveredFiles.Contains(file_.File)) ?? 0;
         int filesIndexed = 0;
         int filesReused = 0;
+        int fastPathReusedFiles = 0;
+        int hashValidatedFiles = 0;
         bool truncated = discovery.Truncated;
 
         progress_?.StartPhase("Indexing changed files");
         foreach (string relativePath in discovery.Files)
         {
-            CodeIndexFileState fileState = cacheService.GetFileState(repoRoot, relativePath);
-            CodeIndexCacheEntry? entry = cacheService.GetReusableEntry(loadResult.Cache, relativePath, fileState.Sha256, fileState.SizeBytes, fileState.LastWriteTimeUtc);
-            if (entry is null)
+            CodeIndexFileMetadata metadata = cacheService.GetFileMetadata(repoRoot, relativePath);
+            CodeIndexCacheEntry? cachedEntry = cacheService.FindEntry(loadResult.Cache, relativePath);
+            CodeIndexCacheEntry? entry;
+            if (useCache_ && cacheService.IsMetadataMatch(cachedEntry, metadata.SizeBytes, metadata.LastWriteTimeUtc))
             {
-                entry = this.IndexFile(repoRoot, fileState, includePrivateMembers_);
-                filesIndexed++;
+                entry = cachedEntry!;
+                filesReused++;
+                fastPathReusedFiles++;
             }
             else
             {
-                filesReused++;
+                CodeIndexFileState fileState = cacheService.GetFileState(repoRoot, metadata);
+                if (useCache_ && cachedEntry is not null)
+                {
+                    hashValidatedFiles++;
+                }
+
+                if (useCache_ && cacheService.IsHashMatch(cachedEntry, fileState.Sha256))
+                {
+                    entry = cachedEntry! with
+                    {
+                        SizeBytes = fileState.SizeBytes,
+                        LastWriteTimeUtc = fileState.LastWriteTimeUtc
+                    };
+                    filesReused++;
+                }
+                else
+                {
+                    entry = this.IndexFile(repoRoot, fileState, includePrivateMembers_);
+                    filesIndexed++;
+                }
             }
 
             cacheEntries.Add(entry);
@@ -101,9 +124,13 @@ public sealed class RoslynCodeIndexService
             discovery.Files.Count,
             filesIndexed,
             filesReused,
+            fastPathReusedFiles,
+            hashValidatedFiles,
+            filesIndexed,
             filesRemovedFromCache,
             useCache_,
             cacheService.GetCachePath(repoRoot),
+            loadResult.InvalidationReason,
             loadResult.Warnings,
             symbolInventory,
             endpointInventory);
