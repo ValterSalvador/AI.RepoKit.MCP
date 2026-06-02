@@ -70,7 +70,8 @@ public sealed record BootstrapOptions
         string orgSubcommand_ = "",
         int maxDepth_ = 3,
         bool validationOnly_ = false,
-        bool strictStdio_ = false)
+        bool strictStdio_ = false,
+        bool stopStaleMcpHosts_ = false)
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -140,6 +141,7 @@ public sealed record BootstrapOptions
         this.MaxDepth = maxDepth_;
         this.ValidationOnly = validationOnly_;
         this.StrictStdio = strictStdio_;
+        this.StopStaleMcpHosts = stopStaleMcpHosts_;
     }
 
     public string Command { get; }
@@ -278,6 +280,8 @@ public sealed record BootstrapOptions
 
     public bool StrictStdio { get; }
 
+    public bool StopStaleMcpHosts { get; }
+
     public BootstrapOptions With(
         string? command_ = null,
         bool? includeMcp_ = null,
@@ -361,6 +365,7 @@ public sealed record BootstrapOptions
             this.OrgSubcommand,
             this.MaxDepth,
             validationOnly_ ?? this.ValidationOnly,
-            this.StrictStdio);
+            this.StrictStdio,
+            this.StopStaleMcpHosts);
     }
 }

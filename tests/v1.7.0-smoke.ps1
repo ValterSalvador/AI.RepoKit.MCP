@@ -10,6 +10,71 @@ if (-not (Test-Path -LiteralPath $dll)) {
     dotnet build $project -c Release | Out-Host
 }
 
+function Test-PathBoundaryTokenMatch {
+    param(
+        [string]$CommandLine,
+        [string]$Path
+    )
+
+    $normalizedCommandLine = $CommandLine.Replace('\', '/').ToLowerInvariant()
+    $normalizedPath = ([System.IO.Path]::GetFullPath($Path)).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Replace('\', '/').ToLowerInvariant()
+    $startIndex = 0
+    while ($startIndex -lt $normalizedCommandLine.Length) {
+        $matchIndex = $normalizedCommandLine.IndexOf($normalizedPath, $startIndex, [System.StringComparison]::OrdinalIgnoreCase)
+        if ($matchIndex -lt 0) {
+            return $false
+        }
+
+        $afterIndex = $matchIndex + $normalizedPath.Length
+        $hasStartBoundary = $matchIndex -eq 0 -or [char]::IsWhiteSpace($normalizedCommandLine[$matchIndex - 1]) -or $normalizedCommandLine[$matchIndex - 1] -eq '"' -or $normalizedCommandLine[$matchIndex - 1] -eq "'" -or $normalizedCommandLine[$matchIndex - 1] -eq '='
+        $hasEndBoundary = $afterIndex -ge $normalizedCommandLine.Length -or $normalizedCommandLine[$afterIndex] -eq '/' -or [char]::IsWhiteSpace($normalizedCommandLine[$afterIndex]) -or $normalizedCommandLine[$afterIndex] -eq '"' -or $normalizedCommandLine[$afterIndex] -eq "'" -or $normalizedCommandLine[$afterIndex] -eq ';'
+        if ($hasStartBoundary -and $hasEndBoundary) {
+            return $true
+        }
+
+        $startIndex = $matchIndex + 1
+    }
+
+    return $false
+}
+
+function Assert-PathBoundaryMatch {
+    param(
+        [string]$CommandLine,
+        [string]$Path,
+        [bool]$Expected,
+        [string]$Message
+    )
+
+    $actual = Test-PathBoundaryTokenMatch -CommandLine $CommandLine -Path $Path
+    if ($actual -ne $Expected) {
+        throw $Message
+    }
+}
+
+$mcpHostProcessServicePath = Join-Path $RepoRoot 'src/AiRepoKit.Cli/Services/McpHostProcessService.cs'
+$mcpHostProcessServiceSource = Get-Content -LiteralPath $mcpHostProcessServicePath -Raw
+if ($mcpHostProcessServiceSource -notmatch 'IsCommandLinePathTokenMatch\(commandLine, normalizedRepoRoot_') {
+    throw 'McpHostProcessService does not use path-boundary matching for the repo root.'
+}
+
+if ($mcpHostProcessServiceSource -notmatch 'IsCommandLinePathTokenMatch\(commandLine, normalizedMcpRoot_') {
+    throw 'McpHostProcessService does not use path-boundary matching for Tools/AiContextMcp.'
+}
+
+if ($mcpHostProcessServiceSource -match 'commandLine\.Contains\(normalizedRepoRoot_') {
+    throw 'McpHostProcessService still uses raw substring matching for the repo root.'
+}
+
+$repoRootForward = $RepoRoot.Replace('\', '/')
+$siblingRootForward = $repoRootForward + 'Bar'
+$toolsRootForward = (Join-Path $RepoRoot 'Tools/AiContextMcp').Replace('\', '/')
+Assert-PathBoundaryMatch -CommandLine "dotnet AiRepo.ContextMcp.dll --repo `"$repoRootForward`"" -Path $RepoRoot -Expected $true -Message 'Path-boundary matcher rejected quoted repo root token.'
+Assert-PathBoundaryMatch -CommandLine "dotnet AiRepo.ContextMcp.dll --repo=$repoRootForward --stdio" -Path $RepoRoot -Expected $true -Message 'Path-boundary matcher rejected repo root after argument equals boundary.'
+Assert-PathBoundaryMatch -CommandLine "dotnet `"$toolsRootForward/bin/Release/net10.0/AiRepo.ContextMcp.dll`" --repo `"$repoRootForward`"" -Path (Join-Path $RepoRoot 'Tools/AiContextMcp') -Expected $true -Message 'Path-boundary matcher rejected Tools/AiContextMcp descendant token.'
+Assert-PathBoundaryMatch -CommandLine "dotnet AiRepo.ContextMcp.dll --repo `"$siblingRootForward`"" -Path $RepoRoot -Expected $false -Message 'Path-boundary matcher accepted sibling repo prefix with forward slashes.'
+Assert-PathBoundaryMatch -CommandLine "dotnet AiRepo.ContextMcp.dll --repo `"$($siblingRootForward.Replace('/', '\'))`"" -Path $RepoRoot -Expected $false -Message 'Path-boundary matcher accepted sibling repo prefix with backslashes.'
+
 function Invoke-AiRepo {
     param(
         [string[]]$Arguments,
@@ -151,6 +216,9 @@ $jsonEscapedRawLocalPathPattern = [regex]::Escape($RepoRoot.Replace('\', '\\'))
 $programFilesPattern = 'Program' + ' Files(?: \([^\\]+\))?'
 $windowsLocalPathPattern = '(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp|' + $programFilesPattern + ')\\[^\s"''<>|]+'
 $jsonEscapedWindowsLocalPathPattern = '(?i)\b[A-Z]:\\\\(?:Users|Repositories|Temp|Windows\\\\Temp|' + $programFilesPattern + ')\\\\[^\s"''<>|]+'
+
+$help = Invoke-AiRepo -Arguments @('mcp-diagnose', '--help')
+Assert-Contains -Output $help -Pattern '--stop-stale-mcp-hosts' -Message 'mcp-diagnose --help did not expose --stop-stale-mcp-hosts.'
 
 $quickJson = Invoke-AiRepo -Arguments @('mcp-diagnose', '--repo', $RepoRoot, '--quick', '--json', '--timings', '--no-progress') -AllowedExitCodes @(0, 2)
 $quick = $quickJson | ConvertFrom-Json

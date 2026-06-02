@@ -46,8 +46,8 @@ public sealed class McpDiagnoseCommand
             else
             {
                 progress.StartPhase("Building MCP project");
-                McpBuildResult buildResult = Measure(out long elapsedMilliseconds, () => new McpBuildService().Execute(options_));
-                McpDiagnosticItem buildCheck = CreateBuildCheck(buildResult);
+                (McpBuildResult buildResult, McpHostProcessStopResult? stopResult) = Measure(out long elapsedMilliseconds, () => BuildMcpWithOptionalStaleHostRetry(options_, repoPath));
+                McpDiagnosticItem buildCheck = CreateBuildCheck(buildResult, stopResult);
                 checks.Add(WithTiming(buildCheck, elapsedMilliseconds, "external-process"));
                 rebuilt = buildResult.State == "Built";
                 if (buildCheck.Status is "Passed" or "Warning")
@@ -458,6 +458,41 @@ public sealed class McpDiagnoseCommand
         return new McpDiagnosticItem("budget", result.Success ? "Passed" : "Failed", false, result.Success ? "MeasureMcpResponseBudget.ps1 passed." : GetProcessMessage(result), null, GetProcessDetails(result));
     }
 
+    private static (McpBuildResult BuildResult, McpHostProcessStopResult? StopResult) BuildMcpWithOptionalStaleHostRetry(BootstrapOptions options_, string repoPath_)
+    {
+        McpBuildService buildService = new();
+        McpBuildResult first = buildService.Execute(options_);
+        if (!options_.StopStaleMcpHosts
+            || first.State != "Failed"
+            || first.Process is null
+            || !McpBuildFailureDiagnostics.IsLockedDllFailure(first.Process))
+        {
+            return (first, null);
+        }
+
+        McpHostProcessStopResult stopResult = new McpHostProcessService().StopStaleHostsForRepo(repoPath_);
+        if (!stopResult.Supported)
+        {
+            return (first with
+            {
+                Message = stopResult.Message,
+                Hint = McpBuildFailureDiagnostics.LockedDllRetryHint
+            }, stopResult);
+        }
+
+        McpBuildResult retry = buildService.Execute(options_);
+        if (retry.State == "Failed" && retry.Process is not null && McpBuildFailureDiagnostics.IsLockedDllFailure(retry.Process))
+        {
+            retry = retry with
+            {
+                Message = "MCP build still failed after stopping stale MCP hosts.",
+                Hint = McpBuildFailureDiagnostics.LockedDllRetryHint
+            };
+        }
+
+        return (retry, stopResult);
+    }
+
     private static void DowngradeLockedBuildWhenSmokePassed(List<McpDiagnosticItem> checks_, bool strict_)
     {
         if (strict_)
@@ -599,7 +634,7 @@ public sealed class McpDiagnoseCommand
             .ToArray();
     }
 
-    private static McpDiagnosticItem CreateBuildCheck(McpBuildResult build_)
+    private static McpDiagnosticItem CreateBuildCheck(McpBuildResult build_, McpHostProcessStopResult? stopResult_ = null)
     {
         string message = build_.State switch
         {
@@ -611,6 +646,11 @@ public sealed class McpDiagnoseCommand
         IReadOnlyList<string> details = build_.State == "SkippedCurrent"
             ? ["Freshness decision: MCP output DLL is newer than project inputs; Release build was not run."]
             : build_.Process is null ? [] : GetProcessDetails(build_.Process);
+        if (stopResult_ is not null)
+        {
+            details = details.Concat([stopResult_.Message]).ToArray();
+        }
+
         return new McpDiagnosticItem("mcp-build", build_.State == "Failed" ? "Failed" : build_.State == "SkippedLockedSmokePassed" ? "Warning" : "Passed", build_.State == "Failed", ProcessRunner.Redact(message), build_.Hint is null ? null : ProcessRunner.Redact(build_.Hint), details.Select(ProcessRunner.Redact).ToArray());
     }
 

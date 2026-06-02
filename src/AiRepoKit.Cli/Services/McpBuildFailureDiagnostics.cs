@@ -5,7 +5,8 @@ namespace AiRepoKit.Cli.Services;
 public static class McpBuildFailureDiagnostics
 {
     public const string LockedDllMessage = "MCP build failed because the Release DLL is currently in use. Close VS Code, Codex, Copilot Agent, or any MCP client using this repository, then retry.";
-    public const string LockedDllHint = "Do not delete project files. Stop the running dotnet/MCP process or close the client that is using the MCP server.";
+    public const string LockedDllHint = "Close MCP clients or rerun with --stop-stale-mcp-hosts to stop MCP hosts for this repository.";
+    public const string LockedDllRetryHint = "Close Codex, VS Code, Visual Studio, or Copilot Agent and rerun.";
 
     public static bool IsLockedDllFailure(ProcessResult build_)
     {
