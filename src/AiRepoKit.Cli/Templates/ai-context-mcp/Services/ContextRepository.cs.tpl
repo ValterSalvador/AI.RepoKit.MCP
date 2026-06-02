@@ -13,6 +13,9 @@ public sealed record RepositoryPromptDescriptor(string Name, string Description)
 
 public sealed class ContextRepository
 {
+    public const string SafeRepoRoot = "<repo-root>";
+    public const string SafeLogFile = "<temp>/ai-repo-context-mcp.log";
+
     private static readonly RepositoryResourceDescriptor[] ResourceDescriptors =
     [
         new("repo://brief", "Repository brief", "Compact repository overview and generated inventory summary.", "application/json"),
@@ -37,7 +40,14 @@ public sealed class ContextRepository
         new("ai-repo.generate-tests", "Plan and generate tests from bounded context first."),
         new("ai-repo.before-commit", "Run a low-token pre-commit readiness check."),
         new("ai-repo.implementation-plan", "Create an implementation plan from MCP context before editing."),
-        new("ai-repo.release-check", "Check release readiness without tagging, pushing, uploading, or releasing.")
+        new("ai-repo.release-check", "Check release readiness without tagging, pushing, uploading, or releasing."),
+        new("ai-repo.workflow.feature-implementation", "MCP-first workflow for narrow feature implementation."),
+        new("ai-repo.workflow.bug-fix", "MCP-first workflow for focused bug fixes."),
+        new("ai-repo.workflow.before-commit", "MCP-first workflow for pre-commit readiness without committing."),
+        new("ai-repo.workflow.release-preparation", "MCP-first workflow for release preparation without release actions."),
+        new("ai-repo.workflow.test-generation", "MCP-first workflow for proportional test generation."),
+        new("ai-repo.workflow.architecture-review", "MCP-first workflow for compact architecture review."),
+        new("ai-repo.workflow.migration-planning", "MCP-first workflow for migration planning without database mutation.")
     ];
 
     private static readonly string[] SupportedContextKinds =
@@ -130,6 +140,19 @@ public sealed class ContextRepository
         ];
     }
 
+    public object Envelope(object data_)
+    {
+        object redactedPayload = this.RedactPayload(data_);
+        return this.Budget().Envelope(redactedPayload, true);
+    }
+
+    public object RedactPayload(object data_)
+    {
+        string json = JsonSerializer.Serialize(data_);
+        string redacted = this._redactor.Redact(json);
+        return JsonNode.Parse(redacted) ?? new JsonObject();
+    }
+
     public IReadOnlyList<string> GeneratedArtifactPaths()
     {
         return
@@ -202,7 +225,7 @@ public sealed class ContextRepository
                 new { requestedUri = uri_, resourceUris = this.KnownResources().Select(resource_ => resource_.Uri).ToArray() })
         };
 
-        return data is ToolError ? data : this.Budget().Envelope(data, true);
+        return data is ToolError ? this.RedactPayload(data) : this.Envelope(data);
     }
 
     public object GetCapabilities(string serverVersion_ = "unknown")
@@ -212,7 +235,7 @@ public sealed class ContextRepository
             ok = true,
             serverVersion = serverVersion_,
             toolVersion = serverVersion_,
-            repoRoot = this.RepoRoot,
+            repoRoot = SafeRepoRoot,
             toolsAvailable = this.ToolNames(),
             supportedContextKinds = this.SupportedKinds(),
             generatedArtifacts = this.GetGeneratedArtifactStatus(),
@@ -227,7 +250,7 @@ public sealed class ContextRepository
                 stdoutReservedForMcp = true,
                 stderrDefault = false,
                 stderrWhen = "--debug or --verbose",
-                logFileDefault = Path.Combine(Path.GetTempPath(), "ai-repo-context-mcp.log")
+                logFileDefault = SafeLogFile
             },
             resources = true,
             prompts = true,
@@ -251,7 +274,7 @@ public sealed class ContextRepository
             databaseAccess = false,
             networkAccess = false,
             secretsRedaction = true,
-            allowedRoots = new[] { this.RepoRoot },
+            allowedRoots = new[] { SafeRepoRoot },
             deniedPaths = manifest.RestrictedPaths,
             generatedArtifactPaths = this.GeneratedArtifactPaths(),
             safeSuggestedCommands = new
@@ -265,7 +288,7 @@ public sealed class ContextRepository
             stdoutReservedForMcp = true,
             logs = new
             {
-                defaultPath = Path.Combine(Path.GetTempPath(), "ai-repo-context-mcp.log"),
+                defaultPath = SafeLogFile,
                 stderrDefault = false,
                 stderrWhen = "--debug or --verbose"
             },
@@ -772,7 +795,7 @@ public sealed class ContextRepository
             string text = this._redactor.Redact(JsonSerializer.Serialize(json));
             if (text.Contains(query_, StringComparison.OrdinalIgnoreCase))
             {
-                string preview = text.Length <= budget.Options.PreviewChars ? text : text[..budget.Options.PreviewChars];
+                string preview = CreateSearchPreview(text, budget.Options.PreviewChars);
                 matches.Add(new { file = relativePath, preview });
                 if (matches.Count >= limit)
                 {
@@ -782,6 +805,30 @@ public sealed class ContextRepository
         }
 
         return matches;
+    }
+
+    private static string CreateSearchPreview(string text_, int maxChars_)
+    {
+        if (text_.Length <= maxChars_)
+        {
+            return text_;
+        }
+
+        int placeholderIndex = text_.IndexOf("<repo-root>", StringComparison.Ordinal);
+        if (placeholderIndex < 0)
+        {
+            placeholderIndex = text_.IndexOf("<temp>", StringComparison.Ordinal);
+        }
+
+        if (placeholderIndex < 0)
+        {
+            return text_[..maxChars_];
+        }
+
+        int start = Math.Max(0, placeholderIndex - (maxChars_ / 3));
+        string prefix = start > 0 ? "..." : string.Empty;
+        int length = Math.Min(maxChars_ - prefix.Length, text_.Length - start);
+        return prefix + text_.Substring(start, length);
     }
 
     private IReadOnlyList<string> GetGeneratedSearchFiles()
@@ -803,9 +850,9 @@ public sealed class ContextRepository
 
             files.AddRange(Directory.GetFiles(fullRoot, "*.json", SearchOption.TopDirectoryOnly)
                 .Select(path_ => Path.GetRelativePath(this.RepoRoot, path_).Replace('\\', '/'))
-                .Where(path_ => path_.Contains("graph", StringComparison.OrdinalIgnoreCase)
+                .Where(path_ => path_.StartsWith(".ai/generated/context-packs/", StringComparison.OrdinalIgnoreCase)
+                    || path_.Contains("graph", StringComparison.OrdinalIgnoreCase)
                     || path_.Contains("impact", StringComparison.OrdinalIgnoreCase)
-                    || path_.Contains("changed-files", StringComparison.OrdinalIgnoreCase)
                     || path_.Contains("org-scan", StringComparison.OrdinalIgnoreCase)
                     || path_.Contains("org-report", StringComparison.OrdinalIgnoreCase)
                     || path_.Contains("org-efficiency", StringComparison.OrdinalIgnoreCase)));

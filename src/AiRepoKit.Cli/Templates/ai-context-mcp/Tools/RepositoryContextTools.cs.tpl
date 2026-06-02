@@ -33,7 +33,7 @@ public sealed class RepositoryContextTools
             Inventory = inventory,
             AllowedFiles = this._repository.AllowedFiles().Take(this._repository.Budget().Options.ArrayDefaultLimit).ToArray()
         };
-        return this._repository.Budget().Envelope(data, true);
+        return this._repository.Envelope(data);
     }
 
     [McpServerTool(Name = "get_context")]
@@ -42,7 +42,7 @@ public sealed class RepositoryContextTools
     {
         ContextDetail parsed = ParseDetail(detail);
         object data = this._repository.ReadContextObject(kind, parsed, limit, task, target);
-        return data is ToolError ? data : this._repository.Budget().Envelope(data, true);
+        return data is ToolError ? this._repository.RedactPayload(data) : this._repository.Envelope(data);
     }
 
     [McpServerTool(Name = "get_health")]
@@ -55,7 +55,7 @@ public sealed class RepositoryContextTools
             : new
         {
             ok = true,
-            repoRoot = this._repository.RepoRoot,
+            repoRoot = ContextRepository.SafeRepoRoot,
             area,
             manifestSchema = manifest.SchemaVersion,
             allowedFileCount = this._repository.AllowedFiles().Count,
@@ -67,7 +67,7 @@ public sealed class RepositoryContextTools
             promptsSupported = true,
             persistence = false
         };
-        return this._repository.Budget().Envelope(data, true);
+        return this._repository.Envelope(data);
     }
 
     [McpServerTool(Name = "search_context")]
@@ -75,16 +75,15 @@ public sealed class RepositoryContextTools
     public object SearchContext(string query, int? limit = null)
     {
         IReadOnlyList<object> data = this._repository.Search(query, limit);
-        return this._repository.Budget().Envelope(data, true);
+        return this._repository.Envelope(data);
     }
 
     [McpServerTool(Name = "get_policy")]
     [Description("Read MCP safety policy. Use before suggesting commands or reading sensitive paths; no file writes or command execution.")]
     public object GetPolicy(string topic = "all")
     {
-        ContextBudget budget = this._repository.Budget();
         object data = this._repository.GetPolicyObject(topic);
-        return budget.Envelope(data, true);
+        return this._repository.Envelope(data);
     }
 
     private static string GetServerVersion()

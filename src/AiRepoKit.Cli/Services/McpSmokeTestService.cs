@@ -1,12 +1,17 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AiRepoKit.Cli.Models.McpDiagnostics;
 
 namespace AiRepoKit.Cli.Services;
 
 public sealed class McpSmokeTestService
 {
+    private static readonly System.Text.RegularExpressions.Regex RawLocalPathRegex = new(
+        @"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp)\\[^\s""'<>|]+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s""'<>]+/[^\s""'<>]+|/(?:tmp|var/tmp)/[^\s""'<>]+",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static readonly string[] ExpectedTools =
     [
         "get_repo_brief",
@@ -40,7 +45,14 @@ public sealed class McpSmokeTestService
         "ai-repo.generate-tests",
         "ai-repo.before-commit",
         "ai-repo.implementation-plan",
-        "ai-repo.release-check"
+        "ai-repo.release-check",
+        "ai-repo.workflow.feature-implementation",
+        "ai-repo.workflow.bug-fix",
+        "ai-repo.workflow.before-commit",
+        "ai-repo.workflow.release-preparation",
+        "ai-repo.workflow.test-generation",
+        "ai-repo.workflow.architecture-review",
+        "ai-repo.workflow.migration-planning"
     ];
 
     public McpSmokeTestResult Run(string repoPath_, string dllPath_, bool verbose_, bool strictStdio_ = false)
@@ -76,7 +88,7 @@ public sealed class McpSmokeTestService
                 {
                     lock (stdoutLines)
                     {
-                        stdoutLines.Add(ProcessRunner.Redact(eventArgs_.Data));
+                        stdoutLines.Add(eventArgs_.Data);
                     }
                 }
             };
@@ -86,7 +98,7 @@ public sealed class McpSmokeTestService
                 {
                     lock (stderrLines)
                     {
-                        stderrLines.Add(ProcessRunner.Redact(eventArgs_.Data));
+                        stderrLines.Add(eventArgs_.Data);
                     }
                 }
             };
@@ -152,7 +164,7 @@ public sealed class McpSmokeTestService
             }
 
             IReadOnlyList<string> resourceUris = AddResourceSmokeCalls(process, stdoutLines, smokeWarnings, 8);
-            IReadOnlyList<string> promptNames = AddPromptSmokeCalls(process, stdoutLines, smokeWarnings, 11);
+            IReadOnlyList<string> promptNames = AddPromptSmokeCalls(process, stdoutLines, smokeWarnings, 13);
 
             process.StandardInput.Close();
             process.WaitForExit(2000);
@@ -175,6 +187,11 @@ public sealed class McpSmokeTestService
             }
 
             string message = "MCP initialize, tools/list, resources/list, prompts/list, minimal core tool calls, resource reads, and prompt gets passed. Expected tools listed: " + string.Join(", ", ExpectedTools) + ".";
+            if (strictStdio_ && TryFindRawLocalPath(stdoutLines.Concat(stderrLines), out string rawLocalPathSource))
+            {
+                return new McpSmokeTestResult("Failed", message + " strict stdio failed because MCP output contained an unredacted local path near: " + rawLocalPathSource, GetSmokeDetails(stdoutLines, stderrLines, true, toolNames, resourceUris, promptNames), toolNames);
+            }
+
             if (smokeWarnings.Count > 0)
             {
                 return new McpSmokeTestResult("Warning", message + " Smoke calls returned warnings: " + string.Join("; ", smokeWarnings) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
@@ -263,6 +280,8 @@ public sealed class McpSmokeTestService
 
             IReadOnlyList<string> resourceUris = GetResourceUris(response.RootElement);
             AddResourceRead(process_, stdoutLines_, warnings_, startId_ + 1, "repo://brief");
+            AddResourceRead(process_, stdoutLines_, warnings_, startId_ + 2, "repo://health");
+            AddResourceRead(process_, stdoutLines_, warnings_, startId_ + 3, "repo://policy");
             return resourceUris;
         }
         catch (Exception exception)
@@ -319,6 +338,7 @@ public sealed class McpSmokeTestService
             IReadOnlyList<string> promptNames = GetPromptNames(response.RootElement);
             AddPromptGet(process_, stdoutLines_, warnings_, startId_ + 1, "ai-repo.help");
             AddPromptGet(process_, stdoutLines_, warnings_, startId_ + 2, "ai-repo.review-risk");
+            AddPromptGet(process_, stdoutLines_, warnings_, startId_ + 3, "ai-repo.workflow.before-commit");
             return promptNames;
         }
         catch (Exception exception)
@@ -497,10 +517,28 @@ public sealed class McpSmokeTestService
         details.Add($"stderr byte count: {GetByteCount(stderrLines_)}");
         if (verbose_)
         {
-            details.AddRange(stderrLines_.TakeLast(5).Select(line_ => "stderr: " + line_));
+            details.AddRange(stderrLines_.TakeLast(5).Select(line_ => "stderr: " + ProcessRunner.Redact(line_)));
         }
 
         return details;
+    }
+
+    private static bool TryFindRawLocalPath(IEnumerable<string> lines_, out string source_)
+    {
+        foreach (string line in lines_)
+        {
+            Match match = RawLocalPathRegex.Match(line);
+            if (match.Success)
+            {
+                int start = Math.Max(0, match.Index - 80);
+                int length = Math.Min(220, line.Length - start);
+                source_ = ProcessRunner.Redact(line.Substring(start, length));
+                return true;
+            }
+        }
+
+        source_ = string.Empty;
+        return false;
     }
 
     private static int GetByteCount(IReadOnlyList<string> lines_)

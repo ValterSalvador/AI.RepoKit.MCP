@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Reflection;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using {{McpNamespace}}.Services;
 using ModelContextProtocol.Server;
@@ -11,6 +12,7 @@ public sealed class RepositoryContextResources
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         WriteIndented = false
     };
 
@@ -87,7 +89,7 @@ public sealed class RepositoryContextResources
     private string ReadJson(string uri_)
     {
         object data = uri_ == "repo://health"
-            ? this._repository.Budget().Envelope(this._repository.GetCapabilities(GetServerVersion()), true)
+            ? this._repository.Envelope(this._repository.GetCapabilities(GetServerVersion()))
             : this._repository.ReadResourceObject(uri_);
         return JsonSerializer.Serialize(data, JsonOptions);
     }

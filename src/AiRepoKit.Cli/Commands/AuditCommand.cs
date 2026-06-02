@@ -85,10 +85,13 @@ public sealed class AuditCommand
         "nen" + "hum"
     ];
 
-    private static readonly Regex LocalPathRegex = new(@"(?i)\b[A-Z]:\\(?:Users|Repositories)\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s]+/[^\s""'<>|]+", RegexOptions.Compiled);
+    private static readonly Regex LocalPathRegex = new(@"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp)\\[^\s""'<>|]+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s]+/[^\s""'<>|]+|/(?:tmp|var/tmp)/[^\s""'<>|]+", RegexOptions.Compiled);
     private static readonly Regex SecretRegex = new(@"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|apikey|connectionstring|private[_-]?key|clientsecret)\b\s*[:=]\s*[""']?([^;,\s""'{}\]]+)", RegexOptions.Compiled);
     private static readonly Regex JsonSecretRegex = new(@"(?i)[""'](password|passwd|pwd|secret|token|api[_-]?key|apikey|connectionstring|private[_-]?key|clientsecret)[""']\s*:\s*[""']([^""'\r\n]+)[""']", RegexOptions.Compiled);
     private static readonly Regex EmailRegex = new(@"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex PromptInjectionRegex = BuildPromptInjectionRegex();
+    private static readonly Regex EscapedSeparatorLiteralRegex = new(@"(?:\[(?:\\\\|\\)/\]|\\+/)", RegexOptions.Compiled);
+    private static readonly Regex RealLocalPathPrefixRegex = new(@"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp)\\|(?<!\[)\\\\(?![/\]])(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\|/(?:Users|home)/(?!user(?:/|$))[^/\s]+/|/(?:tmp|var/tmp)/", RegexOptions.Compiled);
 
     public CommandResult Execute(BootstrapOptions options_)
     {
@@ -184,6 +187,7 @@ public sealed class AuditCommand
                 this.AddLocalPathFindings(findings, relative, lineNumber, line);
                 this.AddPilotNameFindings(findings, relative, lineNumber, line);
                 this.AddSecretFindings(findings, relative, lineNumber, line);
+                this.AddPromptInjectionFindings(findings, relative, lineNumber, line);
                 this.AddEmailFindings(findings, relative, lineNumber, line);
                 this.AddPortugueseFindings(findings, relative, lineNumber, line);
             }
@@ -288,6 +292,16 @@ public sealed class AuditCommand
 
     private void AddLocalPathFindings(List<AuditFinding> findings_, string file_, int line_, string text_)
     {
+        if (LooksLikeLocalPathDetectorSource(text_))
+        {
+            return;
+        }
+
+        if (LooksLikeEscapedSeparatorRegexLiteral(text_))
+        {
+            return;
+        }
+
         foreach (Match match in LocalPathRegex.Matches(text_))
         {
             findings_.Add(CreateFinding(file_, "LocalPath", line_, RedactPreview(text_, match.Value), "High"));
@@ -316,6 +330,22 @@ public sealed class AuditCommand
         HashSet<string> previewHashes = new(StringComparer.OrdinalIgnoreCase);
         this.AddSecretFindings(findings_, file_, line_, text_, SecretRegex, previewHashes);
         this.AddSecretFindings(findings_, file_, line_, text_, JsonSecretRegex, previewHashes);
+    }
+
+    private void AddPromptInjectionFindings(List<AuditFinding> findings_, string file_, int line_, string text_)
+    {
+        if (LooksLikePromptInjectionDetectorSource(file_, text_))
+        {
+            return;
+        }
+
+        Match match = PromptInjectionRegex.Match(text_);
+        if (!match.Success)
+        {
+            return;
+        }
+
+        findings_.Add(CreateFinding(file_, "PromptInjection", line_, RedactPreview(text_, match.Value), "High"));
     }
 
     private void AddSecretFindings(List<AuditFinding> findings_, string file_, int line_, string text_, Regex regex_, HashSet<string> previewHashes_)
@@ -417,6 +447,91 @@ public sealed class AuditCommand
             || text_.Contains("patterns", StringComparison.OrdinalIgnoreCase)
             || text_.Contains("password\\s", StringComparison.OrdinalIgnoreCase)
             || text_.Contains("connectionstring\\s", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeLocalPathDetectorSource(string text_)
+    {
+        string trimmed = text_.Trim();
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        bool containsLocalPathDetector =
+            trimmed.Contains("LocalPathRegex", StringComparison.Ordinal)
+            || trimmed.Contains("LocalPathPrefixRegex", StringComparison.Ordinal)
+            || trimmed.Contains("RawLocalPathRegex", StringComparison.Ordinal)
+            || trimmed.Contains("LocalPathPatterns", StringComparison.Ordinal)
+            || trimmed.Contains("new Regex", StringComparison.Ordinal)
+            || trimmed.Contains("-notmatch", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("-match", StringComparison.OrdinalIgnoreCase);
+
+        if (!containsLocalPathDetector)
+        {
+            return false;
+        }
+
+        return trimmed.Contains(@"[A-Z]:\\", StringComparison.Ordinal)
+            || trimmed.Contains(@"\\\\[^", StringComparison.Ordinal)
+            || trimmed.Contains(@"/(?:Users|home)", StringComparison.Ordinal)
+            || trimmed.Contains(@"/(?:tmp|var/tmp)", StringComparison.Ordinal)
+            || trimmed.Contains(@"[\\/]", StringComparison.Ordinal)
+            || trimmed.Contains(@"\\/", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeEscapedSeparatorRegexLiteral(string text_)
+    {
+        string trimmed = text_.Trim();
+        if (trimmed.Length == 0 || !EscapedSeparatorLiteralRegex.IsMatch(trimmed))
+        {
+            return false;
+        }
+
+        if (RealLocalPathPrefixRegex.IsMatch(trimmed))
+        {
+            return false;
+        }
+
+        return trimmed.StartsWith("'", StringComparison.Ordinal)
+            || trimmed.StartsWith("\"", StringComparison.Ordinal)
+            || trimmed.Contains("-notmatch", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("-match", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("Regex", StringComparison.Ordinal)
+            || trimmed.Contains("Pattern", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikePromptInjectionDetectorSource(string file_, string text_)
+    {
+        if (file_.Equals("src/AiRepoKit.Cli/Commands/AuditCommand.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return text_.Contains("PromptInjection", StringComparison.Ordinal)
+            || text_.Contains("<redacted-instruction>", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Regex BuildPromptInjectionRegex()
+    {
+        string[] phrases =
+        [
+            "ignore previous " + "instructions",
+            "disregard previous " + "instructions",
+            "system " + "instruction",
+            "instrucao do " + "sistema",
+            "instrução do " + "sistema",
+            "ignore as regras " + "anteriores",
+            "responda " + "apenas",
+            "system " + "prompt",
+            "developer " + "message",
+            "exfil" + "trate",
+            "print " + "secrets",
+            "este codigo foi " + "hackeado",
+            "este código foi " + "hackeado"
+        ];
+
+        string pattern = string.Join("|", phrases.Select(phrase_ => Regex.Escape(phrase_).Replace("\\ ", @"\s+", StringComparison.Ordinal)));
+        return new Regex(@"\b(?:" + pattern + @")\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     }
 
     private static string RedactPreview(string line_, string value_)

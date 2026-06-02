@@ -102,7 +102,7 @@ public sealed class McpDiagnoseCommand
             int exitCode = checks.Any(check_ => check_.Required && check_.Status == "Failed") ? 2 : 0;
             string status = exitCode == 2 ? "Failed" : checks.Any(check_ => check_.Status == "Warning") ? "Warning" : "Passed";
             CommandTimingReport? timingReport = options_.Timings ? progress.GetTimingReport() : null;
-            McpDiagnosticResult result = new(status, mode, repoPath, exitCode, clients.Select(GetClientName).ToArray(), checks, hints, timingReport);
+            McpDiagnosticResult result = new(status, mode, "<repo-root>", exitCode, clients.Select(GetClientName).ToArray(), checks, hints.Select(ProcessRunner.Redact).ToArray(), timingReport);
             string output = options_.AuditJson ? JsonSerializer.Serialize(result, JsonOptions) : WriteMarkdown(result, options_.Verbose, options_.Summary, options_.Timings);
             if (exitCode == 0)
             {
@@ -121,7 +121,7 @@ public sealed class McpDiagnoseCommand
             McpDiagnosticResult result = new(
                 "Failed",
                 GetMode(options_),
-                repoPath,
+                "<repo-root>",
                 1,
                 NormalizeClients(options_.Clients).Select(GetClientName).ToArray(),
                 [Failed("fatal", true, ProcessRunner.Redact(exception.Message))],
@@ -151,7 +151,7 @@ public sealed class McpDiagnoseCommand
 
     private static void AddRepoChecks(List<McpDiagnosticItem> checks_, string repoPath_)
     {
-        checks_.Add(Check("repo-root", true, Directory.Exists(repoPath_), $"Repo path: {repoPath_}."));
+        checks_.Add(Check("repo-root", true, Directory.Exists(repoPath_), "Repo path: <repo-root>."));
 
         string mcpProjectRoot = Path.Combine(repoPath_, "Tools", "AiContextMcp");
         bool mcpRootExists = Directory.Exists(mcpProjectRoot);
@@ -548,17 +548,17 @@ public sealed class McpDiagnoseCommand
 
     private static McpDiagnosticItem Passed(string name_, bool required_, string message_, string? hint_ = null, IReadOnlyList<string>? details_ = null)
     {
-        return new McpDiagnosticItem(name_, "Passed", required_, message_, hint_, details_ ?? []);
+        return new McpDiagnosticItem(name_, "Passed", required_, ProcessRunner.Redact(message_), hint_ is null ? null : ProcessRunner.Redact(hint_), details_?.Select(ProcessRunner.Redact).ToArray() ?? []);
     }
 
     private static McpDiagnosticItem Warning(string name_, bool required_, string message_, string? hint_ = null, IReadOnlyList<string>? details_ = null)
     {
-        return new McpDiagnosticItem(name_, "Warning", required_, message_, hint_, details_ ?? []);
+        return new McpDiagnosticItem(name_, "Warning", required_, ProcessRunner.Redact(message_), hint_ is null ? null : ProcessRunner.Redact(hint_), details_?.Select(ProcessRunner.Redact).ToArray() ?? []);
     }
 
     private static McpDiagnosticItem Failed(string name_, bool required_, string message_, string? hint_ = null, IReadOnlyList<string>? details_ = null)
     {
-        return new McpDiagnosticItem(name_, "Failed", required_, message_, hint_, details_ ?? []);
+        return new McpDiagnosticItem(name_, "Failed", required_, ProcessRunner.Redact(message_), hint_ is null ? null : ProcessRunner.Redact(hint_), details_?.Select(ProcessRunner.Redact).ToArray() ?? []);
     }
 
     private static McpDiagnosticItem Skipped(string name_, bool required_, string message_)
@@ -599,12 +599,12 @@ public sealed class McpDiagnoseCommand
             _ => $"Failed. {build_.Message}"
         };
         IReadOnlyList<string> details = build_.Process is null ? [] : GetProcessDetails(build_.Process);
-        return new McpDiagnosticItem("mcp-build", build_.State == "Failed" ? "Failed" : build_.State == "SkippedLockedSmokePassed" ? "Warning" : "Passed", build_.State == "Failed", message, build_.Hint, details);
+        return new McpDiagnosticItem("mcp-build", build_.State == "Failed" ? "Failed" : build_.State == "SkippedLockedSmokePassed" ? "Warning" : "Passed", build_.State == "Failed", ProcessRunner.Redact(message), build_.Hint is null ? null : ProcessRunner.Redact(build_.Hint), details.Select(ProcessRunner.Redact).ToArray());
     }
 
     private static McpDiagnosticItem CreateSmokeCheck(McpSmokeTestResult result_)
     {
-        return new McpDiagnosticItem("smoke-test", result_.Status, true, result_.Message, null, result_.Details);
+        return new McpDiagnosticItem("smoke-test", result_.Status, true, ProcessRunner.Redact(result_.Message), null, result_.Details.Select(ProcessRunner.Redact).ToArray());
     }
 
     private static string WriteMarkdown(McpDiagnosticResult result_, bool verbose_, bool summary_, bool showTimings_)

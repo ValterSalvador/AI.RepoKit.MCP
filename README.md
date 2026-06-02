@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.4.0 performance and MCP client compatibility hardening with quick/full/strict validation modes, reduced repeated setup work, cache-aware code-index reuse, summary/timing output, and stronger Visual Studio, VS Code, and Codex diagnostics.
+Status: v1.6.0 Zero-Trust Security Foundation with local path redaction, PromptInjection audit coverage, strict diagnose path-leakage checks, and Agent Workflow Packs prompts.
 
 ## Goals
 
@@ -118,7 +118,7 @@ The repository-local MCP server is read-only and stdio-only. During normal MCP o
 
 ## MCP Resources And Prompts
 
-v1.5.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and adds read-only Resources and reusable Prompts for lower-token discovery.
+v1.6.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and adds the Zero-Trust Security Foundation: local path redaction, PromptInjection audit category coverage, strict diagnose path-leakage checks, and Agent Workflow Packs prompts. v1.5.0 added read-only Resources and reusable Prompts for lower-token discovery.
 
 Resource URIs:
 
@@ -144,6 +144,13 @@ Prompt names:
 - `ai-repo.before-commit`
 - `ai-repo.implementation-plan`
 - `ai-repo.release-check`
+- `ai-repo.workflow.feature-implementation`
+- `ai-repo.workflow.bug-fix`
+- `ai-repo.workflow.before-commit`
+- `ai-repo.workflow.release-preparation`
+- `ai-repo.workflow.test-generation`
+- `ai-repo.workflow.architecture-review`
+- `ai-repo.workflow.migration-planning`
 
 Recommended low-token agent flow: call `get_repo_brief`, `get_health area=capabilities`, `get_policy`, `get_context kind=changed-files detail=brief`, then use `search_context` only for focused queries. MCP clients that support resources can read `repo://brief`, `repo://health`, and task resources before direct file inspection. Use `prompts/get ai-repo.help` for built-in help, tutorial prompts for onboarding, and `ai-repo.token-efficiency-check` before broad file reads.
 
