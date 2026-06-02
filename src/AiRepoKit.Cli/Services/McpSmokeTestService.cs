@@ -14,10 +14,8 @@ public enum McpSmokeTestDepth
 
 public sealed class McpSmokeTestService
 {
-    private static readonly string ProgramFilesDirectoryPattern = "Program" + " Files(?: \\([^\\\\]+\\))?";
-
     private static readonly System.Text.RegularExpressions.Regex RawLocalPathRegex = new(
-        @"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp|" + ProgramFilesDirectoryPattern + @")\\[^\s""'<>|]+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s""'<>]+/[^\s""'<>]+|/(?:tmp|var/tmp)/[^\s""'<>]+",
+        @"(?i)\b[A-Z]:(?:\\\\|\\u005[Cc]|\\)[^\\\s""'<>|]+(?:(?:\\\\|\\u005[Cc]|\\)[^\\\s""'<>|]+)+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s""'<>]+/[^\s""'<>]+|/(?:tmp|var/tmp)/[^\s""'<>]+",
         System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private static readonly string[] ExpectedTools =

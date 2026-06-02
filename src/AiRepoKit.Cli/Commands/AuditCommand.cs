@@ -85,13 +85,13 @@ public sealed class AuditCommand
         "nen" + "hum"
     ];
 
-    private static readonly Regex LocalPathRegex = new(@"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp)\\[^\s""'<>|]+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s]+/[^\s""'<>|]+|/(?:tmp|var/tmp)/[^\s""'<>|]+", RegexOptions.Compiled);
+    private static readonly Regex LocalPathRegex = new(@"(?i)\b[A-Z]:(?:\\\\|\\u005[Cc]|\\)[^\\\s""'<>|]+(?:(?:\\\\|\\u005[Cc]|\\)[^\\\s""'<>|]+)+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s]+/[^\s""'<>|]+|/(?:tmp|var/tmp)/[^\s""'<>|]+", RegexOptions.Compiled);
     private static readonly Regex SecretRegex = new(@"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|apikey|connectionstring|private[_-]?key|clientsecret)\b\s*[:=]\s*[""']?([^;,\s""'{}\]]+)", RegexOptions.Compiled);
     private static readonly Regex JsonSecretRegex = new(@"(?i)[""'](password|passwd|pwd|secret|token|api[_-]?key|apikey|connectionstring|private[_-]?key|clientsecret)[""']\s*:\s*[""']([^""'\r\n]+)[""']", RegexOptions.Compiled);
     private static readonly Regex EmailRegex = new(@"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex PromptInjectionRegex = BuildPromptInjectionRegex();
     private static readonly Regex EscapedSeparatorLiteralRegex = new(@"(?:\[(?:\\\\|\\)/\]|\\+/)", RegexOptions.Compiled);
-    private static readonly Regex RealLocalPathPrefixRegex = new(@"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp)\\|(?<!\[)\\\\(?![/\]])(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\|/(?:Users|home)/(?!user(?:/|$))[^/\s]+/|/(?:tmp|var/tmp)/", RegexOptions.Compiled);
+    private static readonly Regex RealLocalPathPrefixRegex = new(@"(?i)\b[A-Z]:(?:\\\\|\\u005[Cc]|\\)|(?<!\[)\\\\(?![/\]])(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\|/(?:Users|home)/(?!user(?:/|$))[^/\s]+/|/(?:tmp|var/tmp)/", RegexOptions.Compiled);
 
     public CommandResult Execute(BootstrapOptions options_)
     {

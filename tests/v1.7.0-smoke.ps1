@@ -213,9 +213,34 @@ if ([int]$audit.reviewRequiredCount -ne 0) {
 
 $rawLocalPathPattern = [regex]::Escape($RepoRoot)
 $jsonEscapedRawLocalPathPattern = [regex]::Escape($RepoRoot.Replace('\', '\\'))
-$programFilesPattern = 'Program' + ' Files(?: \([^\\]+\))?'
-$windowsLocalPathPattern = '(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp|' + $programFilesPattern + ')\\[^\s"''<>|]+'
-$jsonEscapedWindowsLocalPathPattern = '(?i)\b[A-Z]:\\\\(?:Users|Repositories|Temp|Windows\\\\Temp|' + $programFilesPattern + ')\\\\[^\s"''<>|]+'
+$windowsLocalPathPattern = '(?i)\b[A-Z]:(?:\\\\|\\u005[Cc]|\\)[^\\\s"''<>|]+(?:(?:\\\\|\\u005[Cc]|\\)[^\\\s"''<>|]+)+'
+
+function Get-RawLocalPathLeakCategory {
+    param([string]$Output)
+
+    $checks = @(
+        [pscustomobject]@{ Name = 'repo-root'; Pattern = $rawLocalPathPattern },
+        [pscustomobject]@{ Name = 'json-escaped-repo-root'; Pattern = $jsonEscapedRawLocalPathPattern },
+        [pscustomobject]@{ Name = 'generic-windows-drive-path'; Pattern = $windowsLocalPathPattern }
+    )
+
+    foreach ($check in $checks) {
+        if ($Output -match $check.Pattern) {
+            return $check.Name
+        }
+    }
+
+    return $null
+}
+
+$ciLikeMcpDllPath = 'D:' + '\a\AI.RepoKit.MCP\AI.RepoKit.MCP\Tools\AiContextMcp\bin\Release\net10.0\AiRepo.ContextMcp.dll'
+$ciLikeMcpDllJsonEscapedPath = $ciLikeMcpDllPath.Replace('\', '\\')
+$ciLikeMcpDllUnicodeEscapedPath = $ciLikeMcpDllPath.Replace('\', '\u005C')
+foreach ($sample in @($ciLikeMcpDllPath, $ciLikeMcpDllJsonEscapedPath, $ciLikeMcpDllUnicodeEscapedPath)) {
+    if ($sample -notmatch $windowsLocalPathPattern) {
+        throw 'v1.7.0 smoke raw local path detector missed generic-windows-drive-path sample.'
+    }
+}
 
 $help = Invoke-AiRepo -Arguments @('mcp-diagnose', '--help')
 Assert-Contains -Output $help -Pattern '--stop-stale-mcp-hosts' -Message 'mcp-diagnose --help did not expose --stop-stale-mcp-hosts.'
@@ -258,7 +283,7 @@ if ($full.Mode -ne 'full') {
 }
 
 $fullBuild = $full.Checks | Where-Object { $_.Name -eq 'mcp-build' } | Select-Object -First 1
-if ($null -eq $fullBuild -or ($fullBuild.Message -notmatch 'Built|SkippedCurrent')) {
+if ($null -eq $fullBuild -or ($fullBuild.Message -notmatch 'Built|SkippedCurrent|SkippedLockedSmokePassed')) {
     throw 'mcp-diagnose --full did not report built or current build freshness.'
 }
 
@@ -272,8 +297,9 @@ if ($null -eq $fullSmoke -or $fullSmoke.Message -notmatch 'Expanded MCP smoke te
 }
 
 $strictJson = Invoke-AiRepo -Arguments @('mcp-diagnose', '--repo', $RepoRoot, '--strict', '--strict-stdio', '--json', '--verbose', '--timings', '--no-progress') -AllowedExitCodes @(0, 2)
-if ($strictJson -match $rawLocalPathPattern -or $strictJson -match $jsonEscapedRawLocalPathPattern -or $strictJson -match $windowsLocalPathPattern -or $strictJson -match $jsonEscapedWindowsLocalPathPattern) {
-    throw 'mcp-diagnose strict output contained a raw local path.'
+$rawLocalPathLeakCategory = Get-RawLocalPathLeakCategory -Output $strictJson
+if ($null -ne $rawLocalPathLeakCategory) {
+    throw "mcp-diagnose strict output contained a raw local path. Category: $rawLocalPathLeakCategory."
 }
 
 $strict = $strictJson | ConvertFrom-Json
