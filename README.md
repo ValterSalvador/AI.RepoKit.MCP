@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.6.0 Zero-Trust Security Foundation with local path redaction, PromptInjection audit coverage, strict diagnose path-leakage checks, and Agent Workflow Packs prompts.
+Status: v1.7.0 Release-ready with incremental code-index cache reuse, context-pack inventory freshness checks, faster `mcp-diagnose --quick`, per-check timing and cost output, and opt-in stale MCP host cleanup.
 
 ## Goals
 
@@ -106,7 +106,7 @@ airepo mcp-diagnose --strict-stdio --timings
 - `self-check --quick` skips audit, MCP build, budget, and full code-index work unless you explicitly request those checks separately.
 - `self-check --full` keeps the broader validation path.
 - `self-check --strict` is release-oriented and treats locked MCP DLL build failures conservatively.
-- `mcp-diagnose --quick` focuses on config validation plus the JSON-RPC smoke path.
+- `mcp-diagnose --quick` focuses on config validation plus the JSON-RPC smoke path, avoids repeated expensive checks, and can report per-check timing and cost output.
 - `mcp-diagnose --strict` validates more aggressively and avoids non-strict build shortcuts.
 - `mcp-diagnose --strict-stdio` can be combined with `--quick` or `--strict`; it fails when the MCP server writes unexpected stderr during stdio JSON-RPC and reports stderr line and byte counts.
 
@@ -118,7 +118,7 @@ The repository-local MCP server is read-only and stdio-only. During normal MCP o
 
 ## MCP Resources And Prompts
 
-v1.6.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and adds the Zero-Trust Security Foundation: local path redaction, PromptInjection audit category coverage, strict diagnose path-leakage checks, and Agent Workflow Packs prompts. v1.5.0 added read-only Resources and reusable Prompts for lower-token discovery.
+v1.7.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and improves release readiness with incremental code-index cache reuse, context-pack inventory freshness checks, faster `mcp-diagnose --quick`, per-check timing and cost output, and `--stop-stale-mcp-hosts` opt-in cleanup. v1.6.0 added the Zero-Trust Security Foundation, and v1.5.0 added read-only Resources and reusable Prompts for lower-token discovery.
 
 Resource URIs:
 
@@ -236,7 +236,8 @@ Visual Studio MCP requires Visual Studio 2022 17.14 or later. When you generate 
 - Use `airepo mcp-diagnose --quick` after bootstrap or when a client stops seeing MCP tools.
 - Use `airepo setup --apply --summary --timings` to confirm which phases dominate setup time.
 - Reserve `--strict` for release validation, tag readiness, or when diagnosing build-lock issues.
-- Reused code-index cache entries and skipped-current MCP builds are reported explicitly so you can tell when expensive work was avoided.
+- Reused code-index cache entries, skipped-current MCP builds, context-pack inventory freshness, and per-check timing/cost are reported explicitly so you can tell when expensive work was avoided.
+- Use `--stop-stale-mcp-hosts` only when you explicitly want `mcp-diagnose` to clean up stale MCP host processes.
 
 ## Release And Versioning
 
@@ -252,7 +253,7 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.4.3
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.7.0
 artifacts/publish/win-x64/airepo.exe --help
 artifacts/publish/win-x64/airepo.exe self-check --repo . --strict --timings
 artifacts/publish/win-x64/airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs --strict --timings

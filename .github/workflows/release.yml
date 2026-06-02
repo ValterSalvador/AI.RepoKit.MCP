@@ -76,6 +76,9 @@ jobs:
       - name: Run v1.6.0 smoke tests
         run: powershell -ExecutionPolicy Bypass -File tests/v1.6.0-smoke.ps1
 
+      - name: Run v1.7.0 smoke tests
+        run: powershell -ExecutionPolicy Bypass -File tests/v1.7.0-smoke.ps1
+
       - name: Build release assets
         run: powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version $env:RELEASE_VERSION
 
