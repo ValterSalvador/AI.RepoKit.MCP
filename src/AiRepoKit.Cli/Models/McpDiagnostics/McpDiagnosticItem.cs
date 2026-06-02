@@ -6,4 +6,6 @@ public sealed record McpDiagnosticItem(
     bool Required,
     string Message,
     string? Hint = null,
-    IReadOnlyList<string>? Details = null);
+    IReadOnlyList<string>? Details = null,
+    long? ElapsedMilliseconds = null,
+    string? Cost = null);

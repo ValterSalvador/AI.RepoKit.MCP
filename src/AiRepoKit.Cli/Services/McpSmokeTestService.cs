@@ -6,10 +6,18 @@ using AiRepoKit.Cli.Models.McpDiagnostics;
 
 namespace AiRepoKit.Cli.Services;
 
+public enum McpSmokeTestDepth
+{
+    Minimal,
+    Expanded
+}
+
 public sealed class McpSmokeTestService
 {
+    private static readonly string ProgramFilesDirectoryPattern = "Program" + " Files(?: \\([^\\\\]+\\))?";
+
     private static readonly System.Text.RegularExpressions.Regex RawLocalPathRegex = new(
-        @"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp)\\[^\s""'<>|]+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s""'<>]+/[^\s""'<>]+|/(?:tmp|var/tmp)/[^\s""'<>]+",
+        @"(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp|" + ProgramFilesDirectoryPattern + @")\\[^\s""'<>|]+|\\\\(?!u00[0-9a-f]{2})[^\\\s""'<>|]+\\[^\\\s""'<>|]+\\[^\s""'<>|]+|/(?:Users|home)/(?!user(?:/|$))[^/\s""'<>]+/[^\s""'<>]+|/(?:tmp|var/tmp)/[^\s""'<>]+",
         System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private static readonly string[] ExpectedTools =
@@ -55,7 +63,7 @@ public sealed class McpSmokeTestService
         "ai-repo.workflow.migration-planning"
     ];
 
-    public McpSmokeTestResult Run(string repoPath_, string dllPath_, bool verbose_, bool strictStdio_ = false)
+    public McpSmokeTestResult Run(string repoPath_, string dllPath_, bool verbose_, bool strictStdio_ = false, McpSmokeTestDepth depth_ = McpSmokeTestDepth.Expanded)
     {
         if (!File.Exists(dllPath_))
         {
@@ -154,60 +162,69 @@ public sealed class McpSmokeTestService
             IReadOnlyList<string> toolNames = GetToolNames(tools.RootElement);
             string[] missing = ExpectedTools.Where(tool_ => !toolNames.Contains(tool_, StringComparer.Ordinal)).ToArray();
             List<string> smokeWarnings = [];
-            if (missing.Length == 0)
+            IReadOnlyList<string> resourceUris = [];
+            IReadOnlyList<string> promptNames = [];
+            if (missing.Length == 0 && depth_ == McpSmokeTestDepth.Expanded)
             {
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 3, "get_repo_brief", new { detail = "brief" });
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 4, "get_health", new { area = "capabilities" });
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 5, "get_policy", new { topic = "all" });
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 6, "get_context", new { kind = "changed-files", detail = "brief", limit = 5 });
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 7, "search_context", new { query = "MCP", limit = 3 });
-            }
 
-            IReadOnlyList<string> resourceUris = AddResourceSmokeCalls(process, stdoutLines, smokeWarnings, 8);
-            IReadOnlyList<string> promptNames = AddPromptSmokeCalls(process, stdoutLines, smokeWarnings, 13);
+                resourceUris = AddResourceSmokeCalls(process, stdoutLines, smokeWarnings, 8);
+                promptNames = AddPromptSmokeCalls(process, stdoutLines, smokeWarnings, 13);
+            }
 
             process.StandardInput.Close();
             process.WaitForExit(2000);
 
             if (missing.Length > 0)
             {
-                return new McpSmokeTestResult("Failed", "MCP smoke test did not list expected tools: " + string.Join(", ", missing) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
+                return new McpSmokeTestResult("Failed", "MCP smoke test did not list expected tools: " + string.Join(", ", missing) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, depth_ == McpSmokeTestDepth.Expanded ? resourceUris : null, depth_ == McpSmokeTestDepth.Expanded ? promptNames : null), toolNames);
             }
 
-            string[] missingResources = ExpectedResourceUris.Where(uri_ => !resourceUris.Contains(uri_, StringComparer.Ordinal)).ToArray();
-            if (missingResources.Length > 0)
+            if (depth_ == McpSmokeTestDepth.Expanded)
             {
-                return new McpSmokeTestResult("Failed", "MCP smoke test did not list expected resources: " + string.Join(", ", missingResources) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
+                string[] missingResources = ExpectedResourceUris.Where(uri_ => !resourceUris.Contains(uri_, StringComparer.Ordinal)).ToArray();
+                if (missingResources.Length > 0)
+                {
+                    return new McpSmokeTestResult("Failed", "MCP smoke test did not list expected resources: " + string.Join(", ", missingResources) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
+                }
+
+                string[] missingPrompts = ExpectedPrompts.Where(prompt_ => !promptNames.Contains(prompt_, StringComparer.Ordinal)).ToArray();
+                if (missingPrompts.Length > 0)
+                {
+                    return new McpSmokeTestResult("Failed", "MCP smoke test did not list expected prompts: " + string.Join(", ", missingPrompts) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
+                }
             }
 
-            string[] missingPrompts = ExpectedPrompts.Where(prompt_ => !promptNames.Contains(prompt_, StringComparer.Ordinal)).ToArray();
-            if (missingPrompts.Length > 0)
-            {
-                return new McpSmokeTestResult("Failed", "MCP smoke test did not list expected prompts: " + string.Join(", ", missingPrompts) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
-            }
-
-            string message = "MCP initialize, tools/list, resources/list, prompts/list, minimal core tool calls, resource reads, and prompt gets passed. Expected tools listed: " + string.Join(", ", ExpectedTools) + ".";
+            string message = depth_ == McpSmokeTestDepth.Expanded
+                ? "Expanded MCP smoke test passed: initialize, tools/list, resources/list, prompts/list, minimal core tool calls, resource reads, and prompt gets. Expected tools listed: " + string.Join(", ", ExpectedTools) + "."
+                : "Minimal MCP smoke test passed: initialize and tools/list. Expected tools listed: " + string.Join(", ", ExpectedTools) + ".";
+            IReadOnlyList<string>? detailResources = depth_ == McpSmokeTestDepth.Expanded ? resourceUris : null;
+            IReadOnlyList<string>? detailPrompts = depth_ == McpSmokeTestDepth.Expanded ? promptNames : null;
             if (strictStdio_ && TryFindRawLocalPath(stdoutLines.Concat(stderrLines), out string rawLocalPathSource))
             {
-                return new McpSmokeTestResult("Failed", message + " strict stdio failed because MCP output contained an unredacted local path near: " + rawLocalPathSource, GetSmokeDetails(stdoutLines, stderrLines, true, toolNames, resourceUris, promptNames), toolNames);
+                return new McpSmokeTestResult("Failed", message + " strict stdio failed because MCP output contained an unredacted local path near: " + rawLocalPathSource, GetSmokeDetails(stdoutLines, stderrLines, true, toolNames, detailResources, detailPrompts), toolNames);
             }
 
             if (smokeWarnings.Count > 0)
             {
-                return new McpSmokeTestResult("Warning", message + " Smoke calls returned warnings: " + string.Join("; ", smokeWarnings) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
+                return new McpSmokeTestResult("Warning", message + " Smoke calls returned warnings: " + string.Join("; ", smokeWarnings) + ".", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, detailResources, detailPrompts), toolNames);
             }
 
             if (strictStdio_ && stderrLines.Count > 0)
             {
-                return new McpSmokeTestResult("Failed", message + $" strict stdio failed because stderr contained {stderrLines.Count} line(s) and {GetByteCount(stderrLines)} byte(s).", GetSmokeDetails(stdoutLines, stderrLines, true, toolNames, resourceUris, promptNames), toolNames);
+                return new McpSmokeTestResult("Failed", message + $" strict stdio failed because stderr contained {stderrLines.Count} line(s) and {GetByteCount(stderrLines)} byte(s).", GetSmokeDetails(stdoutLines, stderrLines, true, toolNames, detailResources, detailPrompts), toolNames);
             }
 
             if (stderrLines.Count > 0)
             {
-                return new McpSmokeTestResult("Warning", message + $" stderr contained {stderrLines.Count} log line(s), but stdout was valid JSON-RPC.", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
+                return new McpSmokeTestResult("Warning", message + $" stderr contained {stderrLines.Count} log line(s), but stdout was valid JSON-RPC.", GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, detailResources, detailPrompts), toolNames);
             }
 
-            return new McpSmokeTestResult("Passed", message, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, resourceUris, promptNames), toolNames);
+            return new McpSmokeTestResult("Passed", message, GetSmokeDetails(stdoutLines, stderrLines, verbose_, toolNames, detailResources, detailPrompts), toolNames);
         }
         catch (Exception exception)
         {

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using AiRepoKit.Cli.Models;
@@ -26,25 +27,28 @@ public sealed class McpDiagnoseCommand
             bool rebuilt = false;
 
             progress.StartPhase("Checking repository");
-            AddRepoChecks(checks, repoPath);
+            AddTimedCheckGroup(checks, "cheap", checks_ => AddRepoChecks(checks_, repoPath));
             progress.CompletePhase("Repository check completed");
             progress.StartPhase("Checking client configs");
-            AddClientChecks(checks, repoPath, clients);
+            AddTimedCheckGroup(checks, "cheap", checks_ => AddClientChecks(checks_, repoPath, clients));
             progress.CompletePhase("Client config checks completed");
             progress.StartPhase("Checking MCP project");
-            AddDotnetCheck(checks);
+            AddTimedCheckGroup(checks, "external-process", AddDotnetCheck);
             progress.CompletePhase("MCP project checks completed");
 
-            if (options_.SkipBuildMcp)
+            if (options_.SkipBuildMcp || string.Equals(mode, "quick", StringComparison.OrdinalIgnoreCase))
             {
-                checks.Add(Skipped("mcp-build", true, "Skipped by --skip-build."));
+                string reason = options_.SkipBuildMcp
+                    ? "Skipped by --skip-build."
+                    : "Skipped in quick mode to avoid Release MCP build.";
+                checks.Add(Skipped("mcp-build", !string.Equals(mode, "quick", StringComparison.OrdinalIgnoreCase), reason));
             }
             else
             {
                 progress.StartPhase("Building MCP project");
-                McpBuildResult buildResult = new McpBuildService().Execute(options_);
+                McpBuildResult buildResult = Measure(out long elapsedMilliseconds, () => new McpBuildService().Execute(options_));
                 McpDiagnosticItem buildCheck = CreateBuildCheck(buildResult);
-                checks.Add(buildCheck);
+                checks.Add(WithTiming(buildCheck, elapsedMilliseconds, "external-process"));
                 rebuilt = buildResult.State == "Built";
                 if (buildCheck.Status is "Passed" or "Warning")
                 {
@@ -57,6 +61,7 @@ public sealed class McpDiagnoseCommand
             }
 
             string dllPath = McpBuildService.GetDllPath(repoPath, options_);
+            bool expandedSmoke = !string.Equals(mode, "quick", StringComparison.OrdinalIgnoreCase);
             if (options_.SkipSmoke)
             {
                 checks.Add(Skipped("smoke-test", true, "Skipped by --skip-smoke."));
@@ -64,7 +69,9 @@ public sealed class McpDiagnoseCommand
             else
             {
                 progress.StartPhase("Running MCP smoke test");
-                checks.Add(CreateSmokeCheck(new McpSmokeTestService().Run(repoPath, dllPath, options_.Verbose, options_.StrictStdio)));
+                McpSmokeTestDepth smokeDepth = expandedSmoke ? McpSmokeTestDepth.Expanded : McpSmokeTestDepth.Minimal;
+                McpSmokeTestResult smokeResult = Measure(out long elapsedMilliseconds, () => new McpSmokeTestService().Run(repoPath, dllPath, options_.Verbose, options_.StrictStdio, smokeDepth));
+                checks.Add(WithTiming(CreateSmokeCheck(smokeResult), elapsedMilliseconds, expandedSmoke ? "expanded-smoke" : "external-process"));
                 McpDiagnosticItem smoke = checks[^1];
                 if (smoke.Status is "Passed" or "Warning")
                 {
@@ -86,7 +93,8 @@ public sealed class McpDiagnoseCommand
             else
             {
                 progress.StartPhase("Running budget script");
-                checks.Add(RunBudget(repoPath));
+                McpDiagnosticItem budgetCheck = Measure(out long elapsedMilliseconds, () => RunBudget(repoPath));
+                checks.Add(WithTiming(budgetCheck, elapsedMilliseconds, "budget"));
                 McpDiagnosticItem budget = checks[^1];
                 if (budget.Status is "Passed" or "Warning")
                 {
@@ -473,7 +481,9 @@ public sealed class McpDiagnoseCommand
             false,
             "SkippedLockedSmokePassed. Locked MCP DLL reuse was accepted because JSON-RPC smoke passed.",
             build.Hint,
-            build.Details);
+            build.Details,
+            build.ElapsedMilliseconds,
+            build.Cost);
     }
 
     private static void AddClientHints(List<string> hints_, List<McpDiagnosticItem> checks_, IReadOnlyList<ClientKind> clients_, string repoPath_, bool rebuilt_)
@@ -563,7 +573,7 @@ public sealed class McpDiagnoseCommand
 
     private static McpDiagnosticItem Skipped(string name_, bool required_, string message_)
     {
-        return new McpDiagnosticItem(name_, "Skipped", required_, message_, null, []);
+        return new McpDiagnosticItem(name_, "Skipped", required_, ProcessRunner.Redact(message_), null, [], 0, "skipped");
     }
 
     private static string GetProcessMessage(ProcessResult process_)
@@ -598,7 +608,9 @@ public sealed class McpDiagnoseCommand
             "SkippedLockedSmokePassed" => "SkippedLockedSmokePassed. Locked MCP DLL reuse was accepted because JSON-RPC smoke passed.",
             _ => $"Failed. {build_.Message}"
         };
-        IReadOnlyList<string> details = build_.Process is null ? [] : GetProcessDetails(build_.Process);
+        IReadOnlyList<string> details = build_.State == "SkippedCurrent"
+            ? ["Freshness decision: MCP output DLL is newer than project inputs; Release build was not run."]
+            : build_.Process is null ? [] : GetProcessDetails(build_.Process);
         return new McpDiagnosticItem("mcp-build", build_.State == "Failed" ? "Failed" : build_.State == "SkippedLockedSmokePassed" ? "Warning" : "Passed", build_.State == "Failed", ProcessRunner.Redact(message), build_.Hint is null ? null : ProcessRunner.Redact(build_.Hint), details.Select(ProcessRunner.Redact).ToArray());
     }
 
@@ -641,6 +653,7 @@ public sealed class McpDiagnoseCommand
         if (showTimings_ && result_.Timings is not null)
         {
             AppendTimings(builder, result_.Timings);
+            AppendCheckTimings(builder, result_.Checks);
         }
 
         return builder.ToString().TrimEnd();
@@ -700,6 +713,51 @@ public sealed class McpDiagnoseCommand
         {
             builder_.AppendLine($"- {phase.Name}: `{phase.ElapsedMilliseconds} ms` ({phase.Status})");
         }
+    }
+
+    private static void AppendCheckTimings(StringBuilder builder_, IReadOnlyList<McpDiagnosticItem> checks_)
+    {
+        builder_.AppendLine();
+        builder_.AppendLine("## Check Timings");
+        builder_.AppendLine();
+        builder_.AppendLine("| Check | Status | Cost | Elapsed |");
+        builder_.AppendLine("| --- | --- | --- | --- |");
+        foreach (McpDiagnosticItem check in checks_)
+        {
+            string elapsed = check.ElapsedMilliseconds.HasValue ? $"{check.ElapsedMilliseconds.Value} ms" : "n/a";
+            builder_.AppendLine($"| `{check.Name}` | {check.Status} | `{check.Cost ?? "unknown"}` | `{elapsed}` |");
+        }
+    }
+
+    private static void AddTimedCheckGroup(List<McpDiagnosticItem> checks_, string cost_, Action<List<McpDiagnosticItem>> addChecks_)
+    {
+        int start = checks_.Count;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        addChecks_(checks_);
+        stopwatch.Stop();
+
+        for (int index = start; index < checks_.Count; index++)
+        {
+            checks_[index] = WithTiming(checks_[index], stopwatch.ElapsedMilliseconds, cost_);
+        }
+    }
+
+    private static T Measure<T>(out long elapsedMilliseconds_, Func<T> action_)
+    {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        T result = action_();
+        stopwatch.Stop();
+        elapsedMilliseconds_ = stopwatch.ElapsedMilliseconds;
+        return result;
+    }
+
+    private static McpDiagnosticItem WithTiming(McpDiagnosticItem item_, long elapsedMilliseconds_, string cost_)
+    {
+        return item_ with
+        {
+            ElapsedMilliseconds = elapsedMilliseconds_,
+            Cost = cost_
+        };
     }
 
     private static string EscapeTable(string value_)

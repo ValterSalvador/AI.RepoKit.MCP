@@ -146,4 +146,77 @@ if ([int]$audit.reviewRequiredCount -ne 0) {
     throw "Audit reported $($audit.reviewRequiredCount) review-required finding(s); expected 0."
 }
 
-Write-Host 'v1.7.0 incremental code-index and context-pack freshness smoke tests passed.'
+$rawLocalPathPattern = [regex]::Escape($RepoRoot)
+$jsonEscapedRawLocalPathPattern = [regex]::Escape($RepoRoot.Replace('\', '\\'))
+$programFilesPattern = 'Program' + ' Files(?: \([^\\]+\))?'
+$windowsLocalPathPattern = '(?i)\b[A-Z]:\\(?:Users|Repositories|Temp|Windows\\Temp|' + $programFilesPattern + ')\\[^\s"''<>|]+'
+$jsonEscapedWindowsLocalPathPattern = '(?i)\b[A-Z]:\\\\(?:Users|Repositories|Temp|Windows\\\\Temp|' + $programFilesPattern + ')\\\\[^\s"''<>|]+'
+
+$quickJson = Invoke-AiRepo -Arguments @('mcp-diagnose', '--repo', $RepoRoot, '--quick', '--json', '--timings', '--no-progress') -AllowedExitCodes @(0, 2)
+$quick = $quickJson | ConvertFrom-Json
+if ($quick.Mode -ne 'quick') {
+    throw 'mcp-diagnose --quick did not report quick mode.'
+}
+
+$quickBuild = $quick.Checks | Where-Object { $_.Name -eq 'mcp-build' } | Select-Object -First 1
+if ($null -eq $quickBuild -or $quickBuild.Status -ne 'Skipped' -or $quickBuild.Message -notmatch 'quick mode') {
+    throw 'mcp-diagnose --quick did not skip mcp-build with a quick-mode message.'
+}
+
+$quickBudget = $quick.Checks | Where-Object { $_.Name -eq 'budget' } | Select-Object -First 1
+if ($null -eq $quickBudget -or $quickBudget.Status -ne 'Skipped') {
+    throw 'mcp-diagnose --quick did not skip budget.'
+}
+
+$quickSmoke = $quick.Checks | Where-Object { $_.Name -eq 'smoke-test' } | Select-Object -First 1
+if ($null -eq $quickSmoke -or $quickSmoke.Message -notmatch 'Minimal MCP smoke test passed') {
+    throw 'mcp-diagnose --quick did not run minimal smoke.'
+}
+
+if (($quickSmoke.Details -join "`n") -match 'Resources:|Prompts:') {
+    throw 'mcp-diagnose --quick minimal smoke unexpectedly included expanded resources/prompts details.'
+}
+
+foreach ($check in $quick.Checks) {
+    if ($null -eq $check.ElapsedMilliseconds -or [string]::IsNullOrWhiteSpace([string]$check.Cost)) {
+        throw "mcp-diagnose --quick check '$($check.Name)' did not include timing/cost metadata."
+    }
+}
+
+$fullJson = Invoke-AiRepo -Arguments @('mcp-diagnose', '--repo', $RepoRoot, '--full', '--json', '--timings', '--no-progress') -AllowedExitCodes @(0, 2)
+$full = $fullJson | ConvertFrom-Json
+if ($full.Mode -ne 'full') {
+    throw 'mcp-diagnose --full did not report full mode.'
+}
+
+$fullBuild = $full.Checks | Where-Object { $_.Name -eq 'mcp-build' } | Select-Object -First 1
+if ($null -eq $fullBuild -or ($fullBuild.Message -notmatch 'Built|SkippedCurrent')) {
+    throw 'mcp-diagnose --full did not report built or current build freshness.'
+}
+
+if ($fullBuild.Message -match 'SkippedCurrent' -and (($fullBuild.Details -join "`n") -notmatch 'Freshness decision')) {
+    throw 'mcp-diagnose --full SkippedCurrent build did not include a freshness decision detail.'
+}
+
+$fullSmoke = $full.Checks | Where-Object { $_.Name -eq 'smoke-test' } | Select-Object -First 1
+if ($null -eq $fullSmoke -or $fullSmoke.Message -notmatch 'Expanded MCP smoke test passed') {
+    throw 'mcp-diagnose --full did not run expanded smoke.'
+}
+
+$strictJson = Invoke-AiRepo -Arguments @('mcp-diagnose', '--repo', $RepoRoot, '--strict', '--strict-stdio', '--json', '--verbose', '--timings', '--no-progress') -AllowedExitCodes @(0, 2)
+if ($strictJson -match $rawLocalPathPattern -or $strictJson -match $jsonEscapedRawLocalPathPattern -or $strictJson -match $windowsLocalPathPattern -or $strictJson -match $jsonEscapedWindowsLocalPathPattern) {
+    throw 'mcp-diagnose strict output contained a raw local path.'
+}
+
+$strict = $strictJson | ConvertFrom-Json
+$strictSmoke = $strict.Checks | Where-Object { $_.Name -eq 'smoke-test' } | Select-Object -First 1
+if ($null -eq $strictSmoke -or $strictSmoke.Status -eq 'Failed') {
+    throw "mcp-diagnose strict smoke failed: $($strictSmoke.Message)"
+}
+
+$strictSmokeDetails = $strictSmoke.Details -join "`n"
+if ($strictSmokeDetails -notmatch 'Tools:' -or $strictSmokeDetails -notmatch 'Resources:' -or $strictSmokeDetails -notmatch 'Prompts:' -or $strictSmokeDetails -notmatch 'stderr byte count:') {
+    throw 'mcp-diagnose strict did not report tools, resources, prompts, and strict stdio details.'
+}
+
+Write-Host 'v1.7.0 incremental code-index, context-pack freshness, and mcp-diagnose cost-control smoke tests passed.'
