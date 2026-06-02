@@ -51,12 +51,9 @@ public sealed class ContextPackCommand
             }
 
             ContextPackRequest request = new(options_.RepoPath, task, options_.Target, format, limit, apply, options_.RebuildCache, options_.SkipCodeInventory, options_.Verbose, options_.NoProgress, options_.Budget);
-            if (!request.SkipCodeIndex)
-            {
-                progress.StartPhase("Loading inventories");
-                this.EnsureCodeIndex(request, warnings);
-                progress.CompletePhase("Inventory loading completed");
-            }
+            progress.StartPhase("Loading inventories");
+            this.EnsureCodeIndex(request, warnings);
+            progress.CompletePhase("Inventory loading completed");
 
             progress.StartPhase("Selecting context");
             pack = this.BuildPack(request, warnings);
@@ -80,13 +77,34 @@ public sealed class ContextPackCommand
 
     private void EnsureCodeIndex(ContextPackRequest request_, List<string> warnings_)
     {
-        string symbolPath = Path.Combine(request_.RepoRoot, ".ai", "generated", "inventories", "symbol-inventory.json");
-        string endpointPath = Path.Combine(request_.RepoRoot, ".ai", "generated", "inventories", "endpoint-inventory.json");
-        if (!request_.RebuildIndex && File.Exists(symbolPath) && File.Exists(endpointPath))
+        InventoryCompatibility compatibility = this.GetInventoryCompatibility(request_.RepoRoot);
+        if (request_.RebuildIndex)
         {
+            this.RunCodeIndex(request_);
+            warnings_.Add("Code-index rebuilt before context-pack generation.");
             return;
         }
 
+        if (request_.SkipCodeIndex)
+        {
+            warnings_.Add(compatibility.Compatible
+                ? "Code-index skipped by --skip-code-index; compatible inventories were used without freshness verification."
+                : "Code-index skipped by --skip-code-index; inventories are missing or incompatible and freshness was not verified.");
+            return;
+        }
+
+        if (compatibility.Compatible)
+        {
+            warnings_.Add("Existing compatible code inventories reused before context-pack generation.");
+            return;
+        }
+
+        this.RunCodeIndex(request_);
+        warnings_.Add("Code-index generated before context-pack generation.");
+    }
+
+    private void RunCodeIndex(ContextPackRequest request_)
+    {
         BootstrapOptions options = new(
             "code-index",
             request_.RepoRoot,
@@ -141,12 +159,17 @@ public sealed class ContextPackCommand
         {
             throw new InvalidOperationException("Unable to refresh code-index before context-pack generation.");
         }
-
-        warnings_.Add(request_.RebuildIndex ? "Code-index rebuilt before context-pack generation." : "Code-index generated before context-pack generation.");
     }
 
     private ContextPack BuildPack(ContextPackRequest request_, List<string> warnings_)
     {
+        if (request_.Task == "changed-files")
+        {
+            JsonObject? changedSymbolsRoot = this.ReadCompatibleSymbolInventory(request_, warnings_);
+            JsonArray changedSymbols = GetArray(changedSymbolsRoot, "Symbols");
+            return this.BuildChangedFilesPack(request_, changedSymbols, warnings_);
+        }
+
         JsonObject? symbolsRoot = this.ReadJson(request_.RepoRoot, ".ai/generated/inventories/symbol-inventory.json", true, warnings_);
         JsonObject? endpointsRoot = this.ReadJson(request_.RepoRoot, ".ai/generated/inventories/endpoint-inventory.json", true, warnings_);
         JsonObject? packagesRoot = this.ReadJson(request_.RepoRoot, ".ai/generated/inventories/package-inventory.json", false, warnings_);
@@ -154,11 +177,6 @@ public sealed class ContextPackCommand
         JsonObject? secretRoot = this.ReadJson(request_.RepoRoot, ".ai/generated/reports/secret-scan-report.json", false, warnings_);
         JsonObject? manifestRoot = this.ReadJson(request_.RepoRoot, ".ai/manifests/mcp-context-manifest.json", false, warnings_);
         JsonArray symbols = GetArray(symbolsRoot, "Symbols");
-        if (request_.Task == "changed-files")
-        {
-            return this.BuildChangedFilesPack(request_, symbols, warnings_);
-        }
-
         JsonArray endpoints = GetArray(endpointsRoot, "Endpoints");
         JsonArray packages = GetArray(packagesRoot, "packages");
         if (packages.Count == 0)
@@ -238,7 +256,9 @@ public sealed class ContextPackCommand
             risks,
             validation,
             ["get_context changed-files brief", "get_context impact brief", "search_context changed-file"],
-            ["Generated from Git status and local regenerable inventories.", "No source method bodies are included."],
+            symbols_.Count == 0
+                ? ["Generated from Git status.", "Changed-files generated without affected symbols.", "No source method bodies are included."]
+                : ["Generated from Git status and local regenerable inventories.", "No source method bodies are included."],
             changed.Files.Where(file_ => file_.Staged).ToArray(),
             changed.Files.Where(file_ => file_.Unstaged).ToArray(),
             changed.Files.Where(file_ => file_.Untracked).ToArray(),
@@ -247,6 +267,18 @@ public sealed class ContextPackCommand
             summary,
             changed.Files.Count == 0 ? string.Empty : $"Review changed files ({changed.Files.Count} files)");
         return this.ApplyBudget(pack, request_.Budget);
+    }
+
+    private JsonObject? ReadCompatibleSymbolInventory(ContextPackRequest request_, List<string> warnings_)
+    {
+        InventoryCompatibility compatibility = this.GetInventoryCompatibility(request_.RepoRoot);
+        if (compatibility.SymbolCompatible)
+        {
+            return this.ReadJson(request_.RepoRoot, ".ai/generated/inventories/symbol-inventory.json", false, warnings_);
+        }
+
+        warnings_.Add("Changed-files generated without affected symbols because symbol inventory was missing or incompatible.");
+        return null;
     }
 
     private ContextPack ApplyBudget(ContextPack pack_, int budget_)
@@ -802,6 +834,63 @@ public sealed class ContextPackCommand
             warnings_.Add($"Optional JSON could not be read: {normalized}");
             return null;
         }
+    }
+
+    private InventoryCompatibility GetInventoryCompatibility(string repoRoot_)
+    {
+        JsonObject? symbols = this.ReadInventoryJson(repoRoot_, ".ai/generated/inventories/symbol-inventory.json");
+        JsonObject? endpoints = this.ReadInventoryJson(repoRoot_, ".ai/generated/inventories/endpoint-inventory.json");
+        bool symbolCompatible = IsSymbolInventoryCompatible(symbols);
+        bool endpointCompatible = IsEndpointInventoryCompatible(endpoints);
+        return new InventoryCompatibility(symbolCompatible, endpointCompatible);
+    }
+
+    private JsonObject? ReadInventoryJson(string repoRoot_, string relativePath_)
+    {
+        string normalized = relativePath_.Replace('\\', '/').TrimStart('/');
+        if (IsRestricted(normalized))
+        {
+            return null;
+        }
+
+        string fullPath = Path.GetFullPath(Path.Combine(repoRoot_, normalized));
+        string root = Path.GetFullPath(repoRoot_).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(fullPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonNode.Parse(File.ReadAllText(fullPath)) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsSymbolInventoryCompatible(JsonObject? inventory_)
+    {
+        return inventory_ is not null
+            && string.Equals(GetString(inventory_, "Indexer"), "RoslynLite", StringComparison.Ordinal)
+            && inventory_.ContainsKey("GeneratedAtLocal")
+            && inventory_.ContainsKey("TotalFilesScanned")
+            && inventory_["Symbols"] is JsonArray;
+    }
+
+    private static bool IsEndpointInventoryCompatible(JsonObject? inventory_)
+    {
+        return inventory_ is not null
+            && string.Equals(GetString(inventory_, "Indexer"), "RoslynLite", StringComparison.Ordinal)
+            && inventory_.ContainsKey("GeneratedAtLocal")
+            && inventory_.ContainsKey("TotalEndpoints")
+            && inventory_["Endpoints"] is JsonArray;
+    }
+
+    private sealed record InventoryCompatibility(bool SymbolCompatible, bool EndpointCompatible)
+    {
+        public bool Compatible => this.SymbolCompatible && this.EndpointCompatible;
     }
 
     private void EnsureOutputPath(string repoRoot_, string outputPath_)

@@ -41,6 +41,18 @@ function Get-CodeIndexMetric {
     throw "code-index output did not include metric: $($Labels -join ' / ')"
 }
 
+function Assert-Contains {
+    param(
+        [string]$Output,
+        [string]$Pattern,
+        [string]$Message
+    )
+
+    if ($Output -notmatch $Pattern) {
+        throw $Message
+    }
+}
+
 $first = Invoke-AiRepo -Arguments @('code-index', '--repo', $RepoRoot, '--apply', '--rebuild-cache', '--timings', '--no-progress')
 $firstDiscovered = Get-CodeIndexMetric -Output $first -Labels @('Files discovered')
 $firstParsed = Get-CodeIndexMetric -Output $first -Labels @('Parsed files', 'ParsedFiles')
@@ -70,6 +82,59 @@ if ($hashValidations -ne 0) {
     throw "Second code-index run performed $hashValidations hash validation(s); expected 0."
 }
 
+$changedDefault = Invoke-AiRepo -Arguments @('context-pack', '--repo', $RepoRoot, '--task', 'changed-files', '--apply', '--budget', '12000', '--limit', '30', '--no-progress')
+Assert-Contains -Output $changedDefault -Pattern 'Existing compatible code inventories reused before context-pack generation' -Message 'changed-files context pack did not report compatible inventory reuse.'
+if ($changedDefault -match 'Code-index generated before context-pack generation') {
+    throw 'changed-files context pack generated code-index despite compatible inventories.'
+}
+
+$changedRebuild = Invoke-AiRepo -Arguments @('context-pack', '--repo', $RepoRoot, '--task', 'changed-files', '--apply', '--rebuild-index', '--budget', '12000', '--limit', '30', '--no-progress')
+Assert-Contains -Output $changedRebuild -Pattern 'Code-index rebuilt before context-pack generation' -Message 'changed-files context pack --rebuild-index did not report rebuild.'
+
+$changedSkip = Invoke-AiRepo -Arguments @('context-pack', '--repo', $RepoRoot, '--task', 'changed-files', '--apply', '--skip-code-index', '--budget', '12000', '--limit', '30', '--no-progress')
+Assert-Contains -Output $changedSkip -Pattern 'freshness verification' -Message 'changed-files context pack --skip-code-index did not warn about unverified freshness.'
+
+$inventoryRoot = Join-Path $RepoRoot '.ai/generated/inventories'
+$backupRoot = Join-Path $RepoRoot ('.ai/generated/v1.7.0-smoke-inventory-backup-' + [guid]::NewGuid().ToString('N'))
+$symbolInventory = Join-Path $inventoryRoot 'symbol-inventory.json'
+$endpointInventory = Join-Path $inventoryRoot 'endpoint-inventory.json'
+$moved = @()
+try {
+    New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+    foreach ($path in @($symbolInventory, $endpointInventory)) {
+        if (Test-Path -LiteralPath $path) {
+            $destination = Join-Path $backupRoot (Split-Path -Leaf $path)
+            Move-Item -LiteralPath $path -Destination $destination
+            $moved += [pscustomobject]@{ Source = $path; Backup = $destination }
+        }
+    }
+
+    $changedSkipMissing = Invoke-AiRepo -Arguments @('context-pack', '--repo', $RepoRoot, '--task', 'changed-files', '--apply', '--skip-code-index', '--budget', '12000', '--limit', '30', '--no-progress')
+    Assert-Contains -Output $changedSkipMissing -Pattern 'inventories are missing or incompatible' -Message 'changed-files --skip-code-index with missing inventories did not warn about missing/incompatible inventories.'
+    Assert-Contains -Output $changedSkipMissing -Pattern 'without affected symbols' -Message 'changed-files --skip-code-index with missing inventories did not warn about missing affected-symbol enrichment.'
+
+    $changedPackPath = Join-Path $RepoRoot '.ai/generated/context-packs/changed-files.json'
+    $changedPack = Get-Content -LiteralPath $changedPackPath -Raw | ConvertFrom-Json
+    if ($null -ne $changedPack.AffectedSymbols -and $changedPack.AffectedSymbols.Count -ne 0) {
+        throw 'changed-files --skip-code-index with missing inventories should not include affected-symbol enrichment.'
+    }
+}
+finally {
+    foreach ($entry in $moved) {
+        if (Test-Path -LiteralPath $entry.Backup) {
+            if (Test-Path -LiteralPath $entry.Source) {
+                Remove-Item -LiteralPath $entry.Source -Force
+            }
+
+            Move-Item -LiteralPath $entry.Backup -Destination $entry.Source
+        }
+    }
+
+    if (Test-Path -LiteralPath $backupRoot) {
+        Remove-Item -LiteralPath $backupRoot -Recurse -Force
+    }
+}
+
 $auditJson = Invoke-AiRepo -Arguments @('audit', '--repo', $RepoRoot, '--json', '--no-progress') -AllowedExitCodes @(0, 2)
 $audit = $auditJson | ConvertFrom-Json
 
@@ -81,4 +146,4 @@ if ([int]$audit.reviewRequiredCount -ne 0) {
     throw "Audit reported $($audit.reviewRequiredCount) review-required finding(s); expected 0."
 }
 
-Write-Host 'v1.7.0 incremental code-index smoke tests passed.'
+Write-Host 'v1.7.0 incremental code-index and context-pack freshness smoke tests passed.'
