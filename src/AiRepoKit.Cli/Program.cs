@@ -42,6 +42,8 @@ public static class Program
                 "audit" => new AuditCommand().Execute(options),
                 "detect" => new DetectCommand().Execute(options),
                 "setup" => new SetupCommand().Execute(options),
+                "update" => new UpdateCommand().Execute(options),
+                "hooks" => new HooksCommand().Execute(options),
                 "sanitize" => new SanitizeCommand().Execute(options),
                 "self-check" => new SelfCheckCommand().Execute(options),
                 "org" => new OrgCommand().Execute(options),
@@ -340,6 +342,7 @@ public static class Program
         string format = "all";
         string task = "review-risk";
         string target = string.Empty;
+        string testTarget = string.Empty;
         int limit = 20;
         bool verbose = false;
         bool summary = false;
@@ -678,6 +681,12 @@ public static class Program
                 continue;
             }
 
+            if (string.Equals(value, "--test-target", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
+            {
+                testTarget = args_[++index];
+                continue;
+            }
+
             if (string.Equals(value, "--limit", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
             {
                 if (int.TryParse(args_[++index], out int parsed))
@@ -819,6 +828,11 @@ public static class Program
             dryRun = true;
         }
 
+        else if (string.Equals(command, "update", StringComparison.OrdinalIgnoreCase))
+        {
+            apply = true;
+            dryRun = false;
+        }
         ProfileService profileService = new();
         profile = profileService.NormalizeProfileName(profile);
         if (profileExplicit && !profileService.IsSupported(profile))
@@ -846,7 +860,7 @@ public static class Program
             resolvedRepoPath = Directory.GetCurrentDirectory();
         }
 
-        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts);
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget);
         if (command is "--help" or "--version" or "help" or "version" or "")
         {
             return parsedOptions;
@@ -860,7 +874,7 @@ public static class Program
             }
 
             ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
-            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget);
         }
         catch
         {
@@ -903,6 +917,8 @@ public static class Program
         airepo setup [--repo <path>] [--apply] [--profile name] [--clients codex,vscode,vs] [--strict] [--summary] [--timings]
         airepo detect [--repo <path>] [--json]
         airepo sanitize [--repo <path>] --term <term> --replacement <value> [--apply --backup]
+        airepo update [--repo <path>] [--target name] [--test-target name] [--quick|--full|--strict] [--dry-run] [--rebuild-index] [--json] [--summary] [--timings]
+        airepo hooks [--repo <path>] [--apply] [--force]
         airepo init --repo <path> --clients codex,vscode,vs --mcp [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
         airepo plan --repo <path> [--clients codex,vscode,vs] [--mcp] [--agents] [--profile generic]
         airepo code-index [--repo <path>] [--apply] [--max-files 3000] [--max-items 10000] [--include-private-members] [--format json|markdown|all] [--no-cache|--rebuild-cache|--rebuild-index] [--summary] [--timings]
@@ -1032,6 +1048,7 @@ public static class Program
         ```text
         --task <name>                 change-api, change-ui, fix-build, update-package, review-risk, security-review, test-generation, or changed-files.
         --target <name>               Optional task target used in pack names and selection.
+        --test-target <name>          Optional test-generation target used by airepo update; defaults to --target.
         --limit <number>              Default: 20.
         ```
 

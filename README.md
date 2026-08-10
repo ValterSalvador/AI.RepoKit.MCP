@@ -2,14 +2,14 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.7.0 Release-ready with incremental code-index cache reuse, context-pack inventory freshness checks, faster `mcp-diagnose --quick`, per-check timing and cost output, and opt-in stale MCP host cleanup.
+Status: v1.8.0 Release-ready with one-command repository updates and opt-in Git automation for pre-commit, post-merge, and post-rewrite workflows.
 
 ## Goals
 
 - Provide a .NET tool named `airepo`.
 - Provide self-contained single-file executables for Windows and Linux.
-- Default to dry-run behavior.
-- Write only when `--apply` is explicit.
+- Default managed and versionable-file changes to dry-run behavior.
+- Require `--apply` for managed files; allow `airepo update` to refresh only ignored, regenerable outputs by default.
 - Avoid reading or copying secrets and generated/runtime folders.
 - Keep generated inventories and reports under `.ai/generated/`.
 - Keep all behavior parameterized by the target repository.
@@ -45,6 +45,28 @@ airepo plan --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet
 
 GitHub Releases are the distribution channel. NuGet.org publishing is not enabled; the `.nupkg` is attached to GitHub Releases for local source installation.
 
+## Update An Existing Global Tool
+
+Before the GitHub Release exists, build the local package and update the already-installed global tool from the repository:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.0
+$packageSource = (Resolve-Path "artifacts/nuget").Path
+dotnet tool update --global AiRepoKit.Cli --version 1.8.0 --add-source $packageSource
+airepo --version
+```
+
+After `v1.8.0` is published, download its `.nupkg` release asset and use it as a temporary package source:
+
+```powershell
+$packageSource = Join-Path $env:TEMP "airepo-1.8.0"
+New-Item -ItemType Directory -Force -Path $packageSource | Out-Null
+$releaseRepo = "owner/AI.RepoKit.MCP"
+gh release download v1.8.0 --repo $releaseRepo --pattern "AiRepoKit.Cli.1.8.0.nupkg" --dir $packageSource --clobber
+dotnet tool update --global AiRepoKit.Cli --version 1.8.0 --add-source $packageSource
+airepo --version
+```
+
 ## Recommended Safe First Run
 
 Start with zero-config setup from the target repository root:
@@ -79,6 +101,36 @@ If `--repo` is omitted, `airepo` resolves upward from the current directory and 
 Use `--profile demo` for a broad demonstration profile that combines common .NET, web, migration, security, and desktop guidance without targeting a specific internal project. `vs` is the preferred Visual Studio client name; `visualstudio` remains accepted only as a legacy alias.
 
 Long-running CLI commands show terminal progress when running interactively. Progress and spinner output is written to stderr, never stdout. `--json` disables progress automatically so JSON stdout stays parseable. Use `--no-progress` to disable progress output, and `--verbose` to keep existing detailed reports plus additional phase detail where supported.
+
+## Automated Repository Update
+
+`airepo update` replaces the routine sequence of detect, code-index, changed-files context, impact, risk context, test-generation context, and self-check commands. It writes only regenerable `.ai/generated/` outputs by default; use `--dry-run` for a preview.
+
+```powershell
+airepo update
+airepo update --target ImportToDatabase --test-target GuideImportTests --summary --timings
+airepo update --quick
+airepo update --full --rebuild-index
+airepo update --dry-run --json
+```
+
+The default preset runs all context phases and a quick self-check. `--quick` omits review-risk and test-generation for pre-commit latency. `--full` keeps all phases and requests the broader self-check. `--strict` uses release-oriented self-check behavior.
+
+Git has no post-add hook. Use the reliable pre-commit and post-merge/post-rewrite points instead:
+
+```powershell
+airepo hooks
+airepo hooks --apply
+git config --local --get core.hooksPath
+```
+
+The installed hooks are versionable under `.githooks/`. Pre-commit runs `airepo update --quick`; merge and rebase completion run the default `airepo update`. Existing custom hooks or a different `core.hooksPath` are preserved unless `--force` is explicit. To bypass the automation for one PowerShell operation:
+
+```powershell
+$env:AIREPO_SKIP_HOOKS = "1"
+git commit -m "Temporary bypass"
+Remove-Item Env:AIREPO_SKIP_HOOKS
+```
 
 ## Daily Workflow
 
@@ -118,7 +170,7 @@ The repository-local MCP server is read-only and stdio-only. During normal MCP o
 
 ## MCP Resources And Prompts
 
-v1.7.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and improves release readiness with incremental code-index cache reuse, context-pack inventory freshness checks, faster `mcp-diagnose --quick`, per-check timing and cost output, and `--stop-stale-mcp-hosts` opt-in cleanup. v1.6.0 added the Zero-Trust Security Foundation, and v1.5.0 added read-only Resources and reusable Prompts for lower-token discovery.
+v1.8.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and adds `airepo update` plus opt-in repository-local Git hooks. v1.7.0 added incremental code-index cache reuse, context-pack freshness checks, faster MCP diagnostics, and stale-host cleanup.
 
 Resource URIs:
 
@@ -253,7 +305,7 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.7.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.0
 artifacts/publish/win-x64/airepo.exe --help
 artifacts/publish/win-x64/airepo.exe self-check --repo . --strict --timings
 artifacts/publish/win-x64/airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs --strict --timings

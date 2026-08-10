@@ -71,7 +71,8 @@ public sealed record BootstrapOptions
         int maxDepth_ = 3,
         bool validationOnly_ = false,
         bool strictStdio_ = false,
-        bool stopStaleMcpHosts_ = false)
+        bool stopStaleMcpHosts_ = false,
+        string testTarget_ = "")
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -142,6 +143,7 @@ public sealed record BootstrapOptions
         this.ValidationOnly = validationOnly_;
         this.StrictStdio = strictStdio_;
         this.StopStaleMcpHosts = stopStaleMcpHosts_;
+        this.TestTarget = testTarget_;
     }
 
     public string Command { get; }
@@ -281,6 +283,8 @@ public sealed record BootstrapOptions
     public bool StrictStdio { get; }
 
     public bool StopStaleMcpHosts { get; }
+    public string TestTarget { get; }
+
 
     public BootstrapOptions With(
         string? command_ = null,
@@ -295,7 +299,17 @@ public sealed record BootstrapOptions
         bool? includeAgents_ = null,
         string? task_ = null,
         bool? requireContextPacks_ = null,
-        bool? validationOnly_ = null)
+        bool? validationOnly_ = null,
+        string? target_ = null,
+        string? testTarget_ = null,
+        int? limit_ = null,
+        int? budget_ = null,
+        string? format_ = null,
+        bool? rebuildCache_ = null,
+        bool? auditJson_ = null,
+        bool? quick_ = null,
+        bool? full_ = null,
+        bool? strict_ = null)
     {
         return new BootstrapOptions(
             command_ ?? this.Command,
@@ -326,12 +340,12 @@ public sealed record BootstrapOptions
             this.MaxItems,
             this.IncludePrivateMembers,
             this.NoCache,
-            this.RebuildCache,
+            rebuildCache_ ?? this.RebuildCache,
             this.Output,
-            this.Format,
+            format_ ?? this.Format,
             this.Verbose,
             this.Summary,
-            this.AuditJson,
+            auditJson_ ?? this.AuditJson,
             this.Timings,
             this.IncludeSource,
             this.CreateAuditBaseline,
@@ -341,8 +355,8 @@ public sealed record BootstrapOptions
             skipAudit_ ?? this.SkipAudit,
             includeAgents_ ?? this.IncludeAgents,
             task_ ?? this.Task,
-            this.Target,
-            this.Limit,
+            target_ ?? this.Target,
+            limit_ ?? this.Limit,
             requireContextPacks_ ?? this.RequireContextPacks,
             this.UnknownOptions,
             this.NoProgress,
@@ -353,11 +367,11 @@ public sealed record BootstrapOptions
             this.ForbiddenTerms,
             this.SanitizeTerm,
             this.SanitizeReplacement,
-            this.Strict,
-            this.Quick,
-            this.Full,
+            strict_ ?? this.Strict,
+            quick_ ?? this.Quick,
+            full_ ?? this.Full,
             this.DefaultsSummary,
-            this.Budget,
+            budget_ ?? this.Budget,
             this.Kind,
             this.Since,
             this.ChangedFiles,
@@ -366,6 +380,7 @@ public sealed record BootstrapOptions
             this.MaxDepth,
             validationOnly_ ?? this.ValidationOnly,
             this.StrictStdio,
-            this.StopStaleMcpHosts);
+            this.StopStaleMcpHosts,
+            testTarget_ ?? this.TestTarget);
     }
 }
