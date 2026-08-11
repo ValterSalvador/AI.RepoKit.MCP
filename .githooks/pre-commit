@@ -1,0 +1,14 @@
+#!/bin/sh
+
+if [ "$AIREPO_SKIP_HOOKS" = "1" ]; then
+  exit 0
+fi
+
+if dotnet tool run airepo -- --version >/dev/null 2>&1; then
+  dotnet tool run airepo -- update --repo . --quick --no-progress
+elif command -v airepo >/dev/null 2>&1; then
+  airepo update --repo . --quick --no-progress
+else
+  echo "airepo was not found. Restore the local dotnet tool or set AIREPO_SKIP_HOOKS=1." >&2
+  exit 1
+fi

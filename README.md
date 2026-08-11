@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.8.0 Release-ready with one-command repository updates and opt-in Git automation for pre-commit, post-merge, and post-rewrite workflows.
+Status: v1.8.1 Release-ready with Git hooks enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
 
 ## Goals
 
@@ -22,8 +22,8 @@ Use a standalone release executable when you want the least setup. Download the 
 
 ```powershell
 .\airepo.exe --version
-.\airepo.exe audit --repo .
-.\airepo.exe plan --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet
+.\airepo.exe audit
+.\airepo.exe plan --clients codex,vscode,vs --mcp --agents --profile dotnet
 ```
 
 Use a local tool when you want repository-pinned installation:
@@ -32,7 +32,7 @@ Use a local tool when you want repository-pinned installation:
 dotnet new tool-manifest
 dotnet tool install AiRepoKit.Cli --add-source artifacts/nuget
 dotnet tool run airepo --version
-dotnet tool run airepo -- plan --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet
+dotnet tool run airepo -- plan --clients codex,vscode,vs --mcp --agents --profile dotnet
 ```
 
 Use a global tool when you want `airepo` on your PATH:
@@ -40,30 +40,32 @@ Use a global tool when you want `airepo` on your PATH:
 ```powershell
 dotnet tool install --global AiRepoKit.Cli --add-source artifacts/nuget
 airepo --version
-airepo plan --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet
+airepo plan --clients codex,vscode,vs --mcp --agents --profile dotnet
 ```
 
 GitHub Releases are the distribution channel. NuGet.org publishing is not enabled; the `.nupkg` is attached to GitHub Releases for local source installation.
+
+Run commands from the repository root whenever you are targeting the current repository. `airepo` resolves the current directory and nearest Git root automatically, so `--repo` is normally unnecessary; keep it for commands that target a different repository.
 
 ## Update An Existing Global Tool
 
 Before the GitHub Release exists, build the local package and update the already-installed global tool from the repository:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.1
 $packageSource = (Resolve-Path "artifacts/nuget").Path
-dotnet tool update --global AiRepoKit.Cli --version 1.8.0 --add-source $packageSource
+dotnet tool update --global AiRepoKit.Cli --version 1.8.1 --add-source $packageSource
 airepo --version
 ```
 
-After `v1.8.0` is published, download its `.nupkg` release asset and use it as a temporary package source:
+After `v1.8.1` is published, download its `.nupkg` release asset and use it as a temporary package source:
 
 ```powershell
-$packageSource = Join-Path $env:TEMP "airepo-1.8.0"
+$packageSource = Join-Path $env:TEMP "airepo-1.8.1"
 New-Item -ItemType Directory -Force -Path $packageSource | Out-Null
 $releaseRepo = "owner/AI.RepoKit.MCP"
-gh release download v1.8.0 --repo $releaseRepo --pattern "AiRepoKit.Cli.1.8.0.nupkg" --dir $packageSource --clobber
-dotnet tool update --global AiRepoKit.Cli --version 1.8.0 --add-source $packageSource
+gh release download v1.8.1 --repo $releaseRepo --pattern "AiRepoKit.Cli.1.8.1.nupkg" --dir $packageSource --clobber
+dotnet tool update --global AiRepoKit.Cli --version 1.8.1 --add-source $packageSource
 airepo --version
 ```
 
@@ -78,21 +80,21 @@ airepo self-check
 airepo mcp-diagnose --quick
 ```
 
-`setup` without `--apply` detects the repository, infers defaults, plans changes, and previews validation. `setup --apply` bootstraps managed files, refreshes the code index, generates baseline context packs (`changed-files`, `review-risk`, and `test-generation` when possible), generates a graph baseline when possible, runs a faster setup-friendly self-check path, and runs MCP diagnostics with fewer repeated expensive phases in non-strict runs. No changed files is a warning, not a blocking setup failure. It does not commit, push, run Docker, run migrations, run SQL, start target services, or call cloud services.
+`setup` without `--apply` detects the repository, infers defaults, plans changes, previews validation, and shows the managed Git hooks that would be installed. `setup --apply` bootstraps managed files, installs the managed Git hooks, refreshes the code index, generates baseline context packs (`changed-files`, `review-risk`, and `test-generation` when possible), generates a graph baseline when possible, runs a faster setup-friendly self-check path, and runs MCP diagnostics with fewer repeated expensive phases in non-strict runs. Pass `--no-hooks` (or `--skip-hooks`) to leave Git hook files and `core.hooksPath` untouched. No changed files is a warning, not a blocking setup failure. It does not commit, push, run Docker, run migrations, run SQL, start target services, or call cloud services.
 
 Start with explicit read-only and generated-output checks when you need tighter control:
 
 ```powershell
-airepo audit --repo .
-airepo plan --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet
-airepo code-index --repo . --apply
-airepo context-pack --repo . --task review-risk --apply
-airepo context-pack --repo . --task changed-files --apply --budget 12000
-airepo graph --repo . --apply
-airepo impact --repo .
-airepo bootstrap --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet --apply --backup
-airepo self-check --repo . --agents --profile dotnet --skip-build-mcp
-airepo mcp-diagnose --repo . --clients codex,vscode,vs --skip-build
+airepo audit
+airepo plan --clients codex,vscode,vs --mcp --agents --profile dotnet
+airepo code-index --apply
+airepo context-pack --task review-risk --apply
+airepo context-pack --task changed-files --apply --budget 12000
+airepo graph --apply
+airepo impact
+airepo bootstrap --clients codex,vscode,vs --mcp --agents --profile dotnet --apply --backup
+airepo self-check --agents --profile dotnet --skip-build-mcp
+airepo mcp-diagnose --clients codex,vscode,vs --skip-build
 git status --short
 ```
 
@@ -116,7 +118,15 @@ airepo update --dry-run --json
 
 The default preset runs all context phases and a quick self-check. `--quick` omits review-risk and test-generation for pre-commit latency. `--full` keeps all phases and requests the broader self-check. `--strict` uses release-oriented self-check behavior.
 
-Git has no post-add hook. Use the reliable pre-commit and post-merge/post-rewrite points instead:
+Git has no post-add hook. Applied `setup` and `bootstrap` runs install the managed pre-commit and post-merge/post-rewrite hooks by default. Opt out with `--no-hooks` when the repository already manages hooks another way:
+
+```powershell
+airepo setup --apply
+airepo bootstrap --apply --clients codex,vscode,vs --mcp
+airepo setup --apply --no-hooks
+```
+
+Use the standalone command to preview or reinstall only the hooks:
 
 ```powershell
 airepo hooks
@@ -170,7 +180,7 @@ The repository-local MCP server is read-only and stdio-only. During normal MCP o
 
 ## MCP Resources And Prompts
 
-v1.8.0 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and adds `airepo update` plus opt-in repository-local Git hooks. v1.7.0 added incremental code-index cache reuse, context-pack freshness checks, faster MCP diagnostics, and stale-host cleanup.
+v1.8.1 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and enables the repository-local Git hooks introduced in v1.8.0 by default during applied `setup` and `bootstrap` runs. v1.7.0 added incremental code-index cache reuse, context-pack freshness checks, faster MCP diagnostics, and stale-host cleanup.
 
 Resource URIs:
 
@@ -226,8 +236,8 @@ Use `get_health area=capabilities` to inspect supported context kinds, generated
 Create and review the audit baseline before committing generated guidance:
 
 ```powershell
-airepo audit --repo .
-airepo audit --repo . --create-baseline
+airepo audit
+airepo audit --create-baseline
 ```
 
 Manually review `.ai/policies/audit-baseline.json`. Keep new entries as `review-required` until a person decides whether each finding should remain blocking, be marked `accepted`, or be marked `false-positive`.
@@ -235,9 +245,9 @@ Manually review `.ai/policies/audit-baseline.json`. Keep new entries as `review-
 Then bootstrap with the selected profile and commit only versionable files:
 
 ```powershell
-airepo bootstrap --repo . --clients codex,vscode,vs --mcp --agents --profile dotnet --apply --backup
-airepo self-check --repo . --agents --profile dotnet
-airepo mcp-diagnose --repo . --clients codex,vscode,vs
+airepo bootstrap --clients codex,vscode,vs --mcp --agents --profile dotnet --apply --backup
+airepo self-check --agents --profile dotnet
+airepo mcp-diagnose --clients codex,vscode,vs
 git status --short
 ```
 
@@ -305,11 +315,11 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.1
 artifacts/publish/win-x64/airepo.exe --help
-artifacts/publish/win-x64/airepo.exe self-check --repo . --strict --timings
-artifacts/publish/win-x64/airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs --strict --timings
-artifacts/publish/win-x64/airepo.exe audit --repo .
+artifacts/publish/win-x64/airepo.exe self-check --strict --timings
+artifacts/publish/win-x64/airepo.exe mcp-diagnose --clients codex,vscode,vs --strict --timings
+artifacts/publish/win-x64/airepo.exe audit
 git status --short
 ```
 
@@ -499,12 +509,12 @@ To use the downloaded standalone executable, download the platform asset, extrac
 
 ```powershell
 .\airepo.exe --version
-.\airepo.exe setup --repo . --clients codex,vscode,vs --mcp --agents --profile auto --no-progress
+.\airepo.exe setup --clients codex,vscode,vs --mcp --agents --profile auto --no-progress
 ```
 
 ```bash
 ./airepo --version
-./airepo setup --repo . --clients codex,vscode,vs --mcp --agents --profile auto --no-progress
+./airepo setup --clients codex,vscode,vs --mcp --agents --profile auto --no-progress
 ```
 
 ## Use Standalone Executables
@@ -536,13 +546,13 @@ Before interactive apply, the CLI shows that it will create repository-local `.a
 To use the standalone executable from a terminal:
 
 ```powershell
-.\airepo.exe doctor --repo .
-.\airepo.exe plan --repo . --clients codex,vscode,vs --mcp
-.\airepo.exe bootstrap --repo . --clients codex,vscode,vs --mcp
-.\airepo.exe bootstrap --repo . --clients codex,vscode,vs --mcp --apply --backup
-.\airepo.exe bootstrap --repo . --clients codex,vscode,vs --mcp --agents --apply --backup
-.\airepo.exe self-check --repo .
-.\airepo.exe mcp-diagnose --repo . --clients codex,vscode,vs
+.\airepo.exe doctor
+.\airepo.exe plan --clients codex,vscode,vs --mcp
+.\airepo.exe bootstrap --clients codex,vscode,vs --mcp
+.\airepo.exe bootstrap --clients codex,vscode,vs --mcp --apply --backup
+.\airepo.exe bootstrap --clients codex,vscode,vs --mcp --agents --apply --backup
+.\airepo.exe self-check
+.\airepo.exe mcp-diagnose --clients codex,vscode,vs
 .\airepo.exe doctor
 .\airepo.exe bootstrap --clients codex,vscode,vs --mcp --apply --backup
 .\airepo.exe code-index --apply
@@ -569,7 +579,7 @@ install-ai-context.ps1
 Then double click `install-ai-context.cmd`. The wrapper changes to its own folder and runs:
 
 ```powershell
-.\airepo.exe bootstrap --repo . --clients codex,vscode,vs --mcp --apply --backup
+.\airepo.exe bootstrap --clients codex,vscode,vs --mcp --apply --backup
 ```
 
 Ubuntu/Linux x64:
@@ -577,7 +587,7 @@ Ubuntu/Linux x64:
 ```bash
 chmod +x artifacts/publish/linux-x64/airepo
 artifacts/publish/linux-x64/airepo --version
-artifacts/publish/linux-x64/airepo doctor --repo .
+artifacts/publish/linux-x64/airepo doctor
 ```
 
 Ubuntu/Linux ARM64:
@@ -585,7 +595,7 @@ Ubuntu/Linux ARM64:
 ```bash
 chmod +x artifacts/publish/linux-arm64/airepo
 artifacts/publish/linux-arm64/airepo --version
-artifacts/publish/linux-arm64/airepo doctor --repo .
+artifacts/publish/linux-arm64/airepo doctor
 ```
 
 ## Commands
@@ -725,11 +735,11 @@ No separate release-check command exists in v0.13. Use the v1.0 readiness checkl
 `airepo self-check` runs a focused reliability check for an initialized repository. It resolves the repository like other commands, checks repository detection and required generated files, runs audit unless skipped, refreshes the RoslynLite code index unless skipped, verifies `.ai/generated/cache/code-index-cache.json` after code-index runs, builds the generated MCP project in Release unless skipped, runs the MCP response budget script unless skipped, verifies `.ai/generated`, verifies the managed-files manifest after bootstrap, and verifies the AiRepoKit `.gitignore` section. If code-index is skipped, the cache check is skipped too.
 
 ```powershell
-airepo self-check --repo .
-airepo self-check --repo . --agents
-airepo self-check --repo . --json
-airepo self-check --repo . --context-packs
-airepo self-check --repo . --skip-build-mcp --skip-code-index --skip-budget --skip-audit
+airepo self-check
+airepo self-check --agents
+airepo self-check --json
+airepo self-check --context-packs
+airepo self-check --skip-build-mcp --skip-code-index --skip-budget --skip-audit
 ```
 
 Exit code `0` means no required checks failed, `2` means at least one required check failed, and `1` means a fatal self-check error occurred. `--agents` makes the optional generated agent and instruction files required for the check. If `.ai/generated/context-packs/` exists, self-check validates readable JSON files. `--context-packs` makes at least one context pack required.
@@ -743,10 +753,10 @@ Use `self-check --forbidden-term <term>` to fail validation when a forbidden ter
 `airepo mcp-diagnose` checks whether the repository MCP project and selected client configuration are generated, built, and smoke-testable. It does not run the target application, Docker, migrations, SQL, or database commands, and it does not add MCP tools or change the MCP protocol.
 
 ```powershell
-airepo mcp-diagnose --repo . --clients codex,vscode,vs
-airepo mcp-diagnose --repo . --clients vscode --skip-build
-airepo mcp-diagnose --repo . --skip-build --skip-smoke --skip-budget
-airepo mcp-diagnose --repo . --json --verbose
+airepo mcp-diagnose --clients codex,vscode,vs
+airepo mcp-diagnose --clients vscode --skip-build
+airepo mcp-diagnose --skip-build --skip-smoke --skip-budget
+airepo mcp-diagnose --json --verbose
 ```
 
 Default clients are `codex,vscode,vs`. `visualstudio` remains accepted as a legacy alias for `vs`.
@@ -774,7 +784,7 @@ If you only want non-build validation while MCP is currently active, rerun self-
 For client-focused diagnostics while the MCP DLL may be locked, use:
 
 ```powershell
-airepo mcp-diagnose --repo . --skip-build
+airepo mcp-diagnose --skip-build
 ```
 
 ## MCP Bootstrap
@@ -846,7 +856,6 @@ By default, code-index uses a local cache at `.ai/generated/cache/code-index-cac
 Dry-run is the default. Use `--apply` to write files:
 
 ```powershell
-airepo code-index --repo . --apply
 airepo code-index --apply
 airepo code-index --apply --format json
 airepo code-index --apply --rebuild-cache
@@ -891,12 +900,12 @@ Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll
 Dry-run is the default:
 
 ```powershell
-airepo context-pack --repo .
-airepo context-pack --repo . --task change-api --target User
-airepo context-pack --repo . --task change-api --target User --apply
-airepo context-pack --repo . --task fix-build --apply --format json
-airepo context-pack --repo . --task review-risk --apply --limit 20
-airepo context-pack --repo . --task changed-files --apply --budget 12000
+airepo context-pack
+airepo context-pack --task change-api --target User
+airepo context-pack --task change-api --target User --apply
+airepo context-pack --task fix-build --apply --format json
+airepo context-pack --task review-risk --apply --limit 20
+airepo context-pack --task changed-files --apply --budget 12000
 ```
 
 Supported tasks are `change-api`, `change-ui`, `fix-build`, `update-package`, `review-risk`, `security-review`, `test-generation`, and `changed-files`.
@@ -1041,12 +1050,11 @@ If an org artifact does not exist, MCP returns `available=false` with the comman
 
 ```powershell
 airepo efficiency
-airepo efficiency --repo .
-airepo efficiency --repo . --json
-airepo efficiency --repo . --no-refresh --no-progress
-airepo efficiency --repo . --refresh
-airepo efficiency --repo . --refresh --rebuild-index
-airepo efficiency --repo . --skip-budget
+airepo efficiency --json
+airepo efficiency --no-refresh --no-progress
+airepo efficiency --refresh
+airepo efficiency --refresh --rebuild-index
+airepo efficiency --skip-budget
 ```
 
 `--repo` is optional. When omitted, the command uses the same repository resolver as the other commands: it accepts the executable directory when it looks like a target repository, otherwise it falls back to the current working directory. From a terminal, run it from the repository root to report on that repository. A copied standalone executable can also report on its current directory and will show a warning if repository data is minimal.
@@ -1075,7 +1083,7 @@ This is an approximation, not exact tokenizer output. It is meant to make the sa
 JSON output includes the same report fields:
 
 ```powershell
-airepo efficiency --repo . --json
+airepo efficiency --json
 ```
 
 ## Generated Outputs
@@ -1114,14 +1122,14 @@ Baseline entries use these review states:
 AiRepoKit does not auto-accept findings. New or merged baseline entries are always written as `review-required` so repositories keep an explicit review trail.
 
 ```powershell
-airepo audit --repo .
-airepo audit --repo . --baseline
-airepo audit --repo . --create-baseline
-airepo audit --repo . --create-baseline --update-baseline
-airepo audit --repo . --fail-on-accepted
-airepo audit --repo . --json
-airepo audit --repo . --no-progress
-airepo audit --repo . --include-source --verbose
+airepo audit
+airepo audit --baseline
+airepo audit --create-baseline
+airepo audit --create-baseline --update-baseline
+airepo audit --fail-on-accepted
+airepo audit --json
+airepo audit --no-progress
+airepo audit --include-source --verbose
 ```
 
 Default audit behavior loads `.ai/policies/audit-baseline.json` when present. Accepted and false-positive findings remain visible in the report, but they do not count as active high-severity blockers unless `--fail-on-accepted` is provided or the baseline entry is expired. Missing baseline files are valid and mean no findings are accepted. Corrupt baseline files are fatal audit errors with exit code `1`.
@@ -1130,12 +1138,12 @@ Default audit behavior loads `.ai/policies/audit-baseline.json` when present. Ac
 
 Recommended repository flow:
 
-1. `airepo audit --repo .`
-2. `airepo audit --repo . --create-baseline`
+1. `airepo audit`
+2. `airepo audit --create-baseline`
 3. Manually review `.ai/policies/audit-baseline.json`.
 4. Change safe findings to `accepted` or `false-positive`.
-5. Rerun `airepo audit --repo .`.
-6. Rerun `airepo self-check --repo . --agents`.
+5. Rerun `airepo audit`.
+6. Rerun `airepo self-check --agents`.
 
 Exit code `0` means no active high-severity findings remain, `2` means active high-severity findings were found, and `1` means a fatal audit error occurred. Secret pattern detection remains strict, while Portuguese text and legacy generated artifact findings are warnings so release validation can adopt the audit without blocking on copy cleanup.
 
@@ -1167,10 +1175,10 @@ Existing `.gitignore` content is preserved. If the section already exists it is 
 Examples:
 
 ```powershell
-airepo plan --repo .
-airepo init --repo . --clients codex,vscode,vs --mcp --profile dotnet
-airepo init --repo . --clients codex,vscode,vs --mcp --profile dotnet --apply --backup
-airepo doctor --repo . --target-framework net10.0 --profile dotnet
+airepo plan
+airepo init --clients codex,vscode,vs --mcp --profile dotnet
+airepo init --clients codex,vscode,vs --mcp --profile dotnet --apply --backup
+airepo doctor --target-framework net10.0 --profile dotnet
 ```
 
 ## Safety Policy

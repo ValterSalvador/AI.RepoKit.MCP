@@ -28,6 +28,24 @@ public sealed class BootstrapCommand
         progress.StartPhase("Validating generated files");
         CommandResult validate = new ValidateCommand().Execute(options_);
         progress.CompletePhase("Validation completed");
+
+        string hooksStatus = "Skipped by --no-hooks";
+        if (!options_.SkipHooks)
+        {
+            progress.StartPhase(apply ? "Installing Git hooks" : "Previewing Git hooks");
+            CommandResult hooks = new HooksCommand().Execute(options_.With(command_: "hooks", apply_: apply, dryRun_: !apply));
+            hooksStatus = hooks.Success ? (apply ? "Installed" : "Planned") : $"Warning exit {hooks.ExitCode}";
+            if (hooks.Success)
+            {
+                progress.CompletePhase(apply ? "Git hooks installed" : "Git hooks preview completed");
+            }
+            else
+            {
+                warnings.Add("Git hooks could not be configured. Run airepo hooks --apply for details or use --no-hooks to opt out.");
+                progress.WarnPhase("Git hooks completed with warnings");
+            }
+        }
+
         string codeIndexStatus = "Skipped";
         bool codeIndexPassed = false;
 
@@ -200,7 +218,7 @@ public sealed class BootstrapCommand
         {
             progress.FailPhase("Bootstrap completed with errors");
         }
-        string markdown = WriteReport(options_, doctor, plan, init, validate, codeIndexStatus, mcpBuildStatus, scriptStatuses, warnings, errors, processes);
+        string markdown = WriteReport(options_, doctor, plan, init, validate, codeIndexStatus, mcpBuildStatus, hooksStatus, scriptStatuses, warnings, errors, processes);
         return errors.Count == 0 ? CommandResult.Ok(markdown) : CommandResult.Failure(markdown, 1);
     }
 
@@ -314,6 +332,7 @@ public sealed class BootstrapCommand
         CommandResult validate_,
         string codeIndexStatus_,
         string mcpBuildStatus_,
+        string hooksStatus_,
         IReadOnlyList<string> scriptStatuses_,
         IReadOnlyList<string> warnings_,
         IReadOnlyList<string> errors_,
@@ -351,6 +370,10 @@ public sealed class BootstrapCommand
         builder.AppendLine("## MCP Build Status");
         builder.AppendLine();
         builder.AppendLine($"- {mcpBuildStatus_}");
+        builder.AppendLine();
+        builder.AppendLine("## Git Hooks Status");
+        builder.AppendLine();
+        builder.AppendLine($"- {hooksStatus_}");
         builder.AppendLine();
         builder.AppendLine("## Script Execution Status");
         builder.AppendLine();

@@ -72,7 +72,8 @@ public sealed record BootstrapOptions
         bool validationOnly_ = false,
         bool strictStdio_ = false,
         bool stopStaleMcpHosts_ = false,
-        string testTarget_ = "")
+        string testTarget_ = "",
+        bool skipHooks_ = false)
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -144,6 +145,7 @@ public sealed record BootstrapOptions
         this.StrictStdio = strictStdio_;
         this.StopStaleMcpHosts = stopStaleMcpHosts_;
         this.TestTarget = testTarget_;
+        this.SkipHooks = skipHooks_;
     }
 
     public string Command { get; }
@@ -283,8 +285,10 @@ public sealed record BootstrapOptions
     public bool StrictStdio { get; }
 
     public bool StopStaleMcpHosts { get; }
+
     public string TestTarget { get; }
 
+    public bool SkipHooks { get; }
 
     public BootstrapOptions With(
         string? command_ = null,
@@ -381,6 +385,7 @@ public sealed record BootstrapOptions
             validationOnly_ ?? this.ValidationOnly,
             this.StrictStdio,
             this.StopStaleMcpHosts,
-            testTarget_ ?? this.TestTarget);
+            testTarget_ ?? this.TestTarget,
+            this.SkipHooks);
     }
 }

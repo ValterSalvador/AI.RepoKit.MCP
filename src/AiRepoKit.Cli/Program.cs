@@ -333,6 +333,7 @@ public static class Program
         bool skipBudget = false;
         bool skipSmoke = false;
         bool skipScripts = false;
+        bool skipHooks = false;
         int maxFiles = 3000;
         int maxItems = 10000;
         bool includePrivateMembers = false;
@@ -613,6 +614,13 @@ public static class Program
                 continue;
             }
 
+            if (string.Equals(value, "--no-hooks", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "--skip-hooks", StringComparison.OrdinalIgnoreCase))
+            {
+                skipHooks = true;
+                continue;
+            }
+
             if (string.Equals(value, "--max-files", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
             {
                 if (int.TryParse(args_[++index], out int parsed))
@@ -860,7 +868,7 @@ public static class Program
             resolvedRepoPath = Directory.GetCurrentDirectory();
         }
 
-        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget);
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks);
         if (command is "--help" or "--version" or "help" or "version" or "")
         {
             return parsedOptions;
@@ -874,7 +882,7 @@ public static class Program
             }
 
             ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
-            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks);
         }
         catch
         {
@@ -913,14 +921,14 @@ public static class Program
         Usage:
 
         ```text
-        airepo bootstrap --repo <path> --clients codex,vscode,vs [--mcp] [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
-        airepo setup [--repo <path>] [--apply] [--profile name] [--clients codex,vscode,vs] [--strict] [--summary] [--timings]
+        airepo bootstrap [--repo <path>] --clients codex,vscode,vs [--mcp] [--agents] [--profile generic] [--apply] [--no-hooks] [--backup|--force|--force-managed]
+        airepo setup [--repo <path>] [--apply] [--no-hooks] [--profile name] [--clients codex,vscode,vs] [--strict] [--summary] [--timings]
         airepo detect [--repo <path>] [--json]
         airepo sanitize [--repo <path>] --term <term> --replacement <value> [--apply --backup]
         airepo update [--repo <path>] [--target name] [--test-target name] [--quick|--full|--strict] [--dry-run] [--rebuild-index] [--json] [--summary] [--timings]
         airepo hooks [--repo <path>] [--apply] [--force]
-        airepo init --repo <path> --clients codex,vscode,vs --mcp [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
-        airepo plan --repo <path> [--clients codex,vscode,vs] [--mcp] [--agents] [--profile generic]
+        airepo init [--repo <path>] --clients codex,vscode,vs --mcp [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
+        airepo plan [--repo <path>] [--clients codex,vscode,vs] [--mcp] [--agents] [--profile generic]
         airepo code-index [--repo <path>] [--apply] [--max-files 3000] [--max-items 10000] [--include-private-members] [--format json|markdown|all] [--no-cache|--rebuild-cache|--rebuild-index] [--summary] [--timings]
         airepo context-pack [--repo <path>] [--task change-api|change-ui|fix-build|update-package|review-risk|security-review|test-generation|changed-files] [--target name] [--apply] [--format json|markdown|all] [--limit 20] [--budget 12000] [--skip-code-index|--rebuild-index]
         airepo graph [--repo <path>] [--kind project|symbol|risk] [--format json|markdown|all] [--apply] [--limit 20] [--budget 12000]
@@ -934,10 +942,10 @@ public static class Program
         airepo org self-check [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--no-progress]
         airepo org setup [--root <path>] [--max-depth 3] [--dry-run] [--json|--format markdown|json|csv] [--no-progress]
         airepo org efficiency [--root <path>] [--max-depth 3] [--json|--format markdown|json|csv] [--apply] [--no-progress]
-        airepo doctor --repo <path> [--target-framework net10.0] [--profile generic] [--dry-run|--apply]
-        airepo validate --repo <path>
-        airepo sample --repo <path> [--apply] [--force]
-        airepo configs --repo <path> --clients codex,vscode,vs,claude,cursor,gemini
+        airepo doctor [--repo <path>] [--target-framework net10.0] [--profile generic] [--dry-run|--apply]
+        airepo validate [--repo <path>]
+        airepo sample [--repo <path>] [--apply] [--force]
+        airepo configs [--repo <path>] --clients codex,vscode,vs,claude,cursor,gemini
         airepo --help
         airepo --version
         ```
@@ -976,6 +984,7 @@ public static class Program
         --summary                     Emit a compact human-readable summary where supported.
         --timings                     Show elapsed ms per phase and total duration where supported.
         --no-progress                 Disable terminal progress messages and spinner.
+        --no-hooks                    Do not preview or install Git hooks during setup/bootstrap. Alias: --skip-hooks.
         --budget <tokens>             Approximate context token budget using chars / 4.
         --root <path>                 Organization scan root for org commands. If omitted, current directory.
         --max-depth <number>          Max directory depth for org discovery. Default: 3.

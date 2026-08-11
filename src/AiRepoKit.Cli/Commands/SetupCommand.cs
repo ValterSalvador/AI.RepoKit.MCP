@@ -43,6 +43,8 @@ public sealed class SetupCommand
                 }
             }
 
+            phases.Add(options_.SkipHooks ? "git hooks skipped (--no-hooks)" : "git hooks requested by bootstrap");
+
             progress.StartPhase("Generating changed-files context pack");
             phases.Add("context-pack changed-files");
             RunOptionalContextPack(baseOptions, "changed-files", results, warnings);
@@ -88,6 +90,27 @@ public sealed class SetupCommand
         }
         else
         {
+            if (options_.SkipHooks)
+            {
+                phases.Add("git hooks skipped (--no-hooks)");
+            }
+            else
+            {
+                phases.Add("preview git hooks");
+                progress.StartPhase("Previewing Git hooks");
+                CommandResult previewHooks = new HooksCommand().Execute(baseOptions.With(command_: "hooks", apply_: false, dryRun_: true));
+                results.Add(previewHooks);
+                if (!previewHooks.Success)
+                {
+                    warnings.Add($"Git hooks preview returned exit code {previewHooks.ExitCode}. Run airepo hooks for details.");
+                    progress.WarnPhase("Git hooks preview completed with warnings");
+                }
+                else
+                {
+                    progress.CompletePhase("Git hooks preview completed");
+                }
+            }
+
             phases.Add("preview self-check");
             progress.StartPhase("Running preview self-check");
             CommandResult previewSelfCheck = new SelfCheckCommand().Execute(CreateSetupSelfCheckOptions(baseOptions, options_));
