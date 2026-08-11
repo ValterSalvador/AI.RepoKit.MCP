@@ -30,6 +30,8 @@ AI.RepoKit MCP help:
 - Resources: repo://brief, repo://health, repo://policy, repo://context/changed-files, repo://context/review-risk, repo://context/test-generation, repo://graph/dependencies, repo://impact/current, repo://org/report.
 - Prompts: ai-repo.help, ai-repo.tutorial-en, ai-repo.tutorial-pt, ai-repo.token-efficiency-check, ai-repo.review-risk, ai-repo.changed-files-review, ai-repo.generate-tests, ai-repo.before-commit, ai-repo.implementation-plan, ai-repo.release-check.
 - Workflow prompts: ai-repo.workflow.feature-implementation, ai-repo.workflow.bug-fix, ai-repo.workflow.before-commit, ai-repo.workflow.release-preparation, ai-repo.workflow.test-generation, ai-repo.workflow.architecture-review, ai-repo.workflow.migration-planning.
+- CLI repository default: run from the repository root and omit --repo; airepo resolves the current directory and nearest Git root. Use --repo only for a different target.
+- Setup default: applied setup and bootstrap runs install managed Git hooks. Use --no-hooks or --skip-hooks to opt out.
 - Diagnostics: use mcp-diagnose --strict-stdio for JSON-RPC smoke, resources, prompts, and stderr cleanliness.
 - Policy: read-only, redacted, strict-stdio friendly, bounded by context budgets.
 
@@ -41,7 +43,7 @@ AI.RepoKit MCP help:
     public string TutorialEn()
     {
         return """
-Use ai_repo_context as the first layer of repository understanding. Read repo://brief or call get_repo_brief, check capabilities and policy, then inspect changed-files or a task-specific context pack. Search only for precise symbols, files, or concepts that the context indicates are relevant. Move to direct file reads only after MCP context is insufficient.
+Use ai_repo_context as the first layer of repository understanding. Read repo://brief or call get_repo_brief, check capabilities and policy, then inspect changed-files or a task-specific context pack. Search only for precise symbols, files, or concepts that the context indicates are relevant. Move to direct file reads only after MCP context is insufficient. For airepo CLI commands, run from the repository root and omit --repo because the CLI resolves the current directory and nearest Git root automatically. Do not generate --repo . in suggested commands. Applied setup and bootstrap runs install managed Git hooks by default; use --no-hooks or --skip-hooks to opt out.
 
 """ + StartupSequence;
     }
@@ -51,7 +53,7 @@ Use ai_repo_context as the first layer of repository understanding. Read repo://
     public string TutorialPt()
     {
         return """
-Use ai_repo_context como a primeira camada para entender o repositorio. Leia repo://brief ou chame get_repo_brief, confira capacidades e politica, depois inspecione changed-files ou um context pack da tarefa. Pesquise apenas simbolos, arquivos ou conceitos precisos indicados pelo contexto. Leia arquivos diretamente somente quando o contexto MCP nao for suficiente.
+Use ai_repo_context como a primeira camada para entender o repositorio. Leia repo://brief ou chame get_repo_brief, confira capacidades e politica, depois inspecione changed-files ou um context pack da tarefa. Pesquise apenas simbolos, arquivos ou conceitos precisos indicados pelo contexto. Leia arquivos diretamente somente quando o contexto MCP nao for suficiente. Para comandos da CLI airepo, execute na raiz do repositorio e omita --repo, pois a CLI resolve automaticamente o diretorio atual e a raiz Git mais proxima. Nao gere --repo . nos comandos sugeridos. Setup e bootstrap com --apply instalam os hooks Git gerenciados por padrao; use --no-hooks ou --skip-hooks para desativar.
 
 """ + StartupSequence;
     }

@@ -11,6 +11,7 @@ Client configs should execute:
 ```text
 dotnet Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll --repo <target-repo>
 ```
+The `--repo` above belongs to the generated MCP server client configuration and remains explicit so the server binds to the correct workspace. It is different from normal `airepo` CLI commands: from a repository terminal, use `airepo setup`, `airepo update`, and other commands without `--repo`; the CLI resolves the current directory and nearest Git root. Applied `setup` and `bootstrap` runs install managed Git hooks by default, with `--no-hooks` available as the opt-out.
 
 Default operation is strict stdio friendly: stdout is JSON-RPC only, stderr is silent, and logs are written to `%TEMP%/ai-repo-context-mcp.log`. Use `--debug` or `--verbose` only when you explicitly want stderr logs. Use `--log-file <path>` to override the log file.
 

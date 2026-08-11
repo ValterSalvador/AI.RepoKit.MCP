@@ -564,7 +564,7 @@ Progress output is optional. Use `--no-progress` to suppress spinner and phase m
 
 `vs` is the preferred client name for GitHub Copilot for Visual Studio. The older `visualstudio` client name remains accepted as a deprecated compatibility alias and writes the same `.ai/client-configs/visualstudio-mcp.snippet.json` snippet.
 
-For commands that accept `--repo`, the option is optional. If omitted, `airepo` first tries the executable folder and then the current directory. A folder is treated as a target repository when it has a `.sln`, `.slnx`, root or immediate `.csproj`, `.git`, `.ai`, or `Tools/AiContextMcp`. If neither location looks valid, pass `--repo <path>`.
+For commands that accept `--repo`, the option is optional. If omitted in a terminal, `airepo` starts from the current directory and resolves upward to the nearest Git root, then falls back to repository markers such as `.sln`, `.slnx`, `.csproj`, `.ai`, or `Tools/AiContextMcp`. The executable folder is considered by the standalone double-click flow because it has no reliable shell working directory. Pass `--repo <path>` only to target another repository explicitly.
 
 ### Optional Wrappers
 
@@ -600,6 +600,8 @@ artifacts/publish/linux-arm64/airepo doctor
 
 ## Commands
 
+The commands below use the current repository. Do not generate or append `--repo .`: when `--repo` is omitted, `airepo` starts at the current directory and resolves the nearest Git root automatically.
+
 ```powershell
 airepo setup
 airepo setup --apply
@@ -607,37 +609,43 @@ airepo detect
 airepo detect --json
 airepo sanitize --term <term> --replacement <value>
 airepo sanitize --term <term> --replacement <value> --apply --backup
-airepo sample --repo <path>
-airepo sample --repo <path> --apply
-airepo sample --repo <path> --apply --force
-airepo plan --repo <path>
-airepo init --repo <path> --clients codex,vscode,vs --mcp
-airepo init --repo <path> --clients codex,vscode,vs --mcp --agents
-airepo init --repo <path> --clients codex,vscode,vs --mcp --apply --backup
-airepo bootstrap --repo <path> --clients codex,vscode,vs --mcp
-airepo bootstrap --repo <path> --clients codex,vscode,vs --mcp --agents
-airepo bootstrap --repo <path> --clients codex,vscode,vs --mcp --apply --backup
-airepo validate --repo <path>
-airepo configs --repo <path> --clients codex,vscode,vs,claude,cursor,gemini
-airepo doctor --repo <path>
-airepo code-index --repo <path>
-airepo code-index --repo <path> --apply
-airepo code-index --repo <path> --apply --rebuild-cache
-airepo code-index --repo <path> --apply --no-cache
-airepo context-pack --repo <path>
-airepo context-pack --repo <path> --task change-api --target User --apply
-airepo context-pack --repo <path> --task changed-files --apply --budget 12000
-airepo graph --repo <path>
-airepo graph --repo <path> --kind project --apply
-airepo impact --repo <path>
-airepo impact --repo <path> --since origin/main --budget 12000
-airepo audit --repo <path>
-airepo audit --repo <path> --json
-airepo self-check --repo <path>
-airepo self-check --repo <path> --agents
-airepo self-check --repo <path> --forbidden-term <term>
+airepo sample --repo .tmp/SampleRepo
+airepo sample --repo .tmp/SampleRepo --apply
+airepo plan
+airepo init --clients codex,vscode,vs --mcp
+airepo init --clients codex,vscode,vs --mcp --agents
+airepo init --clients codex,vscode,vs --mcp --apply --backup
+airepo bootstrap --clients codex,vscode,vs --mcp
+airepo bootstrap --clients codex,vscode,vs --mcp --agents
+airepo bootstrap --clients codex,vscode,vs --mcp --apply --backup
+airepo validate
+airepo configs --clients codex,vscode,vs,claude,cursor,gemini
+airepo doctor
+airepo code-index
+airepo code-index --apply
+airepo code-index --apply --rebuild-cache
+airepo code-index --apply --no-cache
+airepo context-pack
+airepo context-pack --task change-api --target User --apply
+airepo context-pack --task changed-files --apply --budget 12000
+airepo graph
+airepo graph --kind project --apply
+airepo impact
+airepo impact --since origin/main --budget 12000
+airepo audit
+airepo audit --json
+airepo self-check
+airepo self-check --agents
+airepo self-check --forbidden-term <term>
 airepo --help
 airepo --version
+```
+
+Use `--repo <path>` only to target a different repository without changing the current PowerShell directory:
+
+```powershell
+airepo setup --repo <other-repo>
+airepo bootstrap --repo <other-repo> --apply
 ```
 
 Equivalent standalone examples when `airepo.exe` is copied to the repository root:
@@ -1057,7 +1065,7 @@ airepo efficiency --refresh --rebuild-index
 airepo efficiency --skip-budget
 ```
 
-`--repo` is optional. When omitted, the command uses the same repository resolver as the other commands: it accepts the executable directory when it looks like a target repository, otherwise it falls back to the current working directory. From a terminal, run it from the repository root to report on that repository. A copied standalone executable can also report on its current directory and will show a warning if repository data is minimal.
+`--repo` is optional. When omitted, the command uses the same repository resolver as the other terminal commands: it starts from the current directory and resolves the nearest Git root. Run it from the repository root to report on that repository. Use `--repo <path>` only for another explicit target.
 
 By default, the command uses smart refresh. It checks whether `.ai/generated/cache/code-index-cache.json`, `symbol-inventory.json`, and `endpoint-inventory.json` are missing or stale, refreshes the RoslynLite code index incrementally when needed, ensures `review-risk` and `fix-build` context packs exist, and tries to run `Tools/AiContext/MeasureMcpResponseBudget.ps1` when available. Refresh failures are warnings; the report continues with the best available local data.
 

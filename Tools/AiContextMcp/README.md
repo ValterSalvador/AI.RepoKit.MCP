@@ -1,6 +1,18 @@
 # AiRepo.ContextMcp
 
-Generic read-only MCP context server for a local repository. It uses the stable `ModelContextProtocol` package and stdio transport. v1.5.0 keeps the compact tool surface and adds MCP Resources and Prompts for discoverability.
+Generic read-only MCP context server for a local repository. It uses the stable `ModelContextProtocol` package and stdio transport. v1.8.1 keeps the compact MCP surface and documents the zero-config repository workflow used by the `airepo` CLI.
+
+## CLI Onboarding
+
+From a repository terminal, omit `--repo`: `airepo` resolves the current directory and nearest Git root automatically. Suggested commands and tutorials should not generate `--repo .`.
+
+```powershell
+airepo setup
+airepo setup --apply
+airepo update --quick
+```
+
+Applied `setup` and `bootstrap` runs install the managed Git hooks by default. Pass `--no-hooks` (alias `--skip-hooks`) to opt out. Use `--repo <path>` only when a CLI command intentionally targets another repository.
 
 ## Transport
 
