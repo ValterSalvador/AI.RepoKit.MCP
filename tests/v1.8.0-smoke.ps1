@@ -29,10 +29,13 @@ if ($help -notmatch 'airepo update' -or $help -notmatch 'airepo hooks') {
     throw 'CLI help does not expose update and hooks.'
 }
 
-$updateJson = Invoke-AiRepo -Arguments @('update', '--repo', $RepoRoot, '--dry-run', '--quick', '--json', '--no-progress')
+$updateJson = Invoke-AiRepo -Arguments @('update', '--repo', $RepoRoot, '--dry-run', '--quick', '--json', '--no-progress') -AllowedExitCodes @(0, 2)
 $update = $updateJson | ConvertFrom-Json
 if ($update.command -ne 'update' -or $update.mode -ne 'dry-run' -or $update.preset -ne 'quick') {
     throw 'update --dry-run --quick returned unexpected metadata.'
+}
+if ($update.exitCode -notin @(0, 2)) {
+    throw "update --dry-run --quick returned unexpected aggregate exit code: $($update.exitCode)"
 }
 
 $phaseNames = @($update.phases | ForEach-Object { $_.Name })
