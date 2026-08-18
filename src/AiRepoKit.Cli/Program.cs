@@ -3,6 +3,8 @@ using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.Profiles;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("AiRepoKit.Cli.Tests")]
+
 namespace AiRepoKit.Cli;
 
 public static class Program
@@ -302,12 +304,13 @@ public static class Program
         return false;
     }
 
-    private static BootstrapOptions Parse(string[] args_)
+    internal static BootstrapOptions Parse(string[] args_, IEnvironmentAccessor? environmentAccessor_ = null)
     {
         string command = args_.Length > 0 ? args_[0] : string.Empty;
         string orgSubcommand = string.Empty;
         string? repoPath = null;
         string rootPath = string.Empty;
+        string? explicitShellRaw = null;
         List<ClientKind> clients = [];
         List<string> unknownOptions = [];
         bool includeMcp = false;
@@ -406,6 +409,19 @@ public static class Program
             if (string.Equals(value, "--repo", StringComparison.OrdinalIgnoreCase) && index + 1 < args_.Length)
             {
                 repoPath = args_[++index];
+                continue;
+            }
+
+            if (string.Equals(value, "--shell", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 < args_.Length && !args_[index + 1].StartsWith("-", StringComparison.Ordinal))
+                {
+                    explicitShellRaw = args_[++index];
+                }
+                else
+                {
+                    unknownOptions.Add(value);
+                }
                 continue;
             }
 
@@ -868,7 +884,18 @@ public static class Program
             resolvedRepoPath = Directory.GetCurrentDirectory();
         }
 
-        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks);
+        ScriptShell scriptShell = ScriptShell.PowerShell;
+        try
+        {
+            ScriptShellResolver resolver = new(environmentAccessor_ ?? new EnvironmentAccessor());
+            scriptShell = resolver.Resolve(explicitShellRaw);
+        }
+        catch (ArgumentException exception)
+        {
+            unknownOptions.Add(exception.Message);
+        }
+
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks, scriptShell);
         if (command is "--help" or "--version" or "help" or "version" or "")
         {
             return parsedOptions;
@@ -882,7 +909,7 @@ public static class Program
             }
 
             ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
-            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks, parsedOptions.ScriptShell);
         }
         catch
         {
@@ -962,6 +989,7 @@ public static class Program
 
         ```text
         --repo <path>                 Target repository. If omitted, airepo resolves upward from the current directory, preferring .git.
+        --shell <powershell|bash|auto> Explicit script shell selection (powershell, bash, auto). Overrides AIREPO_SHELL environment variable. Default: powershell.
         --dry-run                     Plan only. This is the default for init, bootstrap, and sample.
         --apply                       Write planned files.
         --backup                      Back up existing managed files before overwrite.

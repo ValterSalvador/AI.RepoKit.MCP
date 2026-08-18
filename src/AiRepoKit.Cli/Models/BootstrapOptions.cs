@@ -73,7 +73,8 @@ public sealed record BootstrapOptions
         bool strictStdio_ = false,
         bool stopStaleMcpHosts_ = false,
         string testTarget_ = "",
-        bool skipHooks_ = false)
+        bool skipHooks_ = false,
+        ScriptShell scriptShell_ = ScriptShell.PowerShell)
     {
         this.Command = command_;
         this.RepoPath = repoPath_;
@@ -146,6 +147,7 @@ public sealed record BootstrapOptions
         this.StopStaleMcpHosts = stopStaleMcpHosts_;
         this.TestTarget = testTarget_;
         this.SkipHooks = skipHooks_;
+        this.ScriptShell = scriptShell_;
     }
 
     public string Command { get; }
@@ -290,6 +292,8 @@ public sealed record BootstrapOptions
 
     public bool SkipHooks { get; }
 
+    public ScriptShell ScriptShell { get; }
+
     public BootstrapOptions With(
         string? command_ = null,
         bool? includeMcp_ = null,
@@ -313,7 +317,8 @@ public sealed record BootstrapOptions
         bool? auditJson_ = null,
         bool? quick_ = null,
         bool? full_ = null,
-        bool? strict_ = null)
+        bool? strict_ = null,
+        ScriptShell? scriptShell_ = null)
     {
         return new BootstrapOptions(
             command_ ?? this.Command,
@@ -386,6 +391,7 @@ public sealed record BootstrapOptions
             this.StrictStdio,
             this.StopStaleMcpHosts,
             testTarget_ ?? this.TestTarget,
-            this.SkipHooks);
+            this.SkipHooks,
+            scriptShell_ ?? this.ScriptShell);
     }
 }
