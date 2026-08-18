@@ -5,7 +5,7 @@ using AiRepoKit.Cli.Models;
 
 namespace AiRepoKit.Cli.Services;
 
-public sealed class ProcessRunner
+public sealed class ProcessRunner : IProcessRunner
 {
     private static readonly Regex SensitiveLinePattern = new(
         "(secret|password|passwd|pwd|token|apikey|api_key|connectionstring|connection string|privatekey|private key|credential)\\s*[:=]",
