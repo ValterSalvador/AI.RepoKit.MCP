@@ -16,6 +16,18 @@ public sealed class EfficiencyCommand
         WriteIndented = true
     };
 
+    private readonly IScriptRunner _scriptRunner;
+
+    public EfficiencyCommand()
+        : this(ScriptRuntimeFactory.CreateDefault())
+    {
+    }
+
+    internal EfficiencyCommand(IScriptRunner scriptRunner)
+    {
+        _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+    }
+
     private static readonly string[] IgnoredDirectories =
     [
         "bin",
@@ -113,20 +125,25 @@ public sealed class EfficiencyCommand
                 }
                 else
                 {
-                    string script = Path.Combine(repoPath, "Tools", "AiContext", "MeasureMcpResponseBudget.ps1");
-                    if (File.Exists(script))
+                    budgetAttempted = true;
+                    try
                     {
-                        budgetAttempted = true;
-                        ProcessResult budget = new ProcessRunner().Run("powershell", ["-ExecutionPolicy", "Bypass", "-File", script, "-RepoRoot", repoPath], repoPath);
+                        ProcessResult budget = _scriptRunner.RunScript(
+                            ScriptDefinition.McpBudget,
+                            options_.ScriptShell,
+                            repoPath,
+                            scriptArguments: ["-RepoRoot", repoPath]);
+
                         budgetRefreshed = budget.Success;
                         if (!budget.Success)
                         {
                             warnings.Add("MCP budget refresh failed; using existing budget report or fallback generated context estimate.");
                         }
                     }
-                    else
+                    catch (Exception)
                     {
-                        warnings.Add("MCP budget script was not found; using fallback generated context estimate.");
+                        budgetRefreshed = false;
+                        warnings.Add("MCP budget refresh failed; using existing budget report or fallback generated context estimate.");
                     }
                 }
                 progress.CompletePhase(budgetAttempted ? "MCP budget refresh completed" : "MCP budget refresh not run");

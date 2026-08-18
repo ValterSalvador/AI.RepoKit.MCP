@@ -30,7 +30,31 @@ public sealed class ScriptRunner : IScriptRunner
             throw new ArgumentException("Repository root must be provided.", nameof(repositoryRoot));
         }
 
-        ResolvedScriptExecutable executable = _executableResolver.Resolve(requestedShell);
+        ScriptShell targetShell = requestedShell;
+        if (requestedShell == ScriptShell.Auto)
+        {
+            bool hasPowerShell = !string.IsNullOrWhiteSpace(definition.PowerShellRelativePath);
+            bool hasBash = !string.IsNullOrWhiteSpace(definition.BashRelativePath);
+
+            if (hasPowerShell && hasBash)
+            {
+                targetShell = ScriptShell.Auto;
+            }
+            else if (hasPowerShell)
+            {
+                targetShell = ScriptShell.PowerShell;
+            }
+            else if (hasBash)
+            {
+                targetShell = ScriptShell.Bash;
+            }
+            else
+            {
+                throw new InvalidOperationException($"Script '{definition.Name}' does not have any shell implementations.");
+            }
+        }
+
+        ResolvedScriptExecutable executable = _executableResolver.Resolve(targetShell);
 
         string? relativePath = executable.Kind switch
         {

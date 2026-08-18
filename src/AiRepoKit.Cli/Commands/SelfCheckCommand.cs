@@ -16,6 +16,18 @@ public sealed class SelfCheckCommand
         WriteIndented = true
     };
 
+    private readonly IScriptRunner _scriptRunner;
+
+    public SelfCheckCommand()
+        : this(ScriptRuntimeFactory.CreateDefault())
+    {
+    }
+
+    internal SelfCheckCommand(IScriptRunner scriptRunner)
+    {
+        _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+    }
+
     public CommandResult Execute(BootstrapOptions options_)
     {
         using ProgressReporter progress = ProgressReporter.Create(options_);
@@ -120,12 +132,13 @@ public sealed class SelfCheckCommand
             }
             else
             {
-                string budgetScript = "Tools/AiContext/MeasureMcpResponseBudget.ps1";
-                string budgetPath = Path.Combine(repoPath, budgetScript.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(budgetPath))
+                progress.StartPhase("Running budget script");
+                try
                 {
-                    progress.StartPhase("Running budget script");
-                    ProcessResult budget = new ProcessRunner().Run("powershell", ["-ExecutionPolicy", "Bypass", "-File", budgetScript], repoPath);
+                    ProcessResult budget = _scriptRunner.RunScript(
+                        ScriptDefinition.McpBudget,
+                        options_.ScriptShell,
+                        repoPath);
                     checks.Add(new SelfCheckItem("mcp-budget", budget.Success ? "Passed" : "Failed", true, GetProcessMessage(budget), budget.ExitCode));
                     if (budget.Success)
                     {
@@ -136,9 +149,10 @@ public sealed class SelfCheckCommand
                         progress.FailPhase("Budget script failed");
                     }
                 }
-                else
+                catch (Exception ex)
                 {
-                    checks.Add(Failed("mcp-budget", true, $"Missing {budgetScript}."));
+                    checks.Add(Failed("mcp-budget", true, ProcessRunner.Redact(ex.Message)));
+                    progress.FailPhase("Budget script failed");
                 }
             }
 

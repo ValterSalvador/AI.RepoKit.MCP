@@ -693,6 +693,149 @@ public sealed class ScriptRunnerTests
         }
     }
 
+    [Fact]
+    public void RunScript_Auto_PowerShellOnlyDefinition_ResolvesPowerShell()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            string scriptRelPath = "script.ps1";
+            File.WriteAllText(Path.Combine(tempDir, scriptRelPath), "# ps1");
+
+            var def = new ScriptDefinition("test", PowerShellRelativePath: scriptRelPath, BashRelativePath: null);
+            var resolver = new FakeExecutableResolver(new ResolvedScriptExecutable(ScriptShell.PowerShell, ScriptExecutableKind.PowerShellCore, "pwsh"));
+            var processRunner = new FakeProcessRunner();
+
+            var scriptRunner = new ScriptRunner(resolver, processRunner);
+            scriptRunner.RunScript(def, ScriptShell.Auto, tempDir);
+
+            Assert.Equal(ScriptShell.PowerShell, resolver.LastRequestedShell);
+            Assert.Equal(1, processRunner.CallCount);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void RunScript_Auto_BashOnlyDefinition_ResolvesBash()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            string scriptRelPath = "script.sh";
+            File.WriteAllText(Path.Combine(tempDir, scriptRelPath), "# sh");
+
+            var def = new ScriptDefinition("test", PowerShellRelativePath: null, BashRelativePath: scriptRelPath);
+            var resolver = new FakeExecutableResolver(new ResolvedScriptExecutable(ScriptShell.Bash, ScriptExecutableKind.Bash, "bash"));
+            var processRunner = new FakeProcessRunner();
+
+            var scriptRunner = new ScriptRunner(resolver, processRunner);
+            scriptRunner.RunScript(def, ScriptShell.Auto, tempDir);
+
+            Assert.Equal(ScriptShell.Bash, resolver.LastRequestedShell);
+            Assert.Equal(1, processRunner.CallCount);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void RunScript_Auto_BothImplementations_DelegatesAutoToResolver()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            string ps1Rel = "script.ps1";
+            string shRel = "script.sh";
+            File.WriteAllText(Path.Combine(tempDir, ps1Rel), "# ps1");
+            File.WriteAllText(Path.Combine(tempDir, shRel), "# sh");
+
+            var def = new ScriptDefinition("test", PowerShellRelativePath: ps1Rel, BashRelativePath: shRel);
+            var resolver = new FakeExecutableResolver(new ResolvedScriptExecutable(ScriptShell.PowerShell, ScriptExecutableKind.WindowsPowerShell, "powershell.exe"));
+            var processRunner = new FakeProcessRunner();
+
+            var scriptRunner = new ScriptRunner(resolver, processRunner);
+            scriptRunner.RunScript(def, ScriptShell.Auto, tempDir);
+
+            Assert.Equal(ScriptShell.Auto, resolver.LastRequestedShell);
+            Assert.Equal(1, processRunner.CallCount);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void RunScript_Auto_NeitherImplementation_FailsBeforeProcessExecution()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var def = new ScriptDefinition("test", PowerShellRelativePath: null, BashRelativePath: null);
+            var resolver = new FakeExecutableResolver(new ResolvedScriptExecutable(ScriptShell.PowerShell, ScriptExecutableKind.WindowsPowerShell, "powershell.exe"));
+            var processRunner = new FakeProcessRunner();
+
+            var scriptRunner = new ScriptRunner(resolver, processRunner);
+            var ex = Assert.Throws<InvalidOperationException>(() => scriptRunner.RunScript(def, ScriptShell.Auto, tempDir));
+
+            Assert.Null(resolver.LastRequestedShell);
+            Assert.Equal(0, processRunner.CallCount);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void RunScript_ExplicitBash_PowerShellOnlyDefinition_Fails()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var def = new ScriptDefinition("test", PowerShellRelativePath: "script.ps1", BashRelativePath: null);
+            var resolver = new FakeExecutableResolver(new ResolvedScriptExecutable(ScriptShell.Bash, ScriptExecutableKind.Bash, "bash"));
+            var processRunner = new FakeProcessRunner();
+
+            var scriptRunner = new ScriptRunner(resolver, processRunner);
+            var ex = Assert.Throws<InvalidOperationException>(() => scriptRunner.RunScript(def, ScriptShell.Bash, tempDir));
+
+            Assert.Equal(ScriptShell.Bash, resolver.LastRequestedShell);
+            Assert.Equal(0, processRunner.CallCount);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void RunScript_ExplicitPowerShell_BashOnlyDefinition_Fails()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var def = new ScriptDefinition("test", PowerShellRelativePath: null, BashRelativePath: "script.sh");
+            var resolver = new FakeExecutableResolver(new ResolvedScriptExecutable(ScriptShell.PowerShell, ScriptExecutableKind.WindowsPowerShell, "powershell.exe"));
+            var processRunner = new FakeProcessRunner();
+
+            var scriptRunner = new ScriptRunner(resolver, processRunner);
+            var ex = Assert.Throws<InvalidOperationException>(() => scriptRunner.RunScript(def, ScriptShell.PowerShell, tempDir));
+
+            Assert.Equal(ScriptShell.PowerShell, resolver.LastRequestedShell);
+            Assert.Equal(0, processRunner.CallCount);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
     private static string CreateTempRepo()
     {
         string path = Path.Combine(Path.GetTempPath(), "airepo_runner_test_" + Guid.NewGuid().ToString("N"));
@@ -719,6 +862,8 @@ public sealed class ScriptRunnerTests
         private readonly ResolvedScriptExecutable? _executable;
         private readonly Exception? _exception;
 
+        public ScriptShell? LastRequestedShell { get; private set; }
+
         public FakeExecutableResolver(ResolvedScriptExecutable executable)
         {
             _executable = executable;
@@ -731,6 +876,7 @@ public sealed class ScriptRunnerTests
 
         public ResolvedScriptExecutable Resolve(ScriptShell shell)
         {
+            LastRequestedShell = shell;
             if (_exception != null)
             {
                 throw _exception;
