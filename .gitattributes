@@ -1,0 +1,7 @@
+# Canonical repository line endings.
+# Keep source and configuration files stable across Windows, WSL, and Linux.
+* text=auto eol=lf
+
+# Classic Windows command scripts retain CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf

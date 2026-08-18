@@ -25,3 +25,6 @@ Tools/AiContextMcp/obj/
 artifacts/
 .tmp/
 .codex/config.toml
+
+# Local MCP configuration backups
+.mcp.json.*.bak
