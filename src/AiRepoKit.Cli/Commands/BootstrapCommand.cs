@@ -8,6 +8,18 @@ namespace AiRepoKit.Cli.Commands;
 
 public sealed class BootstrapCommand
 {
+    private readonly IScriptRunner _scriptRunner;
+
+    public BootstrapCommand()
+        : this(ScriptRuntimeFactory.CreateDefault())
+    {
+    }
+
+    internal BootstrapCommand(IScriptRunner scriptRunner)
+    {
+        _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+    }
+
     public CommandResult Execute(BootstrapOptions options_)
     {
         using ProgressReporter progress = ProgressReporter.Create(options_);
@@ -159,40 +171,59 @@ public sealed class BootstrapCommand
         {
             foreach (ScriptPlan script in scripts)
             {
+                string scriptDisplayPath = script.Definition.PowerShellRelativePath ?? script.Definition.Name;
                 if (apply)
                 {
-                    progress.StartPhase($"Running AI context script {script.RelativePath}");
-                    string scriptPath = Path.Combine(Path.GetFullPath(options_.RepoPath), script.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(scriptPath))
-                    {
-                        ProcessResult scriptResult = new ProcessRunner().Run("powershell", ["-ExecutionPolicy", "Bypass", "-File", script.RelativePath], Path.GetFullPath(options_.RepoPath));
-                        processes.Add(scriptResult);
-                        scriptStatuses.Add($"{script.RelativePath}: {(scriptResult.Success ? "Passed" : $"Failed exit {scriptResult.ExitCode}")}");
-                        if (scriptResult.Success && string.Equals(script.RelativePath, "Tools/AiContext/UpdateAiContext.ps1", StringComparison.OrdinalIgnoreCase))
-                        {
-                            updateAiContextPassed = true;
-                        }
+                    progress.StartPhase($"Running AI context script {scriptDisplayPath}");
 
-                        if (!scriptResult.Success)
-                        {
-                            errors.Add($"{script.RelativePath} failed.");
-                            progress.FailPhase($"AI context script failed: {script.RelativePath}");
-                        }
-                        else
-                        {
-                            progress.CompletePhase($"AI context script completed: {script.RelativePath}");
-                        }
+                    bool isPowerShellTarget = options_.ScriptShell is ScriptShell.Auto or ScriptShell.PowerShell;
+                    string? expectedPath = isPowerShellTarget ? script.Definition.PowerShellRelativePath : script.Definition.BashRelativePath;
+                    bool isPhysicalMissing = expectedPath != null && !File.Exists(Path.Combine(Path.GetFullPath(options_.RepoPath), expectedPath.Replace('/', Path.DirectorySeparatorChar)));
+
+                    if (isPhysicalMissing)
+                    {
+                        scriptStatuses.Add($"{scriptDisplayPath}: Missing");
+                        warnings.Add($"{scriptDisplayPath} was not found.");
+                        progress.WarnPhase($"AI context script missing: {scriptDisplayPath}");
                     }
                     else
                     {
-                        scriptStatuses.Add($"{script.RelativePath}: Missing");
-                        warnings.Add($"{script.RelativePath} was not found.");
-                        progress.WarnPhase($"AI context script missing: {script.RelativePath}");
+                        try
+                        {
+                            ProcessResult scriptResult = _scriptRunner.RunScript(
+                                script.Definition,
+                                options_.ScriptShell,
+                                Path.GetFullPath(options_.RepoPath));
+
+                            processes.Add(scriptResult);
+                            scriptStatuses.Add($"{scriptDisplayPath}: {(scriptResult.Success ? "Passed" : $"Failed exit {scriptResult.ExitCode}")}");
+
+                            if (scriptResult.Success && string.Equals(script.Definition.Name, "update-ai-context", StringComparison.Ordinal))
+                            {
+                                updateAiContextPassed = true;
+                            }
+
+                            if (!scriptResult.Success)
+                            {
+                                errors.Add($"{scriptDisplayPath} failed.");
+                                progress.FailPhase($"AI context script failed: {scriptDisplayPath}");
+                            }
+                            else
+                            {
+                                progress.CompletePhase($"AI context script completed: {scriptDisplayPath}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            scriptStatuses.Add($"{scriptDisplayPath}: Failed / unable to execute");
+                            errors.Add(ProcessRunner.Redact($"{scriptDisplayPath} execution failed: {ex.Message}"));
+                            progress.FailPhase($"AI context script failed: {scriptDisplayPath}");
+                        }
                     }
                 }
                 else
                 {
-                    scriptStatuses.Add($"{script.RelativePath}: Simulated");
+                    scriptStatuses.Add($"{scriptDisplayPath}: Simulated");
                 }
             }
         }
@@ -297,28 +328,48 @@ public sealed class BootstrapCommand
         return [".ai/manifests/mcp-context-manifest.json"];
     }
 
+    private static readonly ScriptDefinition UpdateAiContextScript = new(
+        "update-ai-context",
+        PowerShellRelativePath: "Tools/AiContext/UpdateAiContext.ps1",
+        BashRelativePath: null);
+
+    private static readonly ScriptDefinition CheckSdkAlignmentScript = new(
+        "check-sdk-alignment",
+        PowerShellRelativePath: "Tools/AiContext/CheckSdkAlignment.ps1",
+        BashRelativePath: null);
+
+    private static readonly ScriptDefinition UpdateCodeInventoryScript = new(
+        "update-code-inventory",
+        PowerShellRelativePath: "Tools/AiContext/UpdateCodeInventory.ps1",
+        BashRelativePath: null);
+
+    private static readonly ScriptDefinition CheckSecretsScript = new(
+        "check-secrets",
+        PowerShellRelativePath: "Tools/AiContext/CheckSecrets.ps1",
+        BashRelativePath: null);
+
     private static IReadOnlyList<ScriptPlan> GetScripts(BootstrapOptions options_, bool codeIndexPassed_)
     {
         List<ScriptPlan> scripts = [];
         if (!options_.SkipAiContext)
         {
-            scripts.Add(new ScriptPlan("Tools/AiContext/UpdateAiContext.ps1"));
-            scripts.Add(new ScriptPlan("Tools/AiContext/CheckSdkAlignment.ps1"));
+            scripts.Add(new ScriptPlan(UpdateAiContextScript));
+            scripts.Add(new ScriptPlan(CheckSdkAlignmentScript));
         }
 
         if (!options_.SkipCodeInventory && !codeIndexPassed_)
         {
-            scripts.Add(new ScriptPlan("Tools/AiContext/UpdateCodeInventory.ps1"));
+            scripts.Add(new ScriptPlan(UpdateCodeInventoryScript));
         }
 
         if (!options_.SkipSecurityScan)
         {
-            scripts.Add(new ScriptPlan("Tools/AiContext/CheckSecrets.ps1"));
+            scripts.Add(new ScriptPlan(CheckSecretsScript));
         }
 
         if (!options_.SkipBudget)
         {
-            scripts.Add(new ScriptPlan("Tools/AiContext/MeasureMcpResponseBudget.ps1"));
+            scripts.Add(new ScriptPlan(ScriptDefinition.McpBudget));
         }
 
         return scripts;
@@ -466,5 +517,5 @@ public sealed class BootstrapCommand
         }
     }
 
-    private sealed record ScriptPlan(string RelativePath);
+    private sealed record ScriptPlan(ScriptDefinition Definition);
 }

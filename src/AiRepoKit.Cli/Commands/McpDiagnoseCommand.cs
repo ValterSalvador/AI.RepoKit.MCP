@@ -14,6 +14,18 @@ public sealed class McpDiagnoseCommand
         WriteIndented = true
     };
 
+    private readonly IScriptRunner _scriptRunner;
+
+    public McpDiagnoseCommand()
+        : this(ScriptRuntimeFactory.CreateDefault())
+    {
+    }
+
+    internal McpDiagnoseCommand(IScriptRunner scriptRunner)
+    {
+        _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+    }
+
     public CommandResult Execute(BootstrapOptions options_)
     {
         using ProgressReporter progress = ProgressReporter.Create(options_);
@@ -93,7 +105,7 @@ public sealed class McpDiagnoseCommand
             else
             {
                 progress.StartPhase("Running budget script");
-                McpDiagnosticItem budgetCheck = Measure(out long elapsedMilliseconds, () => RunBudget(repoPath));
+                McpDiagnosticItem budgetCheck = Measure(out long elapsedMilliseconds, () => RunBudget(options_, repoPath));
                 checks.Add(WithTiming(budgetCheck, elapsedMilliseconds, "budget"));
                 McpDiagnosticItem budget = checks[^1];
                 if (budget.Status is "Passed" or "Warning")
@@ -445,17 +457,37 @@ public sealed class McpDiagnoseCommand
         return new McpDiagnosticItem("mcp-build", build.Success ? "Passed" : "Failed", true, build.Success ? "Release MCP build passed." : GetProcessMessage(build), null, GetProcessDetails(build));
     }
 
-    private static McpDiagnosticItem RunBudget(string repoPath_)
+    private McpDiagnosticItem RunBudget(BootstrapOptions options_, string repoPath_)
     {
-        string script = "Tools/AiContext/MeasureMcpResponseBudget.ps1";
-        string scriptPath = Path.Combine(repoPath_, script.Replace('/', Path.DirectorySeparatorChar));
-        if (!File.Exists(scriptPath))
+        if (options_.ScriptShell is ScriptShell.Auto or ScriptShell.PowerShell)
         {
-            return Warning("budget", false, "Tools/AiContext/MeasureMcpResponseBudget.ps1 is missing.");
+            string scriptPath = Path.Combine(repoPath_, "Tools", "AiContext", "MeasureMcpResponseBudget.ps1");
+            if (!File.Exists(scriptPath))
+            {
+                return Warning("budget", false, "Tools/AiContext/MeasureMcpResponseBudget.ps1 is missing.");
+            }
         }
 
-        ProcessResult result = new ProcessRunner().Run("powershell", ["-ExecutionPolicy", "Bypass", "-File", script, "-RepoRoot", repoPath_], repoPath_);
-        return new McpDiagnosticItem("budget", result.Success ? "Passed" : "Failed", false, result.Success ? "MeasureMcpResponseBudget.ps1 passed." : GetProcessMessage(result), null, GetProcessDetails(result));
+        try
+        {
+            ProcessResult result = _scriptRunner.RunScript(
+                ScriptDefinition.McpBudget,
+                options_.ScriptShell,
+                repoPath_,
+                scriptArguments: ["-RepoRoot", repoPath_]);
+
+            return new McpDiagnosticItem(
+                "budget",
+                result.Success ? "Passed" : "Failed",
+                false,
+                result.Success ? "MeasureMcpResponseBudget.ps1 passed." : GetProcessMessage(result),
+                null,
+                GetProcessDetails(result));
+        }
+        catch (Exception ex)
+        {
+            return Failed("budget", false, ProcessRunner.Redact(ex.Message));
+        }
     }
 
     private static (McpBuildResult BuildResult, McpHostProcessStopResult? StopResult) BuildMcpWithOptionalStaleHostRetry(BootstrapOptions options_, string repoPath_)
