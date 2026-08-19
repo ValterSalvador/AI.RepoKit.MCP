@@ -6,6 +6,7 @@ using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Models.Efficiency;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.CodeIndex;
+using AiRepoKit.Cli.Services.McpBudget;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -16,16 +17,16 @@ public sealed class EfficiencyCommand
         WriteIndented = true
     };
 
-    private readonly IScriptRunner _scriptRunner;
+    private readonly IMcpBudgetService _mcpBudgetService;
 
     public EfficiencyCommand()
-        : this(ScriptRuntimeFactory.CreateDefault())
+        : this(new McpBudgetService())
     {
     }
 
-    internal EfficiencyCommand(IScriptRunner scriptRunner)
+    internal EfficiencyCommand(IMcpBudgetService mcpBudgetService)
     {
-        _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+        _mcpBudgetService = mcpBudgetService ?? throw new ArgumentNullException(nameof(mcpBudgetService));
     }
 
     private static readonly string[] IgnoredDirectories =
@@ -128,14 +129,9 @@ public sealed class EfficiencyCommand
                     budgetAttempted = true;
                     try
                     {
-                        ProcessResult budget = _scriptRunner.RunScript(
-                            ScriptDefinition.McpBudget,
-                            options_.ScriptShell,
-                            repoPath,
-                            scriptArguments: ["-RepoRoot", repoPath]);
-
-                        budgetRefreshed = budget.Success;
-                        if (!budget.Success)
+                        McpBudgetRunResult budget = _mcpBudgetService.Run(repoPath);
+                        budgetRefreshed = budget.IsSuccess;
+                        if (!budget.IsSuccess)
                         {
                             warnings.Add("MCP budget refresh failed; using existing budget report or fallback generated context estimate.");
                         }

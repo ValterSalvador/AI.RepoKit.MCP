@@ -1,6 +1,7 @@
 using AiRepoKit.Cli.Commands;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.McpBudget;
 using Xunit;
 
 namespace AiRepoKit.Cli.Tests;
@@ -8,22 +9,27 @@ namespace AiRepoKit.Cli.Tests;
 public sealed class SelfCheckCommandTests
 {
     [Fact]
-    public void SelfCheck_PassesScriptShellAndDefinitionToScriptRunner()
+    public void SelfCheck_UsesMcpBudgetServiceAndPassesRepositoryRoot()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeService = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 0, "budget ok", string.Empty)
+                ResultToReturn = CreateBudgetResult(
+                    tempDir,
+                    McpBudgetExitClass.Success,
+                    passed: true)
             };
-            var command = new SelfCheckCommand(fakeRunner);
+
+            var command = new SelfCheckCommand(fakeService);
             BootstrapOptions options = CreateOptions(tempDir, ScriptShell.PowerShell);
 
-            CommandResult result = command.Execute(options);
+            command.Execute(options);
 
-            Assert.Equal(ScriptShell.PowerShell, fakeRunner.LastRequestedShell);
-            Assert.Equal(ScriptDefinition.McpBudget, fakeRunner.LastDefinition);
+            Assert.Equal(1, fakeService.InvocationCount);
+            Assert.Equal(Path.GetFullPath(tempDir), fakeService.LastRepositoryRoot);
+            Assert.Null(fakeService.LastOptions);
         }
         finally
         {
@@ -32,16 +38,20 @@ public sealed class SelfCheckCommandTests
     }
 
     [Fact]
-    public void SelfCheck_SuccessfulProcessResult_ProducesPassedCheck()
+    public void SelfCheck_SuccessfulMcpBudget_ProducesPassedCheck()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeService = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 0, "budget ok", string.Empty)
+                ResultToReturn = CreateBudgetResult(
+                    tempDir,
+                    McpBudgetExitClass.Success,
+                    passed: true)
             };
-            var command = new SelfCheckCommand(fakeRunner);
+
+            var command = new SelfCheckCommand(fakeService);
             BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -56,22 +66,28 @@ public sealed class SelfCheckCommandTests
     }
 
     [Fact]
-    public void SelfCheck_FailedProcessResult_ProducesFailedCheck()
+    public void SelfCheck_FailedMcpBudget_ProducesFailedCheck()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeService = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "budget failed error")
+                ResultToReturn = CreateBudgetResult(
+                    tempDir,
+                    McpBudgetExitClass.ValidationFailure,
+                    passed: false,
+                    "get_repo_brief failed smoke validation.")
             };
-            var command = new SelfCheckCommand(fakeRunner);
+
+            var command = new SelfCheckCommand(fakeService);
             BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
 
             Assert.Contains("\"mcp-budget\"", result.Markdown);
             Assert.Contains("\"Failed\"", result.Markdown);
+            Assert.Contains("get_repo_brief failed smoke validation.", result.Markdown);
             Assert.DoesNotContain("\"fatal\"", result.Markdown);
         }
         finally
@@ -81,22 +97,24 @@ public sealed class SelfCheckCommandTests
     }
 
     [Fact]
-    public void SelfCheck_PreLaunchException_ProducesFailedCheckAndNotFatal()
+    public void SelfCheck_McpBudgetException_ProducesFailedCheckAndNotFatal()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeService = new FakeMcpBudgetService
             {
-                ExceptionToThrow = new InvalidOperationException("Script 'mcp-budget' does not have a Bash implementation.")
+                ExceptionToThrow = new InvalidOperationException("MCP budget service unavailable.")
             };
-            var command = new SelfCheckCommand(fakeRunner);
+
+            var command = new SelfCheckCommand(fakeService);
             BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
 
             Assert.Contains("\"mcp-budget\"", result.Markdown);
             Assert.Contains("\"Failed\"", result.Markdown);
+            Assert.Contains("MCP budget service unavailable.", result.Markdown);
             Assert.DoesNotContain("\"fatal\"", result.Markdown);
         }
         finally
@@ -105,7 +123,115 @@ public sealed class SelfCheckCommandTests
         }
     }
 
-    private static BootstrapOptions CreateOptions(string repoPath, ScriptShell shell)
+    [Fact]
+    public void SelfCheck_MissingCompatibilityBudgetScript_DoesNotBlockNativeBudget()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            string compatibilityScript = Path.Combine(
+                tempDir,
+                "Tools",
+                "AiContext",
+                "MeasureMcpResponseBudget.ps1");
+
+            Assert.False(File.Exists(compatibilityScript));
+
+            var fakeService = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateBudgetResult(
+                    tempDir,
+                    McpBudgetExitClass.Success,
+                    passed: true)
+            };
+
+            var command = new SelfCheckCommand(fakeService);
+            BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Auto);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.Equal(1, fakeService.InvocationCount);
+            Assert.Contains("\"mcp-budget\"", result.Markdown);
+            Assert.Contains("\"Passed\"", result.Markdown);
+            Assert.DoesNotContain(
+                "required-file:Tools/AiContext/MeasureMcpResponseBudget.ps1",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void SelfCheck_BashShell_DoesNotAffectNativeBudgetExecution()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var fakeService = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateBudgetResult(
+                    tempDir,
+                    McpBudgetExitClass.Success,
+                    passed: true)
+            };
+
+            var command = new SelfCheckCommand(fakeService);
+            BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Bash);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.Equal(1, fakeService.InvocationCount);
+            Assert.Equal(Path.GetFullPath(tempDir), fakeService.LastRepositoryRoot);
+            Assert.Contains("\"mcp-budget\"", result.Markdown);
+            Assert.Contains("\"Passed\"", result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    private static McpBudgetRunResult CreateBudgetResult(
+        string repoPath,
+        McpBudgetExitClass exitClass,
+        bool passed,
+        params string[] failures)
+    {
+        return new McpBudgetRunResult(
+            exitClass,
+            new McpBudgetReport
+            {
+                GeneratedAtLocal = "2026-08-19 00:00:00",
+                RepoRoot = Path.GetFullPath(repoPath),
+                McpAssembly = Path.Combine(
+                    Path.GetFullPath(repoPath),
+                    "Tools",
+                    "AiContextMcp",
+                    "bin",
+                    "Release",
+                    "net10.0",
+                    "AiRepo.ContextMcp.dll"),
+                McpAssemblyExists = true,
+                Manifest = Path.Combine(
+                    Path.GetFullPath(repoPath),
+                    ".ai",
+                    "manifests",
+                    "mcp-context-manifest.json"),
+                ToolsListed = [],
+                Results = [],
+                Passed = passed,
+                Failures = failures,
+                Warnings = [],
+                StderrLineCount = 0,
+                StdoutLineCount = 0
+            });
+    }
+
+    private static BootstrapOptions CreateOptions(
+        string repoPath,
+        ScriptShell shell)
     {
         return new BootstrapOptions(
             command_: "self-check",
@@ -184,52 +310,60 @@ public sealed class SelfCheckCommandTests
 
     private static string CreateTempRepo()
     {
-        string path = Path.Combine(Path.GetTempPath(), "airepo_selfcheck_test_" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(
+            Path.GetTempPath(),
+            "airepo_selfcheck_test_" + Guid.NewGuid().ToString("N"));
+
         Directory.CreateDirectory(path);
         return path;
     }
 
     private static void DeleteTempRepo(string path)
     {
-        if (Directory.Exists(path))
+        if (!Directory.Exists(path))
         {
-            try
-            {
-                Directory.Delete(path, true);
-            }
-            catch
-            {
-            }
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch
+        {
         }
     }
 
-    private sealed class FakeScriptRunner : IScriptRunner
+    private sealed class FakeMcpBudgetService : IMcpBudgetService
     {
-        public ScriptDefinition? LastDefinition { get; private set; }
-        public ScriptShell? LastRequestedShell { get; private set; }
-        public string? LastRepositoryRoot { get; private set; }
-        public List<string>? LastScriptArguments { get; private set; }
-        public ProcessResult? ResultToReturn { get; set; }
+        public McpBudgetRunResult? ResultToReturn { get; set; }
+
         public Exception? ExceptionToThrow { get; set; }
 
-        public ProcessResult RunScript(
-            ScriptDefinition definition,
-            ScriptShell requestedShell,
-            string repositoryRoot,
-            IEnumerable<string>? scriptArguments = null,
-            string? workingDirectory = null)
-        {
-            LastDefinition = definition;
-            LastRequestedShell = requestedShell;
-            LastRepositoryRoot = repositoryRoot;
-            LastScriptArguments = scriptArguments?.ToList();
+        public int InvocationCount { get; private set; }
 
-            if (ExceptionToThrow != null)
+        public string? LastRepositoryRoot { get; private set; }
+
+        public McpBudgetOptions? LastOptions { get; private set; }
+
+        public McpBudgetRunResult Run(
+            string repoRoot,
+            McpBudgetOptions? options = null)
+        {
+            InvocationCount++;
+            LastRepositoryRoot = repoRoot;
+            LastOptions = options;
+
+            if (ExceptionToThrow is not null)
             {
                 throw ExceptionToThrow;
             }
 
-            return ResultToReturn ?? new ProcessResult("test", string.Empty, repositoryRoot, 0, "ok", string.Empty);
+            return ResultToReturn
+                ?? SelfCheckCommandTests.CreateBudgetResult(
+                    repoRoot,
+                    McpBudgetExitClass.Success,
+                    passed: true);
         }
     }
 }

@@ -3,21 +3,26 @@ using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Models.ManagedFiles;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.ManagedFiles;
+using AiRepoKit.Cli.Services.McpBudget;
 
 namespace AiRepoKit.Cli.Commands;
 
 public sealed class BootstrapCommand
 {
     private readonly IScriptRunner _scriptRunner;
+    private readonly IMcpBudgetService _mcpBudgetService;
 
     public BootstrapCommand()
-        : this(ScriptRuntimeFactory.CreateDefault())
+        : this(ScriptRuntimeFactory.CreateDefault(), new McpBudgetService())
     {
     }
 
-    internal BootstrapCommand(IScriptRunner scriptRunner)
+    /// <summary>Internal constructor for testing. McpBudgetService is nullable to avoid
+    /// breaking existing tests that only pass a FakeScriptRunner.</summary>
+    internal BootstrapCommand(IScriptRunner scriptRunner, IMcpBudgetService? mcpBudgetService = null)
     {
         _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+        _mcpBudgetService = mcpBudgetService ?? new McpBudgetService();
     }
 
     public CommandResult Execute(BootstrapOptions options_)
@@ -241,6 +246,44 @@ public sealed class BootstrapCommand
             RefreshManagedManifestForScriptOutputs(options_, scriptRefreshEligiblePaths);
         }
 
+        // ── Native MCP budget (IMcpBudgetService) ──────────────────────────────
+        // mcp-budget is no longer in GetScripts(); it runs as a separate native step.
+        string budgetStatus = "Skipped";
+        if (!options_.SkipBudget && options_.IncludeMcp)
+        {
+            if (apply)
+            {
+                progress.StartPhase("Running MCP budget");
+                try
+                {
+                    McpBudgetRunResult budgetResult = _mcpBudgetService.Run(Path.GetFullPath(options_.RepoPath));
+                    if (budgetResult.IsSuccess)
+                    {
+                        budgetStatus = "Passed";
+                        progress.CompletePhase("MCP budget completed");
+                    }
+                    else
+                    {
+                        budgetStatus = $"Failed (exit {(int)budgetResult.ExitClass})";
+                        errors.Add($"MCP budget validation failed: {string.Join("; ", budgetResult.Report.Failures.Take(3))}");
+                        progress.FailPhase("MCP budget failed");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    budgetStatus = "Failed";
+                    errors.Add(ProcessRunner.Redact($"MCP budget execution failed: {ex.Message}"));
+                    progress.FailPhase("MCP budget failed");
+                }
+            }
+            else
+            {
+                budgetStatus = "Simulated";
+            }
+        }
+
+        scriptStatuses.Add($"mcp-budget: {budgetStatus}");
+
         if (errors.Count == 0)
         {
             progress.CompletePhase("Bootstrap completed");
@@ -367,10 +410,8 @@ public sealed class BootstrapCommand
             scripts.Add(new ScriptPlan(CheckSecretsScript));
         }
 
-        if (!options_.SkipBudget)
-        {
-            scripts.Add(new ScriptPlan(ScriptDefinition.McpBudget));
-        }
+        // Note: mcp-budget is intentionally absent — it runs as a native IMcpBudgetService
+        // step separately from the script runner loop (P02.1).
 
         return scripts;
     }

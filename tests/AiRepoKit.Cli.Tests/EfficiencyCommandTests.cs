@@ -1,6 +1,6 @@
 using AiRepoKit.Cli.Commands;
 using AiRepoKit.Cli.Models;
-using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.McpBudget;
 using Xunit;
 
 namespace AiRepoKit.Cli.Tests;
@@ -8,24 +8,22 @@ namespace AiRepoKit.Cli.Tests;
 public sealed class EfficiencyCommandTests
 {
     [Fact]
-    public void Efficiency_PassesScriptShellAndIndividualArgumentsToScriptRunner()
+    public void Efficiency_NativeBudgetService_IsInvokedWithRepoRoot()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeBudget = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
+                ResultToReturn = CreateSuccessResult(tempDir)
             };
-            var command = new EfficiencyCommand(fakeRunner);
-            BootstrapOptions options = CreateOptions(tempDir, ScriptShell.PowerShell);
+            var command = new EfficiencyCommand(fakeBudget);
+            BootstrapOptions options = CreateOptions(tempDir, skipBudget: false);
 
-            CommandResult result = command.Execute(options);
+            command.Execute(options);
 
-            Assert.Equal(ScriptShell.PowerShell, fakeRunner.LastRequestedShell);
-            Assert.Equal(ScriptDefinition.McpBudget, fakeRunner.LastDefinition);
-            Assert.NotNull(fakeRunner.LastScriptArguments);
-            Assert.Equal(new[] { "-RepoRoot", tempDir }, fakeRunner.LastScriptArguments);
+            Assert.Equal(1, fakeBudget.InvocationCount);
+            Assert.Equal(Path.GetFullPath(tempDir), fakeBudget.LastRepoRoot);
         }
         finally
         {
@@ -34,17 +32,17 @@ public sealed class EfficiencyCommandTests
     }
 
     [Fact]
-    public void Efficiency_SuccessfulProcessResult_SetsBudgetRefreshedTrue()
+    public void Efficiency_SuccessfulNativeBudget_SetsBudgetRefreshedTrue()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeBudget = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
+                ResultToReturn = CreateSuccessResult(tempDir)
             };
-            var command = new EfficiencyCommand(fakeRunner);
-            BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Auto);
+            var command = new EfficiencyCommand(fakeBudget);
+            BootstrapOptions options = CreateOptions(tempDir, skipBudget: false);
 
             CommandResult result = command.Execute(options);
 
@@ -59,21 +57,21 @@ public sealed class EfficiencyCommandTests
     }
 
     [Fact]
-    public void Efficiency_FailedProcessResult_PreservesFallbackAndSetsBudgetRefreshedFalse()
+    public void Efficiency_FailedNativeBudget_PreservesFallbackAndSetsBudgetRefreshedFalse()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeBudget = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "error")
+                ResultToReturn = CreateFailureResult(tempDir)
             };
-            var command = new EfficiencyCommand(fakeRunner);
-            BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Auto);
+            var command = new EfficiencyCommand(fakeBudget);
+            BootstrapOptions options = CreateOptions(tempDir, skipBudget: false);
 
             CommandResult result = command.Execute(options);
 
-            Assert.True(result.Success);
+            Assert.True(result.Success); // Efficiency is non-fatal on budget failure
             Assert.Contains("\"McpBudgetAttempted\": true", result.Markdown);
             Assert.Contains("\"McpBudgetRefreshed\": false", result.Markdown);
             Assert.Contains("MCP budget refresh failed", result.Markdown);
@@ -85,21 +83,22 @@ public sealed class EfficiencyCommandTests
     }
 
     [Fact]
-    public void Efficiency_ScriptRunnerException_PreservesFallbackAndDoesNotFailCommand()
+    public void Efficiency_NativeBudgetServiceException_PreservesFallbackAndDoesNotFailCommand()
     {
         string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeBudget = new FakeMcpBudgetService
             {
-                ExceptionToThrow = new InvalidOperationException("Script 'mcp-budget' does not have a Bash implementation.")
+                ExceptionToThrow = new InvalidOperationException("MCP budget service failed unexpectedly.")
             };
-            var command = new EfficiencyCommand(fakeRunner);
-            BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Bash);
+            var command = new EfficiencyCommand(fakeBudget);
+            // Even with Bash shell, native service is invoked (ScriptShell independence)
+            BootstrapOptions options = CreateOptions(tempDir, skipBudget: false, shell: ScriptShell.Bash);
 
             CommandResult result = command.Execute(options);
 
-            Assert.True(result.Success);
+            Assert.True(result.Success); // Non-fatal fallback
             Assert.Contains("\"McpBudgetAttempted\": true", result.Markdown);
             Assert.Contains("\"McpBudgetRefreshed\": false", result.Markdown);
             Assert.Contains("MCP budget refresh failed", result.Markdown);
@@ -110,7 +109,74 @@ public sealed class EfficiencyCommandTests
         }
     }
 
-    private static BootstrapOptions CreateOptions(string repoPath, ScriptShell shell)
+    [Fact]
+    public void Efficiency_BashShell_InvokesNativeBudgetWithoutScriptShellDependency()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var fakeBudget = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateSuccessResult(tempDir)
+            };
+            var command = new EfficiencyCommand(fakeBudget);
+            BootstrapOptions options = CreateOptions(tempDir, skipBudget: false, shell: ScriptShell.Bash);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.Equal(1, fakeBudget.InvocationCount);
+            Assert.Null(fakeBudget.LastOptions); // No ScriptShell passed to native service
+            Assert.Contains("\"McpBudgetRefreshed\": true", result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    private static McpBudgetRunResult CreateSuccessResult(string repoPath)
+    {
+        return new McpBudgetRunResult(
+            McpBudgetExitClass.Success,
+            new McpBudgetReport
+            {
+                GeneratedAtLocal = "2026-08-19 00:00:00",
+                RepoRoot = Path.GetFullPath(repoPath),
+                McpAssembly = string.Empty,
+                McpAssemblyExists = false,
+                Manifest = null,
+                ToolsListed = [],
+                Results = [],
+                Passed = true,
+                Failures = [],
+                Warnings = [],
+                StderrLineCount = 0,
+                StdoutLineCount = 0
+            });
+    }
+
+    private static McpBudgetRunResult CreateFailureResult(string repoPath)
+    {
+        return new McpBudgetRunResult(
+            McpBudgetExitClass.ValidationFailure,
+            new McpBudgetReport
+            {
+                GeneratedAtLocal = "2026-08-19 00:00:00",
+                RepoRoot = Path.GetFullPath(repoPath),
+                McpAssembly = string.Empty,
+                McpAssemblyExists = false,
+                Manifest = null,
+                ToolsListed = [],
+                Results = [],
+                Passed = false,
+                Failures = ["get_repo_brief failed smoke validation."],
+                Warnings = [],
+                StderrLineCount = 0,
+                StdoutLineCount = 0
+            });
+    }
+
+    private static BootstrapOptions CreateOptions(string repoPath, bool skipBudget, ScriptShell shell = ScriptShell.Auto)
     {
         return new BootstrapOptions(
             command_: "efficiency",
@@ -134,7 +200,7 @@ public sealed class EfficiencyCommandTests
             skipAiContext_: true,
             skipCodeInventory_: true,
             skipSecurityScan_: true,
-            skipBudget_: false,
+            skipBudget_: skipBudget,
             skipSmoke_: true,
             skipScripts_: true,
             maxFiles_: 100,
@@ -200,43 +266,25 @@ public sealed class EfficiencyCommandTests
     {
         if (Directory.Exists(path))
         {
-            try
-            {
-                Directory.Delete(path, true);
-            }
-            catch
-            {
-            }
+            try { Directory.Delete(path, true); } catch { }
         }
     }
 
-    private sealed class FakeScriptRunner : IScriptRunner
+    private sealed class FakeMcpBudgetService : IMcpBudgetService
     {
-        public ScriptDefinition? LastDefinition { get; private set; }
-        public ScriptShell? LastRequestedShell { get; private set; }
-        public string? LastRepositoryRoot { get; private set; }
-        public List<string>? LastScriptArguments { get; private set; }
-        public ProcessResult? ResultToReturn { get; set; }
+        public int InvocationCount { get; private set; }
+        public string? LastRepoRoot { get; private set; }
+        public McpBudgetOptions? LastOptions { get; private set; }
+        public McpBudgetRunResult? ResultToReturn { get; set; }
         public Exception? ExceptionToThrow { get; set; }
 
-        public ProcessResult RunScript(
-            ScriptDefinition definition,
-            ScriptShell requestedShell,
-            string repositoryRoot,
-            IEnumerable<string>? scriptArguments = null,
-            string? workingDirectory = null)
+        public McpBudgetRunResult Run(string repoRoot, McpBudgetOptions? options = null)
         {
-            LastDefinition = definition;
-            LastRequestedShell = requestedShell;
-            LastRepositoryRoot = repositoryRoot;
-            LastScriptArguments = scriptArguments?.ToList();
-
-            if (ExceptionToThrow != null)
-            {
-                throw ExceptionToThrow;
-            }
-
-            return ResultToReturn ?? new ProcessResult("test", string.Empty, repositoryRoot, 0, "ok", string.Empty);
+            InvocationCount++;
+            LastRepoRoot = repoRoot;
+            LastOptions = options;
+            if (ExceptionToThrow is not null) throw ExceptionToThrow;
+            return ResultToReturn ?? throw new InvalidOperationException("No result configured.");
         }
     }
 }

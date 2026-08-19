@@ -1,6 +1,7 @@
 using AiRepoKit.Cli.Commands;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.McpBudget;
 using Xunit;
 
 namespace AiRepoKit.Cli.Tests;
@@ -14,7 +15,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.PowerShell);
 
             CommandResult result = command.Execute(options);
@@ -35,7 +36,8 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner);
+            var fakeBudget = new FakeMcpBudgetService();
+            var command = new BootstrapCommand(fakeRunner, fakeBudget);
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -44,7 +46,9 @@ public sealed class BootstrapCommandTests
             Assert.Contains("update-ai-context", scriptNames);
             Assert.Contains("check-sdk-alignment", scriptNames);
             Assert.Contains("check-secrets", scriptNames);
-            Assert.Contains("mcp-budget", scriptNames);
+            // mcp-budget is now a native service step, not in the script runner loop.
+            Assert.DoesNotContain("mcp-budget", scriptNames);
+            Assert.Equal(1, fakeBudget.InvocationCount);
         }
         finally
         {
@@ -59,7 +63,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: false, dryRun: true, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -83,7 +87,7 @@ public sealed class BootstrapCommandTests
             {
                 ResultHandler = (def, shell) => new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
             };
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -109,7 +113,7 @@ public sealed class BootstrapCommandTests
                     ? new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "secret leak detected")
                     : new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
             };
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -135,7 +139,7 @@ public sealed class BootstrapCommandTests
             {
                 ExceptionToThrow = new InvalidOperationException("Executable resolution failed.")
             };
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -161,7 +165,7 @@ public sealed class BootstrapCommandTests
             {
                 ExceptionToThrow = new InvalidOperationException("Script 'update-ai-context' does not have a Bash implementation.")
             };
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Bash);
 
             CommandResult result = command.Execute(options);
@@ -188,7 +192,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -221,7 +225,7 @@ public sealed class BootstrapCommandTests
                     return new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty);
                 }
             };
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -247,7 +251,7 @@ public sealed class BootstrapCommandTests
                     ? new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "check-secrets failed")
                     : new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
             };
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -269,7 +273,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto, skipCodeInventory: true);
 
             CommandResult result = command.Execute(options);
@@ -290,7 +294,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner);
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto, skipCodeInventory: false, format: "invalid");
 
             CommandResult result = command.Execute(options);
@@ -469,6 +473,36 @@ public sealed class BootstrapCommandTests
             }
 
             return new ProcessResult("pwsh", string.Empty, repositoryRoot, 0, "ok", string.Empty);
+        }
+    }
+
+    private sealed class FakeMcpBudgetService : IMcpBudgetService
+    {
+        public int InvocationCount { get; private set; }
+        public Exception? ExceptionToThrow { get; set; }
+        public McpBudgetRunResult? ResultToReturn { get; set; }
+
+        public McpBudgetRunResult Run(string repoRoot, McpBudgetOptions? options = null)
+        {
+            InvocationCount++;
+            if (ExceptionToThrow is not null) throw ExceptionToThrow;
+            return ResultToReturn ?? new McpBudgetRunResult(
+                McpBudgetExitClass.Success,
+                new McpBudgetReport
+                {
+                    GeneratedAtLocal = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    RepoRoot = repoRoot,
+                    McpAssembly = string.Empty,
+                    McpAssemblyExists = false,
+                    Manifest = null,
+                    ToolsListed = [],
+                    Results = [],
+                    Passed = true,
+                    Failures = [],
+                    Warnings = [],
+                    StderrLineCount = 0,
+                    StdoutLineCount = 0
+                });
         }
     }
 }

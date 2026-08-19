@@ -2,7 +2,7 @@ using System.Text.Json;
 using AiRepoKit.Cli.Commands;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Models.McpDiagnostics;
-using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.McpBudget;
 using Xunit;
 
 namespace AiRepoKit.Cli.Tests;
@@ -10,80 +10,40 @@ namespace AiRepoKit.Cli.Tests;
 public sealed class McpDiagnoseCommandTests
 {
     [Fact]
-    public void McpDiagnose_PassesScriptShellToScriptRunner()
+    public void McpDiagnose_NativeBudgetService_IsInvokedWithRepoRoot()
     {
-        string tempDir = CreateTempRepoWithBudgetScript();
+        string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner();
-            var command = new McpDiagnoseCommand(fakeRunner);
-            BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.PowerShell);
-
-            CommandResult result = command.Execute(options);
-
-            Assert.Single(fakeRunner.Calls);
-            Assert.Equal(ScriptShell.PowerShell, fakeRunner.Calls[0].RequestedShell);
-        }
-        finally
-        {
-            DeleteTempRepo(tempDir);
-        }
-    }
-
-    [Fact]
-    public void McpDiagnose_PassesMcpBudgetScriptDefinition()
-    {
-        string tempDir = CreateTempRepoWithBudgetScript();
-        try
-        {
-            var fakeRunner = new FakeScriptRunner();
-            var command = new McpDiagnoseCommand(fakeRunner);
-            BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
-
-            CommandResult result = command.Execute(options);
-
-            Assert.Single(fakeRunner.Calls);
-            Assert.Equal(ScriptDefinition.McpBudget, fakeRunner.Calls[0].Definition);
-        }
-        finally
-        {
-            DeleteTempRepo(tempDir);
-        }
-    }
-
-    [Fact]
-    public void McpDiagnose_PassesRepoRootAsSeparateScriptArguments()
-    {
-        string tempDir = CreateTempRepoWithBudgetScript();
-        try
-        {
-            var fakeRunner = new FakeScriptRunner();
-            var command = new McpDiagnoseCommand(fakeRunner);
-            BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
-
-            CommandResult result = command.Execute(options);
-
-            Assert.Single(fakeRunner.Calls);
-            Assert.NotNull(fakeRunner.Calls[0].ScriptArguments);
-            Assert.Equal(new[] { "-RepoRoot", Path.GetFullPath(tempDir) }, fakeRunner.Calls[0].ScriptArguments);
-        }
-        finally
-        {
-            DeleteTempRepo(tempDir);
-        }
-    }
-
-    [Fact]
-    public void McpDiagnose_SuccessfulProcessResult_ProducesPassedBudgetDiagnostic()
-    {
-        string tempDir = CreateTempRepoWithBudgetScript();
-        try
-        {
-            var fakeRunner = new FakeScriptRunner
+            var fakeBudget = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
+                ResultToReturn = CreateSuccessResult(tempDir)
             };
-            var command = new McpDiagnoseCommand(fakeRunner);
+            var command = new McpDiagnoseCommand(fakeBudget);
+            BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
+
+            command.Execute(options);
+
+            Assert.Equal(1, fakeBudget.InvocationCount);
+            Assert.Equal(Path.GetFullPath(tempDir), fakeBudget.LastRepoRoot);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void McpDiagnose_SuccessfulNativeBudget_ProducesPassedBudgetDiagnostic()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var fakeBudget = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateSuccessResult(tempDir)
+            };
+            var command = new McpDiagnoseCommand(fakeBudget);
             BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -101,16 +61,16 @@ public sealed class McpDiagnoseCommandTests
     }
 
     [Fact]
-    public void McpDiagnose_FailedProcessResult_ProducesFailedNonRequiredBudgetDiagnostic()
+    public void McpDiagnose_FailedNativeBudget_ProducesFailedNonRequiredBudgetDiagnostic()
     {
-        string tempDir = CreateTempRepoWithBudgetScript();
+        string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeBudget = new FakeMcpBudgetService
             {
-                ResultToReturn = new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "budget check failed")
+                ResultToReturn = CreateFailureResult(tempDir)
             };
-            var command = new McpDiagnoseCommand(fakeRunner);
+            var command = new McpDiagnoseCommand(fakeBudget);
             BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -128,16 +88,16 @@ public sealed class McpDiagnoseCommandTests
     }
 
     [Fact]
-    public void McpDiagnose_ScriptRunnerPreLaunchException_ProducesFailedBudgetDiagnosticNotFatal()
+    public void McpDiagnose_NativeBudgetServiceException_ProducesFailedBudgetDiagnosticNotFatal()
     {
-        string tempDir = CreateTempRepoWithBudgetScript();
+        string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner
+            var fakeBudget = new FakeMcpBudgetService
             {
-                ExceptionToThrow = new InvalidOperationException("Script 'mcp-budget' does not have a Bash implementation.")
+                ExceptionToThrow = new InvalidOperationException("MCP budget service unavailable.")
             };
-            var command = new McpDiagnoseCommand(fakeRunner);
+            var command = new McpDiagnoseCommand(fakeBudget);
             BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Bash);
 
             CommandResult result = command.Execute(options);
@@ -149,7 +109,7 @@ public sealed class McpDiagnoseCommandTests
 
             Assert.Equal("Failed", budgetCheck.Status);
             Assert.False(budgetCheck.Required);
-            Assert.Contains("Script 'mcp-budget' does not have a Bash implementation.", budgetCheck.Message);
+            Assert.Contains("MCP budget service unavailable.", budgetCheck.Message);
         }
         finally
         {
@@ -158,25 +118,29 @@ public sealed class McpDiagnoseCommandTests
     }
 
     [Fact]
-    public void McpDiagnose_PhysicallyMissingBudgetScript_ProducesWarningAndNoRunnerInvocation()
+    public void McpDiagnose_MissingCompatibilityBudgetScript_DoesNotBlockNativeBudget()
     {
+        // P02.1: physical absence of MeasureMcpResponseBudget.ps1 is irrelevant to native budget.
         string tempDir = CreateTempRepoWithoutBudgetScript();
         try
         {
-            var fakeRunner = new FakeScriptRunner();
-            var command = new McpDiagnoseCommand(fakeRunner);
+            Assert.False(File.Exists(Path.Combine(tempDir, "Tools", "AiContext", "MeasureMcpResponseBudget.ps1")));
+
+            var fakeBudget = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateSuccessResult(tempDir)
+            };
+            var command = new McpDiagnoseCommand(fakeBudget);
             BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
 
-            Assert.Empty(fakeRunner.Calls);
+            Assert.Equal(1, fakeBudget.InvocationCount);
 
             McpDiagnosticResult jsonResult = JsonSerializer.Deserialize<McpDiagnosticResult>(result.Markdown)!;
             McpDiagnosticItem budgetCheck = jsonResult.Checks.First(c => c.Name == "budget");
-
-            Assert.Equal("Warning", budgetCheck.Status);
-            Assert.False(budgetCheck.Required);
-            Assert.Contains("Tools/AiContext/MeasureMcpResponseBudget.ps1 is missing.", budgetCheck.Message);
+            Assert.Equal("Passed", budgetCheck.Status);
+            Assert.DoesNotContain("MeasureMcpResponseBudget.ps1 is missing", budgetCheck.Message);
         }
         finally
         {
@@ -185,18 +149,45 @@ public sealed class McpDiagnoseCommandTests
     }
 
     [Fact]
-    public void McpDiagnose_QuickMode_DoesNotInvokeScriptRunner()
+    public void McpDiagnose_BashShell_InvokesNativeBudgetWithoutScriptShellDependency()
     {
-        string tempDir = CreateTempRepoWithBudgetScript();
+        string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner();
-            var command = new McpDiagnoseCommand(fakeRunner);
+            var fakeBudget = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateSuccessResult(tempDir)
+            };
+            var command = new McpDiagnoseCommand(fakeBudget);
+            // Bash shell must not cause budget to fail (service accepts no ScriptShell param)
+            BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Bash);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.Equal(1, fakeBudget.InvocationCount);
+            McpDiagnosticResult jsonResult = JsonSerializer.Deserialize<McpDiagnosticResult>(result.Markdown)!;
+            McpDiagnosticItem budgetCheck = jsonResult.Checks.First(c => c.Name == "budget");
+            Assert.Equal("Passed", budgetCheck.Status);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void McpDiagnose_QuickMode_DoesNotInvokeBudgetService()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var fakeBudget = new FakeMcpBudgetService();
+            var command = new McpDiagnoseCommand(fakeBudget);
             BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto, quick: true);
 
             CommandResult result = command.Execute(options);
 
-            Assert.Empty(fakeRunner.Calls);
+            Assert.Equal(0, fakeBudget.InvocationCount);
 
             McpDiagnosticResult jsonResult = JsonSerializer.Deserialize<McpDiagnosticResult>(result.Markdown)!;
             McpDiagnosticItem budgetCheck = jsonResult.Checks.First(c => c.Name == "budget");
@@ -211,18 +202,18 @@ public sealed class McpDiagnoseCommandTests
     }
 
     [Fact]
-    public void McpDiagnose_SkipBudget_DoesNotInvokeScriptRunner()
+    public void McpDiagnose_SkipBudget_DoesNotInvokeBudgetService()
     {
-        string tempDir = CreateTempRepoWithBudgetScript();
+        string tempDir = CreateTempRepo();
         try
         {
-            var fakeRunner = new FakeScriptRunner();
-            var command = new McpDiagnoseCommand(fakeRunner);
+            var fakeBudget = new FakeMcpBudgetService();
+            var command = new McpDiagnoseCommand(fakeBudget);
             BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto, skipBudget: true);
 
             CommandResult result = command.Execute(options);
 
-            Assert.Empty(fakeRunner.Calls);
+            Assert.Equal(0, fakeBudget.InvocationCount);
 
             McpDiagnosticResult jsonResult = JsonSerializer.Deserialize<McpDiagnosticResult>(result.Markdown)!;
             McpDiagnosticItem budgetCheck = jsonResult.Checks.First(c => c.Name == "budget");
@@ -234,6 +225,48 @@ public sealed class McpDiagnoseCommandTests
         {
             DeleteTempRepo(tempDir);
         }
+    }
+
+    private static McpBudgetRunResult CreateSuccessResult(string repoPath)
+    {
+        return new McpBudgetRunResult(
+            McpBudgetExitClass.Success,
+            new McpBudgetReport
+            {
+                GeneratedAtLocal = "2026-08-19 00:00:00",
+                RepoRoot = Path.GetFullPath(repoPath),
+                McpAssembly = string.Empty,
+                McpAssemblyExists = false,
+                Manifest = null,
+                ToolsListed = [],
+                Results = [],
+                Passed = true,
+                Failures = [],
+                Warnings = [],
+                StderrLineCount = 0,
+                StdoutLineCount = 0
+            });
+    }
+
+    private static McpBudgetRunResult CreateFailureResult(string repoPath)
+    {
+        return new McpBudgetRunResult(
+            McpBudgetExitClass.ValidationFailure,
+            new McpBudgetReport
+            {
+                GeneratedAtLocal = "2026-08-19 00:00:00",
+                RepoRoot = Path.GetFullPath(repoPath),
+                McpAssembly = string.Empty,
+                McpAssemblyExists = false,
+                Manifest = null,
+                ToolsListed = [],
+                Results = [],
+                Passed = false,
+                Failures = ["get_repo_brief failed smoke validation."],
+                Warnings = [],
+                StderrLineCount = 0,
+                StdoutLineCount = 0
+            });
     }
 
     private static BootstrapOptions CreateOptions(string repoPath, ScriptShell shell, bool quick = false, bool skipBudget = false)
@@ -313,21 +346,20 @@ public sealed class McpDiagnoseCommandTests
             scriptShell_: shell);
     }
 
-    private static string CreateTempRepoWithBudgetScript()
+    private static string CreateTempRepo()
     {
         string path = Path.Combine(Path.GetTempPath(), "airepo_mcpdiagnose_test_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(path, "Tools", "AiContext"));
         Directory.CreateDirectory(Path.Combine(path, "Tools", "AiContextMcp"));
         string binDir = Path.Combine(path, "Tools", "AiContextMcp", "bin", "Release", "net10.0");
         Directory.CreateDirectory(binDir);
         File.WriteAllText(Path.Combine(path, "Tools", "AiContextMcp", "AiRepo.ContextMcp.csproj"), "<Project></Project>");
         File.WriteAllText(Path.Combine(binDir, "AiRepo.ContextMcp.dll"), "dummy dll");
-        File.WriteAllText(Path.Combine(path, "Tools", "AiContext", "MeasureMcpResponseBudget.ps1"), "# dummy");
         return path;
     }
 
     private static string CreateTempRepoWithoutBudgetScript()
     {
+        // MeasureMcpResponseBudget.ps1 intentionally absent — native budget must still run.
         string path = Path.Combine(Path.GetTempPath(), "airepo_mcpdiagnose_nobudget_test_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(path, "Tools", "AiContextMcp"));
         string binDir = Path.Combine(path, "Tools", "AiContextMcp", "bin", "Release", "net10.0");
@@ -341,37 +373,23 @@ public sealed class McpDiagnoseCommandTests
     {
         if (Directory.Exists(path))
         {
-            try
-            {
-                Directory.Delete(path, true);
-            }
-            catch
-            {
-            }
+            try { Directory.Delete(path, true); } catch { }
         }
     }
 
-    private sealed class FakeScriptRunner : IScriptRunner
+    private sealed class FakeMcpBudgetService : IMcpBudgetService
     {
-        public List<(ScriptDefinition Definition, ScriptShell RequestedShell, string RepoRoot, List<string>? ScriptArguments)> Calls { get; } = [];
-        public ProcessResult? ResultToReturn { get; set; }
+        public int InvocationCount { get; private set; }
+        public string? LastRepoRoot { get; private set; }
+        public McpBudgetRunResult? ResultToReturn { get; set; }
         public Exception? ExceptionToThrow { get; set; }
 
-        public ProcessResult RunScript(
-            ScriptDefinition definition,
-            ScriptShell requestedShell,
-            string repositoryRoot,
-            IEnumerable<string>? scriptArguments = null,
-            string? workingDirectory = null)
+        public McpBudgetRunResult Run(string repoRoot, McpBudgetOptions? options = null)
         {
-            Calls.Add((definition, requestedShell, repositoryRoot, scriptArguments?.ToList()));
-
-            if (ExceptionToThrow != null)
-            {
-                throw ExceptionToThrow;
-            }
-
-            return ResultToReturn ?? new ProcessResult("pwsh", string.Empty, repositoryRoot, 0, "ok", string.Empty);
+            InvocationCount++;
+            LastRepoRoot = repoRoot;
+            if (ExceptionToThrow is not null) throw ExceptionToThrow;
+            return ResultToReturn ?? throw new InvalidOperationException("No result configured.");
         }
     }
 }

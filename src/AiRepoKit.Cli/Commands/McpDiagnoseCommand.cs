@@ -4,6 +4,7 @@ using System.Text.Json;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Models.McpDiagnostics;
 using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.McpBudget;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -14,16 +15,16 @@ public sealed class McpDiagnoseCommand
         WriteIndented = true
     };
 
-    private readonly IScriptRunner _scriptRunner;
+    private readonly IMcpBudgetService _mcpBudgetService;
 
     public McpDiagnoseCommand()
-        : this(ScriptRuntimeFactory.CreateDefault())
+        : this(new McpBudgetService())
     {
     }
 
-    internal McpDiagnoseCommand(IScriptRunner scriptRunner)
+    internal McpDiagnoseCommand(IMcpBudgetService mcpBudgetService)
     {
-        _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+        _mcpBudgetService = mcpBudgetService ?? throw new ArgumentNullException(nameof(mcpBudgetService));
     }
 
     public CommandResult Execute(BootstrapOptions options_)
@@ -459,30 +460,25 @@ public sealed class McpDiagnoseCommand
 
     private McpDiagnosticItem RunBudget(BootstrapOptions options_, string repoPath_)
     {
-        if (options_.ScriptShell is ScriptShell.Auto or ScriptShell.PowerShell)
-        {
-            string scriptPath = Path.Combine(repoPath_, "Tools", "AiContext", "MeasureMcpResponseBudget.ps1");
-            if (!File.Exists(scriptPath))
-            {
-                return Warning("budget", false, "Tools/AiContext/MeasureMcpResponseBudget.ps1 is missing.");
-            }
-        }
-
+        // P02.1: budget validation runs natively via IMcpBudgetService.
+        // No physical MeasureMcpResponseBudget.ps1 prerequisite; ScriptShell is irrelevant.
         try
         {
-            ProcessResult result = _scriptRunner.RunScript(
-                ScriptDefinition.McpBudget,
-                options_.ScriptShell,
-                repoPath_,
-                scriptArguments: ["-RepoRoot", repoPath_]);
+            McpBudgetRunResult result = _mcpBudgetService.Run(repoPath_);
+            bool passed = result.IsSuccess;
+            string message = passed
+                ? "MCP budget validation passed."
+                : result.Report.Failures.Count > 0
+                    ? string.Join("; ", result.Report.Failures.Take(3))
+                    : $"MCP budget validation failed (exit class {(int)result.ExitClass}).";
 
             return new McpDiagnosticItem(
                 "budget",
-                result.Success ? "Passed" : "Failed",
+                passed ? "Passed" : "Failed",
                 false,
-                result.Success ? "MeasureMcpResponseBudget.ps1 passed." : GetProcessMessage(result),
+                message,
                 null,
-                GetProcessDetails(result));
+                []);
         }
         catch (Exception ex)
         {

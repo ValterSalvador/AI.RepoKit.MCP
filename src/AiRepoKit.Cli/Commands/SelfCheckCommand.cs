@@ -6,6 +6,7 @@ using AiRepoKit.Cli.Models.SelfCheck;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.CodeIndex;
 using AiRepoKit.Cli.Services.ManagedFiles;
+using AiRepoKit.Cli.Services.McpBudget;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -16,16 +17,16 @@ public sealed class SelfCheckCommand
         WriteIndented = true
     };
 
-    private readonly IScriptRunner _scriptRunner;
+    private readonly IMcpBudgetService _mcpBudgetService;
 
     public SelfCheckCommand()
-        : this(ScriptRuntimeFactory.CreateDefault())
+        : this(new McpBudgetService())
     {
     }
 
-    internal SelfCheckCommand(IScriptRunner scriptRunner)
+    internal SelfCheckCommand(IMcpBudgetService mcpBudgetService)
     {
-        _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+        _mcpBudgetService = mcpBudgetService ?? throw new ArgumentNullException(nameof(mcpBudgetService));
     }
 
     public CommandResult Execute(BootstrapOptions options_)
@@ -132,27 +133,30 @@ public sealed class SelfCheckCommand
             }
             else
             {
-                progress.StartPhase("Running budget script");
+                progress.StartPhase("Running MCP budget");
                 try
                 {
-                    ProcessResult budget = _scriptRunner.RunScript(
-                        ScriptDefinition.McpBudget,
-                        options_.ScriptShell,
-                        repoPath);
-                    checks.Add(new SelfCheckItem("mcp-budget", budget.Success ? "Passed" : "Failed", true, GetProcessMessage(budget), budget.ExitCode));
-                    if (budget.Success)
+                    McpBudgetRunResult budget = _mcpBudgetService.Run(repoPath);
+                    bool budgetPassed = budget.IsSuccess;
+                    string budgetMessage = budgetPassed
+                        ? "MCP budget validation passed."
+                        : budget.Report.Failures.Count > 0
+                            ? string.Join("; ", budget.Report.Failures.Take(3))
+                            : $"MCP budget validation failed (exit class {(int)budget.ExitClass}).";
+                    checks.Add(new SelfCheckItem("mcp-budget", budgetPassed ? "Passed" : "Failed", true, budgetMessage, (int)budget.ExitClass));
+                    if (budgetPassed)
                     {
-                        progress.CompletePhase("Budget script completed");
+                        progress.CompletePhase("MCP budget completed");
                     }
                     else
                     {
-                        progress.FailPhase("Budget script failed");
+                        progress.FailPhase("MCP budget failed");
                     }
                 }
                 catch (Exception ex)
                 {
                     checks.Add(Failed("mcp-budget", true, ProcessRunner.Redact(ex.Message)));
-                    progress.FailPhase("Budget script failed");
+                    progress.FailPhase("MCP budget failed");
                 }
             }
 
@@ -248,7 +252,6 @@ public sealed class SelfCheckCommand
             "Tools/AiContext/UpdateCodeInventory.ps1",
             "Tools/AiContext/InvokeBuildDiagnostics.ps1",
             "Tools/AiContext/CheckSecrets.ps1",
-            "Tools/AiContext/MeasureMcpResponseBudget.ps1",
             "Tools/AiContextMcp/Program.cs",
             "Tools/AiContextMcp/README.md"
         ];
