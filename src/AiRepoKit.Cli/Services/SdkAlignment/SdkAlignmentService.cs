@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Xml.Linq;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.DotNetSdk;
 
 namespace AiRepoKit.Cli.Services.SdkAlignment;
 
@@ -30,7 +31,7 @@ public sealed class SdkAlignmentService : ISdkAlignmentService
     private readonly IProcessRunner _processRunner;
 
     public SdkAlignmentService()
-        : this(new ProcessRunner())
+        : this(new DotNetSdkProcessRunner())
     {
     }
 

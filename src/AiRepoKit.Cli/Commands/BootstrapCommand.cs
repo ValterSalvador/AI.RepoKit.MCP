@@ -2,6 +2,7 @@ using System.Text;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Models.ManagedFiles;
 using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.AiContextUpdate;
 using AiRepoKit.Cli.Services.ManagedFiles;
 using AiRepoKit.Cli.Services.McpBudget;
 using AiRepoKit.Cli.Services.SdkAlignment;
@@ -13,12 +14,14 @@ public sealed class BootstrapCommand
     private readonly IScriptRunner _scriptRunner;
     private readonly IMcpBudgetService _mcpBudgetService;
     private readonly ISdkAlignmentService _sdkAlignmentService;
+    private readonly IAiContextUpdateService _aiContextUpdateService;
 
     public BootstrapCommand()
         : this(
             ScriptRuntimeFactory.CreateDefault(),
             new McpBudgetService(),
-            new SdkAlignmentService())
+            new SdkAlignmentService(),
+            new AiContextUpdateService())
     {
     }
 
@@ -29,11 +32,13 @@ public sealed class BootstrapCommand
     internal BootstrapCommand(
         IScriptRunner scriptRunner,
         IMcpBudgetService? mcpBudgetService = null,
-        ISdkAlignmentService? sdkAlignmentService = null)
+        ISdkAlignmentService? sdkAlignmentService = null,
+        IAiContextUpdateService? aiContextUpdateService = null)
     {
         _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
         _mcpBudgetService = mcpBudgetService ?? new McpBudgetService();
         _sdkAlignmentService = sdkAlignmentService ?? new SdkAlignmentService();
+        _aiContextUpdateService = aiContextUpdateService ?? new AiContextUpdateService();
     }
 
     public CommandResult Execute(BootstrapOptions options_)
@@ -179,109 +184,152 @@ public sealed class BootstrapCommand
             : [];
         List<string> scriptStatuses = [];
         bool updateAiContextPassed = false;
+
         if (options_.SkipScripts)
         {
             scriptStatuses.Add("All scripts skipped.");
+            scriptStatuses.Add("ai-context-update: Skipped by --skip-scripts");
             scriptStatuses.Add("sdk-alignment: Skipped by --skip-scripts");
         }
-        else if (options_.IncludeMcp && (mcpBuildStatus is "Built" or "SkippedCurrent" or "SkippedLockedSmokePassed" || !apply))
+        else if (options_.IncludeMcp &&
+            (mcpBuildStatus is "Built" or "SkippedCurrent" or "SkippedLockedSmokePassed" || !apply))
         {
             if (options_.SkipAiContext)
             {
+                scriptStatuses.Add("ai-context-update: Skipped by --skip-ai-context");
                 scriptStatuses.Add("sdk-alignment: Skipped by --skip-ai-context");
+            }
+            else if (apply)
+            {
+                updateAiContextPassed = RunAiContextUpdate(
+                    options_,
+                    progress,
+                    scriptStatuses,
+                    errors);
+
+                // Preserve the historical execution order: SDK alignment is
+                // attempted immediately after the AI-context update phase,
+                // even when the update itself reports a failure.
+                RunSdkAlignment(
+                    options_,
+                    progress,
+                    scriptStatuses,
+                    errors);
+            }
+            else
+            {
+                scriptStatuses.Add("ai-context-update: Simulated");
+                scriptStatuses.Add("sdk-alignment: Simulated");
             }
 
             foreach (ScriptPlan script in scripts)
             {
-                string scriptDisplayPath = script.Definition.PowerShellRelativePath ?? script.Definition.Name;
-                bool isUpdateAiContext = string.Equals(
-                    script.Definition.Name,
-                    "update-ai-context",
-                    StringComparison.Ordinal);
+                string scriptDisplayPath =
+                    script.Definition.PowerShellRelativePath ??
+                    script.Definition.Name;
 
                 if (apply)
                 {
-                    progress.StartPhase($"Running AI context script {scriptDisplayPath}");
+                    progress.StartPhase(
+                        $"Running AI context script {scriptDisplayPath}");
 
-                    bool isPowerShellTarget = options_.ScriptShell is ScriptShell.Auto or ScriptShell.PowerShell;
-                    string? expectedPath = isPowerShellTarget ? script.Definition.PowerShellRelativePath : script.Definition.BashRelativePath;
-                    bool isPhysicalMissing = expectedPath != null && !File.Exists(Path.Combine(Path.GetFullPath(options_.RepoPath), expectedPath.Replace('/', Path.DirectorySeparatorChar)));
+                    bool isPowerShellTarget =
+                        options_.ScriptShell is
+                            ScriptShell.Auto or
+                            ScriptShell.PowerShell;
+
+                    string? expectedPath =
+                        isPowerShellTarget
+                            ? script.Definition.PowerShellRelativePath
+                            : script.Definition.BashRelativePath;
+
+                    bool isPhysicalMissing =
+                        expectedPath != null &&
+                        !File.Exists(
+                            Path.Combine(
+                                Path.GetFullPath(options_.RepoPath),
+                                expectedPath.Replace(
+                                    '/',
+                                    Path.DirectorySeparatorChar)));
 
                     if (isPhysicalMissing)
                     {
-                        scriptStatuses.Add($"{scriptDisplayPath}: Missing");
-                        warnings.Add($"{scriptDisplayPath} was not found.");
-                        progress.WarnPhase($"AI context script missing: {scriptDisplayPath}");
+                        scriptStatuses.Add(
+                            $"{scriptDisplayPath}: Missing");
+
+                        warnings.Add(
+                            $"{scriptDisplayPath} was not found.");
+
+                        progress.WarnPhase(
+                            $"AI context script missing: {scriptDisplayPath}");
                     }
                     else
                     {
                         try
                         {
-                            ProcessResult scriptResult = _scriptRunner.RunScript(
-                                script.Definition,
-                                options_.ScriptShell,
-                                Path.GetFullPath(options_.RepoPath));
+                            ProcessResult scriptResult =
+                                _scriptRunner.RunScript(
+                                    script.Definition,
+                                    options_.ScriptShell,
+                                    Path.GetFullPath(options_.RepoPath));
 
                             processes.Add(scriptResult);
-                            scriptStatuses.Add($"{scriptDisplayPath}: {(scriptResult.Success ? "Passed" : $"Failed exit {scriptResult.ExitCode}")}");
 
-                            if (scriptResult.Success && string.Equals(script.Definition.Name, "update-ai-context", StringComparison.Ordinal))
-                            {
-                                updateAiContextPassed = true;
-                            }
+                            scriptStatuses.Add(
+                                $"{scriptDisplayPath}: " +
+                                $"{(scriptResult.Success ? "Passed" : $"Failed exit {scriptResult.ExitCode}")}");
 
                             if (!scriptResult.Success)
                             {
-                                errors.Add($"{scriptDisplayPath} failed.");
-                                progress.FailPhase($"AI context script failed: {scriptDisplayPath}");
+                                errors.Add(
+                                    $"{scriptDisplayPath} failed.");
+
+                                progress.FailPhase(
+                                    $"AI context script failed: {scriptDisplayPath}");
                             }
                             else
                             {
-                                progress.CompletePhase($"AI context script completed: {scriptDisplayPath}");
+                                progress.CompletePhase(
+                                    $"AI context script completed: {scriptDisplayPath}");
                             }
                         }
                         catch (Exception ex)
                         {
-                            scriptStatuses.Add($"{scriptDisplayPath}: Failed / unable to execute");
-                            errors.Add(ProcessRunner.Redact($"{scriptDisplayPath} execution failed: {ex.Message}"));
-                            progress.FailPhase($"AI context script failed: {scriptDisplayPath}");
+                            scriptStatuses.Add(
+                                $"{scriptDisplayPath}: Failed / unable to execute");
+
+                            errors.Add(
+                                ProcessRunner.Redact(
+                                    $"{scriptDisplayPath} execution failed: {ex.Message}"));
+
+                            progress.FailPhase(
+                                $"AI context script failed: {scriptDisplayPath}");
                         }
                     }
                 }
                 else
                 {
-                    scriptStatuses.Add($"{scriptDisplayPath}: Simulated");
-                }
-
-                if (isUpdateAiContext)
-                {
-                    if (apply)
-                    {
-                        RunSdkAlignment(
-                            options_,
-                            progress,
-                            scriptStatuses,
-                            errors);
-                    }
-                    else
-                    {
-                        scriptStatuses.Add("sdk-alignment: Simulated");
-                    }
+                    scriptStatuses.Add(
+                        $"{scriptDisplayPath}: Simulated");
                 }
             }
         }
         else if (options_.IncludeMcp)
         {
-            scriptStatuses.Add("Skipped because MCP build did not pass.");
+            scriptStatuses.Add(
+                "Skipped because MCP build did not pass.");
         }
         else
         {
-            scriptStatuses.Add("Skipped because --mcp was not selected.");
+            scriptStatuses.Add(
+                "Skipped because --mcp was not selected.");
         }
 
         if (apply && updateAiContextPassed)
         {
-            RefreshManagedManifestForScriptOutputs(options_, scriptRefreshEligiblePaths);
+            RefreshManagedManifestForScriptOutputs(
+                options_,
+                scriptRefreshEligiblePaths);
         }
 
         // ── Native MCP budget (IMcpBudgetService) ──────────────────────────────
@@ -332,6 +380,68 @@ public sealed class BootstrapCommand
         }
         string markdown = WriteReport(options_, doctor, plan, init, validate, codeIndexStatus, mcpBuildStatus, hooksStatus, scriptStatuses, warnings, errors, processes);
         return errors.Count == 0 ? CommandResult.Ok(markdown) : CommandResult.Failure(markdown, 1);
+    }
+
+    private bool RunAiContextUpdate(
+        BootstrapOptions options_,
+        ProgressReporter progress_,
+        List<string> statuses_,
+        List<string> errors_)
+    {
+        progress_.StartPhase("Running native AI context update");
+
+        try
+        {
+            AiContextUpdateRunResult result =
+                _aiContextUpdateService.Run(
+                    Path.GetFullPath(options_.RepoPath),
+                    new AiContextUpdateOptions
+                    {
+                        TargetFramework =
+                            options_.TargetFramework,
+                        McpServerName =
+                            options_.McpServerName,
+                        McpProjectRelativePath =
+                            options_.McpProjectRelativePath
+                    });
+
+            if (result.IsSuccess)
+            {
+                statuses_.Add(
+                    "ai-context-update: Passed");
+
+                progress_.CompletePhase(
+                    "Native AI context update completed");
+
+                return true;
+            }
+
+            statuses_.Add(
+                "ai-context-update: Failed");
+
+            errors_.Add(
+                ProcessRunner.Redact(
+                    $"AI context update failed: {result.ErrorMessage ?? "Unknown failure."}"));
+
+            progress_.FailPhase(
+                "Native AI context update failed");
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            statuses_.Add(
+                "ai-context-update: Failed / unable to execute");
+
+            errors_.Add(
+                ProcessRunner.Redact(
+                    $"AI context update execution failed: {ex.Message}"));
+
+            progress_.FailPhase(
+                "Native AI context update failed");
+
+            return false;
+        }
     }
 
     private void RunSdkAlignment(
@@ -446,11 +556,6 @@ public sealed class BootstrapCommand
         return [".ai/manifests/mcp-context-manifest.json"];
     }
 
-    private static readonly ScriptDefinition UpdateAiContextScript = new(
-        "update-ai-context",
-        PowerShellRelativePath: "Tools/AiContext/UpdateAiContext.ps1",
-        BashRelativePath: null);
-
     private static readonly ScriptDefinition UpdateCodeInventoryScript = new(
         "update-code-inventory",
         PowerShellRelativePath: "Tools/AiContext/UpdateCodeInventory.ps1",
@@ -464,10 +569,6 @@ public sealed class BootstrapCommand
     private static IReadOnlyList<ScriptPlan> GetScripts(BootstrapOptions options_, bool codeIndexPassed_)
     {
         List<ScriptPlan> scripts = [];
-        if (!options_.SkipAiContext)
-        {
-            scripts.Add(new ScriptPlan(UpdateAiContextScript));
-        }
 
         if (!options_.SkipCodeInventory && !codeIndexPassed_)
         {

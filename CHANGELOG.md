@@ -17,33 +17,58 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - Native executable resolution and script-runner abstractions.
 - Native MCP response-budget service with deterministic protocol, security,
   report, and integration tests.
-- Native SDK-alignment service using the existing process-runner abstraction.
+- Native SDK-alignment service.
+- Native AI-context update service that generates the MCP context manifest,
+  project inventory, project references, package inventory, SDK inventory,
+  and generated context summary without requiring PowerShell.
+- Dedicated .NET SDK probe runner that preserves the historical successful
+  `dotnet --version` and `dotnet --list-sdks` artifact contract while keeping
+  diagnostic errors redacted.
 - Deterministic SDK-alignment tests covering project discovery, target
   frameworks, ignored paths, report generation, and process failures.
+- Deterministic AI-context update tests covering generated artifacts, project
+  discovery, references, packages, SDK discovery, runtime options, ignored
+  paths, timestamps, failure atomicity, and output ordering.
 
 #### Changed
 
 - SelfCheck, Efficiency, Bootstrap, and MCP diagnostics use the native MCP
   budget service instead of PowerShell product business logic.
-- Bootstrap now runs SDK alignment natively after UpdateAiContext.
+- Bootstrap runs AI-context update and SDK alignment natively.
+- `UpdateAiContext.ps1` and `CheckSdkAlignment.ps1` are no longer executed by
+  Bootstrap for product runtime behavior.
+- SelfCheck no longer requires the migrated UpdateAiContext or SDK-alignment
+  PowerShell compatibility scripts to exist.
 - SDK-alignment report generation is cross-platform on Windows, Linux, and WSL.
 - SDK-alignment project paths and output ordering are deterministic.
+- Native SDK inventory and SDK-alignment reports preserve the successful raw
+  `dotnet --list-sdks` output required for compatibility with the historical
+  PowerShell-generated artifacts.
 
 #### Compatibility
 
 - Historical PowerShell compatibility artifacts are retained until P03.
 - `Tools/AiContext/CheckSdkAlignment.ps1` remains available as a compatibility
-  artifact but is no longer used for Bootstrap product runtime behavior.
-- `UpdateAiContext.ps1` remains runtime-backed by PowerShell and is the next
-  P02.2 migration slice.
+  artifact but is no longer used for product runtime behavior.
+- `Tools/AiContext/UpdateAiContext.ps1` remains available as a compatibility
+  artifact but is no longer used for product runtime behavior.
+- ConfigGenerator continues to generate the historical compatibility artifacts.
 
 #### Validation
 
 - Native MCP budget migration validated on Windows and WSL.
 - Native SDK alignment validated with real `dotnet` execution on Windows and WSL.
+- Native AI-context update validated with real execution on Windows and WSL.
+- AI-context generated-artifact parity against the legacy PowerShell
+  implementation: 6 of 6 artifacts passing on Windows.
+- SDK-alignment semantic parity against the legacy PowerShell implementation
+  passing on Windows, including the raw SDK-list contract.
+- AI-context update service tests: 18 passing.
 - SDK-alignment service tests: 17 passing.
-- Bootstrap integration tests: 19 passing.
-- Current WSL full test suite: 179 passing.
+- Bootstrap integration tests: 21 passing.
+- SelfCheck tests: 7 passing.
+- Current WSL full test suite: 200 passing.
+- Current Windows full test suite: 200 passing.
 
 ### Release policy
 

@@ -247,8 +247,6 @@ public sealed class SelfCheckCommand
         [
             ".ai/README.md",
             ".ai/manifests/mcp-context-manifest.json",
-            "Tools/AiContext/UpdateAiContext.ps1",
-            "Tools/AiContext/CheckSdkAlignment.ps1",
             "Tools/AiContext/UpdateCodeInventory.ps1",
             "Tools/AiContext/InvokeBuildDiagnostics.ps1",
             "Tools/AiContext/CheckSecrets.ps1",

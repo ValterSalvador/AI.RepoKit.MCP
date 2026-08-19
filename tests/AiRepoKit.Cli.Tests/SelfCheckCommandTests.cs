@@ -164,6 +164,68 @@ public sealed class SelfCheckCommandTests
     }
 
     [Fact]
+    public void SelfCheck_MissingNativeMigratedCompatibilityScripts_DoesNotCreateRequiredFileFailures()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            string updateScript =
+                Path.Combine(
+                    tempDir,
+                    "Tools",
+                    "AiContext",
+                    "UpdateAiContext.ps1");
+
+            string sdkScript =
+                Path.Combine(
+                    tempDir,
+                    "Tools",
+                    "AiContext",
+                    "CheckSdkAlignment.ps1");
+
+            Assert.False(
+                File.Exists(updateScript));
+
+            Assert.False(
+                File.Exists(sdkScript));
+
+            var fakeService =
+                new FakeMcpBudgetService
+                {
+                    ResultToReturn =
+                        CreateBudgetResult(
+                            tempDir,
+                            McpBudgetExitClass.Success,
+                            passed: true)
+                };
+
+            var command =
+                new SelfCheckCommand(
+                    fakeService);
+
+            BootstrapOptions options =
+                CreateOptions(
+                    tempDir,
+                    ScriptShell.Auto);
+
+            CommandResult result =
+                command.Execute(options);
+
+            Assert.DoesNotContain(
+                "required-file:Tools/AiContext/UpdateAiContext.ps1",
+                result.Markdown);
+
+            Assert.DoesNotContain(
+                "required-file:Tools/AiContext/CheckSdkAlignment.ps1",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
     public void SelfCheck_BashShell_DoesNotAffectNativeBudgetExecution()
     {
         string tempDir = CreateTempRepo();
