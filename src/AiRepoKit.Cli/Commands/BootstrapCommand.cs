@@ -4,6 +4,7 @@ using AiRepoKit.Cli.Models.ManagedFiles;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.ManagedFiles;
 using AiRepoKit.Cli.Services.McpBudget;
+using AiRepoKit.Cli.Services.SdkAlignment;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -11,18 +12,28 @@ public sealed class BootstrapCommand
 {
     private readonly IScriptRunner _scriptRunner;
     private readonly IMcpBudgetService _mcpBudgetService;
+    private readonly ISdkAlignmentService _sdkAlignmentService;
 
     public BootstrapCommand()
-        : this(ScriptRuntimeFactory.CreateDefault(), new McpBudgetService())
+        : this(
+            ScriptRuntimeFactory.CreateDefault(),
+            new McpBudgetService(),
+            new SdkAlignmentService())
     {
     }
 
-    /// <summary>Internal constructor for testing. McpBudgetService is nullable to avoid
-    /// breaking existing tests that only pass a FakeScriptRunner.</summary>
-    internal BootstrapCommand(IScriptRunner scriptRunner, IMcpBudgetService? mcpBudgetService = null)
+    /// <summary>
+    /// Internal constructor for testing. Optional native services preserve
+    /// compatibility with existing tests that inject only a script runner.
+    /// </summary>
+    internal BootstrapCommand(
+        IScriptRunner scriptRunner,
+        IMcpBudgetService? mcpBudgetService = null,
+        ISdkAlignmentService? sdkAlignmentService = null)
     {
         _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
         _mcpBudgetService = mcpBudgetService ?? new McpBudgetService();
+        _sdkAlignmentService = sdkAlignmentService ?? new SdkAlignmentService();
     }
 
     public CommandResult Execute(BootstrapOptions options_)
@@ -171,12 +182,23 @@ public sealed class BootstrapCommand
         if (options_.SkipScripts)
         {
             scriptStatuses.Add("All scripts skipped.");
+            scriptStatuses.Add("sdk-alignment: Skipped by --skip-scripts");
         }
         else if (options_.IncludeMcp && (mcpBuildStatus is "Built" or "SkippedCurrent" or "SkippedLockedSmokePassed" || !apply))
         {
+            if (options_.SkipAiContext)
+            {
+                scriptStatuses.Add("sdk-alignment: Skipped by --skip-ai-context");
+            }
+
             foreach (ScriptPlan script in scripts)
             {
                 string scriptDisplayPath = script.Definition.PowerShellRelativePath ?? script.Definition.Name;
+                bool isUpdateAiContext = string.Equals(
+                    script.Definition.Name,
+                    "update-ai-context",
+                    StringComparison.Ordinal);
+
                 if (apply)
                 {
                     progress.StartPhase($"Running AI context script {scriptDisplayPath}");
@@ -229,6 +251,22 @@ public sealed class BootstrapCommand
                 else
                 {
                     scriptStatuses.Add($"{scriptDisplayPath}: Simulated");
+                }
+
+                if (isUpdateAiContext)
+                {
+                    if (apply)
+                    {
+                        RunSdkAlignment(
+                            options_,
+                            progress,
+                            scriptStatuses,
+                            errors);
+                    }
+                    else
+                    {
+                        scriptStatuses.Add("sdk-alignment: Simulated");
+                    }
                 }
             }
         }
@@ -294,6 +332,43 @@ public sealed class BootstrapCommand
         }
         string markdown = WriteReport(options_, doctor, plan, init, validate, codeIndexStatus, mcpBuildStatus, hooksStatus, scriptStatuses, warnings, errors, processes);
         return errors.Count == 0 ? CommandResult.Ok(markdown) : CommandResult.Failure(markdown, 1);
+    }
+
+    private void RunSdkAlignment(
+        BootstrapOptions options_,
+        ProgressReporter progress_,
+        List<string> statuses_,
+        List<string> errors_)
+    {
+        progress_.StartPhase("Running native SDK alignment");
+
+        try
+        {
+            SdkAlignmentRunResult result = _sdkAlignmentService.Run(
+                Path.GetFullPath(options_.RepoPath));
+
+            if (result.IsSuccess)
+            {
+                statuses_.Add("sdk-alignment: Passed");
+                progress_.CompletePhase("Native SDK alignment completed");
+            }
+            else
+            {
+                statuses_.Add("sdk-alignment: Failed");
+                errors_.Add(
+                    ProcessRunner.Redact(
+                        $"SDK alignment failed: {result.ErrorMessage ?? "Unknown failure."}"));
+                progress_.FailPhase("Native SDK alignment failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            statuses_.Add("sdk-alignment: Failed / unable to execute");
+            errors_.Add(
+                ProcessRunner.Redact(
+                    $"SDK alignment execution failed: {ex.Message}"));
+            progress_.FailPhase("Native SDK alignment failed");
+        }
     }
 
     private static HashSet<string> GetCleanManagedScriptRefreshPaths(BootstrapOptions options_)
@@ -376,11 +451,6 @@ public sealed class BootstrapCommand
         PowerShellRelativePath: "Tools/AiContext/UpdateAiContext.ps1",
         BashRelativePath: null);
 
-    private static readonly ScriptDefinition CheckSdkAlignmentScript = new(
-        "check-sdk-alignment",
-        PowerShellRelativePath: "Tools/AiContext/CheckSdkAlignment.ps1",
-        BashRelativePath: null);
-
     private static readonly ScriptDefinition UpdateCodeInventoryScript = new(
         "update-code-inventory",
         PowerShellRelativePath: "Tools/AiContext/UpdateCodeInventory.ps1",
@@ -397,7 +467,6 @@ public sealed class BootstrapCommand
         if (!options_.SkipAiContext)
         {
             scripts.Add(new ScriptPlan(UpdateAiContextScript));
-            scripts.Add(new ScriptPlan(CheckSdkAlignmentScript));
         }
 
         if (!options_.SkipCodeInventory && !codeIndexPassed_)

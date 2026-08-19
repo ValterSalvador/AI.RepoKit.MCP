@@ -2,6 +2,7 @@ using AiRepoKit.Cli.Commands;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.McpBudget;
+using AiRepoKit.Cli.Services.SdkAlignment;
 using Xunit;
 
 namespace AiRepoKit.Cli.Tests;
@@ -15,7 +16,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.PowerShell);
 
             CommandResult result = command.Execute(options);
@@ -37,18 +38,312 @@ public sealed class BootstrapCommandTests
         {
             var fakeRunner = new FakeScriptRunner();
             var fakeBudget = new FakeMcpBudgetService();
-            var command = new BootstrapCommand(fakeRunner, fakeBudget);
+            var fakeSdkAlignment = new FakeSdkAlignmentService();
+            var command = new BootstrapCommand(fakeRunner, fakeBudget, fakeSdkAlignment);
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
 
             List<string> scriptNames = fakeRunner.Calls.Select(c => c.Definition.Name).ToList();
             Assert.Contains("update-ai-context", scriptNames);
-            Assert.Contains("check-sdk-alignment", scriptNames);
+            Assert.DoesNotContain("check-sdk-alignment", scriptNames);
             Assert.Contains("check-secrets", scriptNames);
-            // mcp-budget is now a native service step, not in the script runner loop.
+            // Native product steps no longer participate in the script runner loop.
             Assert.DoesNotContain("mcp-budget", scriptNames);
             Assert.Equal(1, fakeBudget.InvocationCount);
+            Assert.Equal(1, fakeSdkAlignment.InvocationCount);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_NativeSdkAlignment_RunsAfterUpdateAiContextAndBeforeRemainingScripts()
+    {
+        string tempDir = CreateTempRepoWithScripts();
+        try
+        {
+            List<string> events = [];
+            var fakeRunner = new FakeScriptRunner
+            {
+                ResultHandler = (definition, shell) =>
+                {
+                    events.Add(definition.Name);
+                    return new ProcessResult(
+                        "pwsh",
+                        string.Empty,
+                        tempDir,
+                        0,
+                        "ok",
+                        string.Empty);
+                }
+            };
+
+            var fakeSdkAlignment = new FakeSdkAlignmentService
+            {
+                OnRun = () => events.Add("sdk-alignment")
+            };
+
+            var command = new BootstrapCommand(
+                fakeRunner,
+                new FakeMcpBudgetService(),
+                fakeSdkAlignment);
+
+            BootstrapOptions options = CreateOptions(
+                tempDir,
+                apply: true,
+                dryRun: false,
+                shell: ScriptShell.Auto);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.True(result.Success);
+
+            int updateIndex = events.IndexOf("update-ai-context");
+            int sdkIndex = events.IndexOf("sdk-alignment");
+            int secretsIndex = events.IndexOf("check-secrets");
+
+            Assert.True(updateIndex >= 0);
+            Assert.True(sdkIndex > updateIndex);
+            Assert.True(secretsIndex > sdkIndex);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_NativeSdkAlignmentFailure_FailsBootstrap()
+    {
+        string tempDir = CreateTempRepoWithScripts();
+        try
+        {
+            var fakeSdkAlignment = new FakeSdkAlignmentService
+            {
+                ResultToReturn = SdkAlignmentRunResult.Failure(
+                    "dotnet --version failed: test failure")
+            };
+
+            var command = new BootstrapCommand(
+                new FakeScriptRunner(),
+                new FakeMcpBudgetService(),
+                fakeSdkAlignment);
+
+            BootstrapOptions options = CreateOptions(
+                tempDir,
+                apply: true,
+                dryRun: false,
+                shell: ScriptShell.Auto);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.False(result.Success);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains(
+                "sdk-alignment: Failed",
+                result.Markdown);
+            Assert.Contains(
+                "SDK alignment failed: dotnet --version failed: test failure",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_DryRun_DoesNotInvokeNativeSdkAlignment()
+    {
+        string tempDir = CreateTempRepoWithScripts();
+        try
+        {
+            var fakeSdkAlignment = new FakeSdkAlignmentService();
+
+            var command = new BootstrapCommand(
+                new FakeScriptRunner(),
+                new FakeMcpBudgetService(),
+                fakeSdkAlignment);
+
+            BootstrapOptions options = CreateOptions(
+                tempDir,
+                apply: false,
+                dryRun: true,
+                shell: ScriptShell.Auto);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.Equal(0, fakeSdkAlignment.InvocationCount);
+            Assert.Contains(
+                "sdk-alignment: Simulated",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_SkipAiContext_DoesNotInvokeNativeSdkAlignment()
+    {
+        string tempDir = CreateTempRepoWithScripts();
+        try
+        {
+            var fakeSdkAlignment = new FakeSdkAlignmentService();
+
+            var command = new BootstrapCommand(
+                new FakeScriptRunner(),
+                new FakeMcpBudgetService(),
+                fakeSdkAlignment);
+
+            BootstrapOptions options = CreateOptions(
+                tempDir,
+                apply: true,
+                dryRun: false,
+                shell: ScriptShell.Auto,
+                skipAiContext: true);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.Equal(0, fakeSdkAlignment.InvocationCount);
+            Assert.Contains(
+                "sdk-alignment: Skipped by --skip-ai-context",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_SkipScripts_DoesNotInvokeNativeSdkAlignment()
+    {
+        string tempDir = CreateTempRepoWithScripts();
+        try
+        {
+            var fakeSdkAlignment = new FakeSdkAlignmentService();
+
+            var command = new BootstrapCommand(
+                new FakeScriptRunner(),
+                new FakeMcpBudgetService(),
+                fakeSdkAlignment);
+
+            BootstrapOptions options = CreateOptions(
+                tempDir,
+                apply: true,
+                dryRun: false,
+                shell: ScriptShell.Auto,
+                skipScripts: true);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.Equal(0, fakeSdkAlignment.InvocationCount);
+            Assert.Contains(
+                "sdk-alignment: Skipped by --skip-scripts",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_IncludeMcpFalse_DoesNotInvokeNativeSdkAlignment()
+    {
+        string tempDir = CreateTempRepoWithScripts();
+        try
+        {
+            var fakeSdkAlignment =
+                new FakeSdkAlignmentService();
+
+            var command = new BootstrapCommand(
+                new FakeScriptRunner(),
+                new FakeMcpBudgetService(),
+                fakeSdkAlignment);
+
+            BootstrapOptions options = CreateOptions(
+                tempDir,
+                apply: true,
+                dryRun: false,
+                shell: ScriptShell.Auto,
+                includeMcp: false);
+
+            CommandResult result =
+                command.Execute(options);
+
+            Assert.Equal(
+                0,
+                fakeSdkAlignment.InvocationCount);
+
+            Assert.Contains(
+                "Skipped because --mcp was not selected.",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_McpBuildFailure_DoesNotInvokeNativeSdkAlignment()
+    {
+        string tempDir = CreateTempRepoWithScripts();
+        try
+        {
+            string mcpProject = Path.Combine(
+                tempDir,
+                "Tools",
+                "AiContextMcp",
+                "AiRepo.ContextMcp.csproj");
+
+            string mcpDll = Path.Combine(
+                tempDir,
+                "Tools",
+                "AiContextMcp",
+                "bin",
+                "Release",
+                "net10.0",
+                "AiRepo.ContextMcp.dll");
+
+            File.Delete(mcpDll);
+
+            File.WriteAllText(
+                mcpProject,
+                "<Project><Invalid>");
+
+            var fakeSdkAlignment =
+                new FakeSdkAlignmentService();
+
+            var command = new BootstrapCommand(
+                new FakeScriptRunner(),
+                new FakeMcpBudgetService(),
+                fakeSdkAlignment);
+
+            BootstrapOptions options = CreateOptions(
+                tempDir,
+                apply: true,
+                dryRun: false,
+                shell: ScriptShell.Auto);
+
+            CommandResult result =
+                command.Execute(options);
+
+            Assert.False(result.Success);
+
+            Assert.Equal(
+                0,
+                fakeSdkAlignment.InvocationCount);
+
+            Assert.Contains(
+                "Skipped because MCP build did not pass.",
+                result.Markdown);
         }
         finally
         {
@@ -63,7 +358,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: false, dryRun: true, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -87,7 +382,7 @@ public sealed class BootstrapCommandTests
             {
                 ResultHandler = (def, shell) => new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
             };
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -113,7 +408,7 @@ public sealed class BootstrapCommandTests
                     ? new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "secret leak detected")
                     : new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
             };
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -139,7 +434,7 @@ public sealed class BootstrapCommandTests
             {
                 ExceptionToThrow = new InvalidOperationException("Executable resolution failed.")
             };
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -165,7 +460,7 @@ public sealed class BootstrapCommandTests
             {
                 ExceptionToThrow = new InvalidOperationException("Script 'update-ai-context' does not have a Bash implementation.")
             };
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Bash);
 
             CommandResult result = command.Execute(options);
@@ -192,7 +487,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -225,7 +520,7 @@ public sealed class BootstrapCommandTests
                     return new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty);
                 }
             };
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -251,7 +546,7 @@ public sealed class BootstrapCommandTests
                     ? new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "check-secrets failed")
                     : new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
             };
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
 
             CommandResult result = command.Execute(options);
@@ -273,7 +568,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto, skipCodeInventory: true);
 
             CommandResult result = command.Execute(options);
@@ -294,7 +589,7 @@ public sealed class BootstrapCommandTests
         try
         {
             var fakeRunner = new FakeScriptRunner();
-            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService());
+            var command = new BootstrapCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
             BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto, skipCodeInventory: false, format: "invalid");
 
             CommandResult result = command.Execute(options);
@@ -308,13 +603,22 @@ public sealed class BootstrapCommandTests
         }
     }
 
-    private static BootstrapOptions CreateOptions(string repoPath, bool apply, bool dryRun, ScriptShell shell, bool skipCodeInventory = true, string format = "markdown")
+    private static BootstrapOptions CreateOptions(
+        string repoPath,
+        bool apply,
+        bool dryRun,
+        ScriptShell shell,
+        bool skipCodeInventory = true,
+        string format = "markdown",
+        bool skipAiContext = false,
+        bool skipScripts = false,
+        bool includeMcp = true)
     {
         return new BootstrapOptions(
             command_: "bootstrap",
             repoPath_: repoPath,
             clients_: [],
-            includeMcp_: true,
+            includeMcp_: includeMcp,
             apply_: apply,
             dryRun_: dryRun,
             backup_: false,
@@ -329,12 +633,12 @@ public sealed class BootstrapCommandTests
             mcpAssemblyName_: "AiRepo.ContextMcp",
             mcpProjectRelativePath_: "Tools/AiContextMcp/AiRepo.ContextMcp.csproj",
             skipBuildMcp_: false,
-            skipAiContext_: false,
+            skipAiContext_: skipAiContext,
             skipCodeInventory_: skipCodeInventory,
             skipSecurityScan_: false,
             skipBudget_: false,
             skipSmoke_: true,
-            skipScripts_: false,
+            skipScripts_: skipScripts,
             maxFiles_: 100,
             maxItems_: 100,
             includePrivateMembers_: false,
@@ -473,6 +777,31 @@ public sealed class BootstrapCommandTests
             }
 
             return new ProcessResult("pwsh", string.Empty, repositoryRoot, 0, "ok", string.Empty);
+        }
+    }
+
+    private sealed class FakeSdkAlignmentService : ISdkAlignmentService
+    {
+        public int InvocationCount { get; private set; }
+
+        public Action? OnRun { get; init; }
+
+        public SdkAlignmentRunResult? ResultToReturn { get; init; }
+
+        public SdkAlignmentRunResult Run(string repoRoot)
+        {
+            InvocationCount++;
+            OnRun?.Invoke();
+
+            return ResultToReturn ??
+                SdkAlignmentRunResult.Success(
+                    new SdkAlignmentReport
+                    {
+                        ExpectedTargetFramework = "net10.0",
+                        DotNetSdkVersion = "10.0.111",
+                        DotNetSdks = ["10.0.111 [/sdk]"],
+                        Projects = []
+                    });
         }
     }
 
