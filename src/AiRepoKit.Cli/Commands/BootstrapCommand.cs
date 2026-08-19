@@ -6,6 +6,7 @@ using AiRepoKit.Cli.Services.AiContextUpdate;
 using AiRepoKit.Cli.Services.ManagedFiles;
 using AiRepoKit.Cli.Services.McpBudget;
 using AiRepoKit.Cli.Services.SdkAlignment;
+using AiRepoKit.Cli.Services.SecretScan;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -15,13 +16,15 @@ public sealed class BootstrapCommand
     private readonly IMcpBudgetService _mcpBudgetService;
     private readonly ISdkAlignmentService _sdkAlignmentService;
     private readonly IAiContextUpdateService _aiContextUpdateService;
+    private readonly ISecretScanService _secretScanService;
 
     public BootstrapCommand()
         : this(
             ScriptRuntimeFactory.CreateDefault(),
             new McpBudgetService(),
             new SdkAlignmentService(),
-            new AiContextUpdateService())
+            new AiContextUpdateService(),
+            new SecretScanService())
     {
     }
 
@@ -33,12 +36,14 @@ public sealed class BootstrapCommand
         IScriptRunner scriptRunner,
         IMcpBudgetService? mcpBudgetService = null,
         ISdkAlignmentService? sdkAlignmentService = null,
-        IAiContextUpdateService? aiContextUpdateService = null)
+        IAiContextUpdateService? aiContextUpdateService = null,
+        ISecretScanService? secretScanService = null)
     {
         _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
         _mcpBudgetService = mcpBudgetService ?? new McpBudgetService();
         _sdkAlignmentService = sdkAlignmentService ?? new SdkAlignmentService();
         _aiContextUpdateService = aiContextUpdateService ?? new AiContextUpdateService();
+        _secretScanService = secretScanService ?? new SecretScanService();
     }
 
     public CommandResult Execute(BootstrapOptions options_)
@@ -190,6 +195,7 @@ public sealed class BootstrapCommand
             scriptStatuses.Add("All scripts skipped.");
             scriptStatuses.Add("ai-context-update: Skipped by --skip-scripts");
             scriptStatuses.Add("sdk-alignment: Skipped by --skip-scripts");
+            scriptStatuses.Add("secret-scan: Skipped by --skip-scripts");
         }
         else if (options_.IncludeMcp &&
             (mcpBuildStatus is "Built" or "SkippedCurrent" or "SkippedLockedSmokePassed" || !apply))
@@ -312,6 +318,25 @@ public sealed class BootstrapCommand
                     scriptStatuses.Add(
                         $"{scriptDisplayPath}: Simulated");
                 }
+            }
+
+            if (options_.SkipSecurityScan)
+            {
+                scriptStatuses.Add(
+                    "secret-scan: Skipped by --skip-security-scan");
+            }
+            else if (apply)
+            {
+                RunSecretScan(
+                    options_,
+                    progress,
+                    scriptStatuses,
+                    errors);
+            }
+            else
+            {
+                scriptStatuses.Add(
+                    "secret-scan: Simulated");
             }
         }
         else if (options_.IncludeMcp)
@@ -444,6 +469,60 @@ public sealed class BootstrapCommand
         }
     }
 
+    private void RunSecretScan(
+        BootstrapOptions options_,
+        ProgressReporter progress_,
+        List<string> statuses_,
+        List<string> errors_)
+    {
+        progress_.StartPhase(
+            "Running native secret scan");
+
+        try
+        {
+            SecretScanRunResult result =
+                _secretScanService.Run(
+                    Path.GetFullPath(
+                        options_.RepoPath));
+
+            if (result.IsSuccess)
+            {
+                statuses_.Add(
+                    "secret-scan: Passed");
+
+                progress_.CompletePhase(
+                    "Native secret scan completed");
+
+                return;
+            }
+
+            statuses_.Add(
+                "secret-scan: Failed");
+
+            errors_.Add(
+                ProcessRunner.Redact(
+                    "Secret scan failed: " +
+                    (result.ErrorMessage ??
+                        "Unknown failure.")));
+
+            progress_.FailPhase(
+                "Native secret scan failed");
+        }
+        catch (Exception exception)
+        {
+            statuses_.Add(
+                "secret-scan: Failed / unable to execute");
+
+            errors_.Add(
+                ProcessRunner.Redact(
+                    "Secret scan execution failed: " +
+                    exception.Message));
+
+            progress_.FailPhase(
+                "Native secret scan failed");
+        }
+    }
+
     private void RunSdkAlignment(
         BootstrapOptions options_,
         ProgressReporter progress_,
@@ -561,11 +640,6 @@ public sealed class BootstrapCommand
         PowerShellRelativePath: "Tools/AiContext/UpdateCodeInventory.ps1",
         BashRelativePath: null);
 
-    private static readonly ScriptDefinition CheckSecretsScript = new(
-        "check-secrets",
-        PowerShellRelativePath: "Tools/AiContext/CheckSecrets.ps1",
-        BashRelativePath: null);
-
     private static IReadOnlyList<ScriptPlan> GetScripts(BootstrapOptions options_, bool codeIndexPassed_)
     {
         List<ScriptPlan> scripts = [];
@@ -573,11 +647,6 @@ public sealed class BootstrapCommand
         if (!options_.SkipCodeInventory && !codeIndexPassed_)
         {
             scripts.Add(new ScriptPlan(UpdateCodeInventoryScript));
-        }
-
-        if (!options_.SkipSecurityScan)
-        {
-            scripts.Add(new ScriptPlan(CheckSecretsScript));
         }
 
         // Note: mcp-budget is intentionally absent — it runs as a native IMcpBudgetService

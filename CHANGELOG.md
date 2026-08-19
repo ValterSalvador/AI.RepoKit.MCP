@@ -21,6 +21,8 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - Native AI-context update service that generates the MCP context manifest,
   project inventory, project references, package inventory, SDK inventory,
   and generated context summary without requiring PowerShell.
+- Native secret-scan service preserving the historical filtering and report
+  contract with deterministic cross-platform execution and redacted findings.
 - Dedicated .NET SDK probe runner that preserves the historical successful
   `dotnet --version` and `dotnet --list-sdks` artifact contract while keeping
   diagnostic errors redacted.
@@ -35,6 +37,10 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - SelfCheck, Efficiency, Bootstrap, and MCP diagnostics use the native MCP
   budget service instead of PowerShell product business logic.
 - Bootstrap runs AI-context update and SDK alignment natively.
+- Bootstrap runs secret scanning natively and no longer executes
+  `CheckSecrets.ps1` for product runtime behavior.
+- SelfCheck no longer requires the secret-scan PowerShell compatibility script
+  to exist at runtime.
 - `UpdateAiContext.ps1` and `CheckSdkAlignment.ps1` are no longer executed by
   Bootstrap for product runtime behavior.
 - SelfCheck no longer requires the migrated UpdateAiContext or SDK-alignment
@@ -52,6 +58,8 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   artifact but is no longer used for product runtime behavior.
 - `Tools/AiContext/UpdateAiContext.ps1` remains available as a compatibility
   artifact but is no longer used for product runtime behavior.
+- `Tools/AiContext/CheckSecrets.ps1` remains available as a compatibility
+  artifact until P03 but is no longer used by Bootstrap product runtime.
 - ConfigGenerator continues to generate the historical compatibility artifacts.
 
 #### Validation
@@ -63,12 +71,18 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   implementation: 6 of 6 artifacts passing on Windows.
 - SDK-alignment semantic parity against the legacy PowerShell implementation
   passing on Windows, including the raw SDK-list contract.
+- Native secret scan validated with real execution on Windows and WSL.
+- Secret-scan semantic parity against the historical PowerShell implementation
+  validated on Windows.
+- Explicit secret-value non-disclosure validation passed for reports and
+  surfaced scanner output.
+- Secret-scan service tests: 21 passing after final diagnostic-contract review.
 - AI-context update service tests: 18 passing.
 - SDK-alignment service tests: 17 passing.
-- Bootstrap integration tests: 21 passing.
-- SelfCheck tests: 7 passing.
-- Current WSL full test suite: 200 passing.
-- Current Windows full test suite: 200 passing.
+- Bootstrap integration tests: 23 passing.
+- SelfCheck tests: 8 passing.
+- P02.3 WSL acceptance full test suite: 223 passing.
+- P02.3 Windows acceptance full test suite: 223 passing.
 
 ### Release policy
 

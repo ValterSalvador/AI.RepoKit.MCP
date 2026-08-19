@@ -226,6 +226,63 @@ public sealed class SelfCheckCommandTests
     }
 
     [Fact]
+    public void SelfCheck_MissingNativeSecretScanCompatibilityScript_DoesNotCreateRequiredFileFailure()
+    {
+        string tempDir =
+            CreateTempRepo();
+
+        try
+        {
+            string compatibilityScript =
+                Path.Combine(
+                    tempDir,
+                    "Tools",
+                    "AiContext",
+                    "CheckSecrets.ps1");
+
+            Assert.False(
+                File.Exists(
+                    compatibilityScript));
+
+            var fakeService =
+                new FakeMcpBudgetService
+                {
+                    ResultToReturn =
+                        CreateBudgetResult(
+                            tempDir,
+                            McpBudgetExitClass.Success,
+                            passed: true)
+                };
+
+            var command =
+                new SelfCheckCommand(
+                    fakeService);
+
+            BootstrapOptions options =
+                CreateOptions(
+                    tempDir,
+                    ScriptShell.Auto);
+
+            CommandResult result =
+                command.Execute(
+                    options);
+
+            Assert.DoesNotContain(
+                "required-file:Tools/AiContext/CheckSecrets.ps1",
+                result.Markdown);
+
+            Assert.Equal(
+                1,
+                fakeService.InvocationCount);
+        }
+        finally
+        {
+            DeleteTempRepo(
+                tempDir);
+        }
+    }
+
+    [Fact]
     public void SelfCheck_BashShell_DoesNotAffectNativeBudgetExecution()
     {
         string tempDir = CreateTempRepo();

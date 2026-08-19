@@ -4,6 +4,7 @@ using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.AiContextUpdate;
 using AiRepoKit.Cli.Services.McpBudget;
 using AiRepoKit.Cli.Services.SdkAlignment;
+using AiRepoKit.Cli.Services.SecretScan;
 using Xunit;
 
 namespace AiRepoKit.Cli.Tests;
@@ -13,17 +14,55 @@ public sealed class BootstrapCommandTests
     [Fact]
     public void Bootstrap_PassesScriptShellToScriptRunner()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
-            var fakeRunner = new FakeScriptRunner();
-            var command = CreateCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
-            BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.PowerShell);
+            var fakeRunner =
+                new FakeScriptRunner();
 
-            CommandResult result = command.Execute(options);
+            var fakeSecretScan =
+                new FakeSecretScanService();
 
-            Assert.NotEmpty(fakeRunner.Calls);
-            Assert.All(fakeRunner.Calls, call => Assert.Equal(ScriptShell.PowerShell, call.RequestedShell));
+            var command =
+                CreateCommand(
+                    fakeRunner,
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService(),
+                    new FakeAiContextUpdateService(),
+                    fakeSecretScan);
+
+            BootstrapOptions options =
+                CreateOptions(
+                    tempDir,
+                    apply: true,
+                    dryRun: false,
+                    shell: ScriptShell.PowerShell,
+                    skipCodeInventory: false,
+                    format: "invalid");
+
+            command.Execute(options);
+
+            Assert.NotEmpty(
+                fakeRunner.Calls);
+
+            Assert.All(
+                fakeRunner.Calls,
+                call =>
+                    Assert.Equal(
+                        ScriptShell.PowerShell,
+                        call.RequestedShell));
+
+            Assert.DoesNotContain(
+                fakeRunner.Calls,
+                call =>
+                    call.Definition.Name ==
+                    "check-secrets");
+
+            Assert.Equal(
+                1,
+                fakeSecretScan.InvocationCount);
         }
         finally
         {
@@ -34,7 +73,9 @@ public sealed class BootstrapCommandTests
     [Fact]
     public void Bootstrap_PassesExpectedLogicalScriptDefinitions()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
             var fakeRunner =
@@ -49,11 +90,16 @@ public sealed class BootstrapCommandTests
             var fakeAiContextUpdate =
                 new FakeAiContextUpdateService();
 
-            var command = CreateCommand(
-                fakeRunner,
-                fakeBudget,
-                fakeSdkAlignment,
-                fakeAiContextUpdate);
+            var fakeSecretScan =
+                new FakeSecretScanService();
+
+            var command =
+                CreateCommand(
+                    fakeRunner,
+                    fakeBudget,
+                    fakeSdkAlignment,
+                    fakeAiContextUpdate,
+                    fakeSecretScan);
 
             BootstrapOptions options =
                 CreateOptions(
@@ -65,12 +111,14 @@ public sealed class BootstrapCommandTests
             CommandResult result =
                 command.Execute(options);
 
-            Assert.True(result.Success);
+            Assert.True(
+                result.Success);
 
             List<string> scriptNames =
                 fakeRunner.Calls
-                    .Select(call =>
-                        call.Definition.Name)
+                    .Select(
+                        call =>
+                            call.Definition.Name)
                     .ToList();
 
             Assert.DoesNotContain(
@@ -81,7 +129,7 @@ public sealed class BootstrapCommandTests
                 "check-sdk-alignment",
                 scriptNames);
 
-            Assert.Contains(
+            Assert.DoesNotContain(
                 "check-secrets",
                 scriptNames);
 
@@ -100,6 +148,10 @@ public sealed class BootstrapCommandTests
             Assert.Equal(
                 1,
                 fakeAiContextUpdate.InvocationCount);
+
+            Assert.Equal(
+                1,
+                fakeSecretScan.InvocationCount);
         }
         finally
         {
@@ -108,31 +160,15 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_NativeSdkAlignment_RunsAfterNativeAiContextUpdateAndBeforeRemainingScripts()
+    public void Bootstrap_NativeSecretScan_RunsAfterAiContextAndSdkAlignment()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
-            List<string> events = [];
-
-            var fakeRunner =
-                new FakeScriptRunner
-                {
-                    ResultHandler =
-                        (definition, shell) =>
-                        {
-                            events.Add(
-                                definition.Name);
-
-                            return new ProcessResult(
-                                "pwsh",
-                                string.Empty,
-                                tempDir,
-                                0,
-                                "ok",
-                                string.Empty);
-                        }
-                };
+            List<string> events =
+                [];
 
             var fakeAiContextUpdate =
                 new FakeAiContextUpdateService
@@ -152,60 +188,41 @@ public sealed class BootstrapCommandTests
                                 "sdk-alignment")
                 };
 
-            var command = CreateCommand(
-                fakeRunner,
-                new FakeMcpBudgetService(),
-                fakeSdkAlignment,
-                fakeAiContextUpdate);
+            var fakeSecretScan =
+                new FakeSecretScanService
+                {
+                    OnRun =
+                        _ =>
+                            events.Add(
+                                "secret-scan")
+                };
 
-            BootstrapOptions options =
-                CreateOptions(
-                    tempDir,
-                    apply: true,
-                    dryRun: false,
-                    shell: ScriptShell.Auto);
+            var command =
+                CreateCommand(
+                    new FakeScriptRunner(),
+                    new FakeMcpBudgetService(),
+                    fakeSdkAlignment,
+                    fakeAiContextUpdate,
+                    fakeSecretScan);
 
             CommandResult result =
-                command.Execute(options);
+                command.Execute(
+                    CreateOptions(
+                        tempDir,
+                        apply: true,
+                        dryRun: false,
+                        shell: ScriptShell.Auto));
 
-            Assert.True(result.Success);
-
-            int updateIndex =
-                events.IndexOf(
-                    "ai-context-update");
-
-            int sdkIndex =
-                events.IndexOf(
-                    "sdk-alignment");
-
-            int secretsIndex =
-                events.IndexOf(
-                    "check-secrets");
-
-            Assert.True(updateIndex >= 0);
-            Assert.True(sdkIndex > updateIndex);
-            Assert.True(secretsIndex > sdkIndex);
-
-            Assert.NotNull(
-                fakeAiContextUpdate.LastOptions);
+            Assert.True(
+                result.Success);
 
             Assert.Equal(
-                "net10.0",
-                fakeAiContextUpdate
-                    .LastOptions!
-                    .TargetFramework);
-
-            Assert.Equal(
-                "ai_repo_context",
-                fakeAiContextUpdate
-                    .LastOptions
-                    .McpServerName);
-
-            Assert.Equal(
-                "Tools/AiContextMcp/AiRepo.ContextMcp.csproj",
-                fakeAiContextUpdate
-                    .LastOptions
-                    .McpProjectRelativePath);
+                [
+                    "ai-context-update",
+                    "sdk-alignment",
+                    "secret-scan"
+                ],
+                events);
         }
         finally
         {
@@ -664,6 +681,157 @@ public sealed class BootstrapCommandTests
         }
     }
 
+
+    [Fact]
+    public void Bootstrap_NativeSecretScan_RespectsNonExecutionGates()
+    {
+        var cases = new[]
+        {
+            new
+            {
+                Apply = false,
+                DryRun = true,
+                SkipScripts = false,
+                IncludeMcp = true,
+                SkipSecurity = false,
+                ExpectedStatus =
+                    "secret-scan: Simulated"
+            },
+            new
+            {
+                Apply = true,
+                DryRun = false,
+                SkipScripts = true,
+                IncludeMcp = true,
+                SkipSecurity = false,
+                ExpectedStatus =
+                    "secret-scan: Skipped by --skip-scripts"
+            },
+            new
+            {
+                Apply = true,
+                DryRun = false,
+                SkipScripts = false,
+                IncludeMcp = true,
+                SkipSecurity = true,
+                ExpectedStatus =
+                    "secret-scan: Skipped by --skip-security-scan"
+            },
+            new
+            {
+                Apply = true,
+                DryRun = false,
+                SkipScripts = false,
+                IncludeMcp = false,
+                SkipSecurity = false,
+                ExpectedStatus =
+                    "Skipped because --mcp was not selected."
+            }
+        };
+
+        foreach (var gate in cases)
+        {
+            string tempDir =
+                CreateTempRepoWithScripts();
+
+            try
+            {
+                var fakeSecretScan =
+                    new FakeSecretScanService();
+
+                var command =
+                    CreateCommand(
+                        new FakeScriptRunner(),
+                        new FakeMcpBudgetService(),
+                        new FakeSdkAlignmentService(),
+                        new FakeAiContextUpdateService(),
+                        fakeSecretScan);
+
+                CommandResult result =
+                    command.Execute(
+                        CreateOptions(
+                            tempDir,
+                            gate.Apply,
+                            gate.DryRun,
+                            ScriptShell.Auto,
+                            skipScripts:
+                                gate.SkipScripts,
+                            includeMcp:
+                                gate.IncludeMcp,
+                            skipSecurityScan:
+                                gate.SkipSecurity));
+
+                Assert.True(
+                    result.Success);
+
+                Assert.Equal(
+                    0,
+                    fakeSecretScan.InvocationCount);
+
+                Assert.Contains(
+                    gate.ExpectedStatus,
+                    result.Markdown);
+            }
+            finally
+            {
+                DeleteTempRepo(tempDir);
+            }
+        }
+    }
+
+    [Fact]
+    public void Bootstrap_SkipAiContext_DoesNotSkipNativeSecretScan()
+    {
+        string tempDir =
+            CreateTempRepoWithScripts();
+
+        try
+        {
+            var fakeSecretScan =
+                new FakeSecretScanService();
+
+            var command =
+                CreateCommand(
+                    new FakeScriptRunner(),
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService(),
+                    new FakeAiContextUpdateService(),
+                    fakeSecretScan);
+
+            CommandResult result =
+                command.Execute(
+                    CreateOptions(
+                        tempDir,
+                        apply: true,
+                        dryRun: false,
+                        shell: ScriptShell.Auto,
+                        skipAiContext: true));
+
+            Assert.True(
+                result.Success);
+
+            Assert.Equal(
+                1,
+                fakeSecretScan.InvocationCount);
+
+            Assert.Contains(
+                "ai-context-update: Skipped by --skip-ai-context",
+                result.Markdown);
+
+            Assert.Contains(
+                "sdk-alignment: Skipped by --skip-ai-context",
+                result.Markdown);
+
+            Assert.Contains(
+                "secret-scan: Passed",
+                result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
     [Fact]
     public void Bootstrap_DryRun_DoesNotInvokeScriptRunner()
     {
@@ -686,47 +854,67 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_SuccessfulScriptProcessResult_ProducesPassedScriptStatus()
+    public void Bootstrap_NativeSecretScanSuccess_ProducesPassedStatus()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
             var fakeRunner =
-                new FakeScriptRunner
+                new FakeScriptRunner();
+
+            var fakeSecretScan =
+                new FakeSecretScanService
                 {
-                    ResultHandler =
-                        (definition, shell) =>
-                            new ProcessResult(
-                                "pwsh",
-                                string.Empty,
-                                tempDir,
-                                0,
-                                "ok",
-                                string.Empty)
+                    ResultToReturn =
+                        SecretScanRunResult.Success(
+                            new SecretScanReport
+                            {
+                                FindingCount = 1,
+                                Findings =
+                                [
+                                    new SecretScanFinding
+                                    {
+                                        File =
+                                            "finding.txt"
+                                    }
+                                ]
+                            })
                 };
 
-            var command = CreateCommand(
-                fakeRunner);
-
-            BootstrapOptions options =
-                CreateOptions(
-                    tempDir,
-                    apply: true,
-                    dryRun: false,
-                    shell: ScriptShell.Auto);
+            var command =
+                CreateCommand(
+                    fakeRunner,
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService(),
+                    new FakeAiContextUpdateService(),
+                    fakeSecretScan);
 
             CommandResult result =
-                command.Execute(options);
+                command.Execute(
+                    CreateOptions(
+                        tempDir,
+                        apply: true,
+                        dryRun: false,
+                        shell: ScriptShell.Auto));
 
-            Assert.True(result.Success);
+            Assert.True(
+                result.Success);
 
             Assert.Contains(
-                "Tools/AiContext/CheckSecrets.ps1: Passed",
+                "secret-scan: Passed",
                 result.Markdown);
 
-            Assert.Contains(
-                "ai-context-update: Passed",
-                result.Markdown);
+            Assert.Equal(
+                1,
+                fakeSecretScan.InvocationCount);
+
+            Assert.DoesNotContain(
+                fakeRunner.Calls,
+                call =>
+                    call.Definition.Name ==
+                    "check-secrets");
         }
         finally
         {
@@ -735,26 +923,55 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_FailedProcessResult_ProducesFailedScriptStatusAndBootstrapFailure()
+    public void Bootstrap_NativeSecretScanFailure_FailsBootstrap()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
-            var fakeRunner = new FakeScriptRunner
-            {
-                ResultHandler = (def, shell) => def.Name == "check-secrets"
-                    ? new ProcessResult("pwsh", string.Empty, tempDir, 1, string.Empty, "secret leak detected")
-                    : new ProcessResult("pwsh", string.Empty, tempDir, 0, "ok", string.Empty)
-            };
-            var command = CreateCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
-            BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto);
+            var fakeSecretScan =
+                new FakeSecretScanService
+                {
+                    ResultToReturn =
+                        SecretScanRunResult.Failure(
+                            "scanner failure")
+                };
 
-            CommandResult result = command.Execute(options);
+            var command =
+                CreateCommand(
+                    new FakeScriptRunner(),
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService(),
+                    new FakeAiContextUpdateService(),
+                    fakeSecretScan);
 
-            Assert.False(result.Success);
-            Assert.Equal(1, result.ExitCode);
-            Assert.Contains("Tools/AiContext/CheckSecrets.ps1: Failed exit 1", result.Markdown);
-            Assert.Contains("Tools/AiContext/CheckSecrets.ps1 failed.", result.Markdown);
+            CommandResult result =
+                command.Execute(
+                    CreateOptions(
+                        tempDir,
+                        apply: true,
+                        dryRun: false,
+                        shell: ScriptShell.Auto));
+
+            Assert.False(
+                result.Success);
+
+            Assert.Equal(
+                1,
+                result.ExitCode);
+
+            Assert.Contains(
+                "secret-scan: Failed",
+                result.Markdown);
+
+            Assert.Contains(
+                "Secret scan failed: scanner failure",
+                result.Markdown);
+
+            Assert.Equal(
+                1,
+                fakeSecretScan.InvocationCount);
         }
         finally
         {
@@ -763,45 +980,50 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_ScriptRunnerPreLaunchException_BecomesScriptLevelFailure()
+    public void Bootstrap_NativeSecretScanException_BecomesNativeFailure()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
-            var fakeRunner =
-                new FakeScriptRunner
+            var fakeSecretScan =
+                new FakeSecretScanService
                 {
                     ExceptionToThrow =
                         new InvalidOperationException(
-                            "Executable resolution failed.")
+                            "scanner exploded")
                 };
 
-            var command = CreateCommand(
-                fakeRunner);
-
-            BootstrapOptions options =
-                CreateOptions(
-                    tempDir,
-                    apply: true,
-                    dryRun: false,
-                    shell: ScriptShell.Auto);
+            var command =
+                CreateCommand(
+                    new FakeScriptRunner(),
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService(),
+                    new FakeAiContextUpdateService(),
+                    fakeSecretScan);
 
             CommandResult result =
-                command.Execute(options);
+                command.Execute(
+                    CreateOptions(
+                        tempDir,
+                        apply: true,
+                        dryRun: false,
+                        shell: ScriptShell.Auto));
 
-            Assert.False(result.Success);
-            Assert.Equal(1, result.ExitCode);
+            Assert.False(
+                result.Success);
+
+            Assert.Equal(
+                1,
+                result.ExitCode);
 
             Assert.Contains(
-                "Tools/AiContext/CheckSecrets.ps1: Failed / unable to execute",
+                "secret-scan: Failed / unable to execute",
                 result.Markdown);
 
             Assert.Contains(
-                "Tools/AiContext/CheckSecrets.ps1 execution failed: Executable resolution failed.",
-                result.Markdown);
-
-            Assert.Contains(
-                "ai-context-update: Passed",
+                "Secret scan execution failed: scanner exploded",
                 result.Markdown);
         }
         finally
@@ -811,9 +1033,11 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_ExplicitBash_DoesNotAffectNativeAiContextUpdate()
+    public void Bootstrap_ExplicitBash_DoesNotAffectNativeServices()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
             var fakeRunner =
@@ -825,25 +1049,31 @@ public sealed class BootstrapCommandTests
             var fakeAiContextUpdate =
                 new FakeAiContextUpdateService();
 
-            var command = CreateCommand(
-                fakeRunner,
-                new FakeMcpBudgetService(),
-                fakeSdkAlignment,
-                fakeAiContextUpdate);
+            var fakeSecretScan =
+                new FakeSecretScanService();
 
-            BootstrapOptions options =
-                CreateOptions(
-                    tempDir,
-                    apply: true,
-                    dryRun: false,
-                    shell: ScriptShell.Bash,
-                    skipSecurityScan: true);
+            var command =
+                CreateCommand(
+                    fakeRunner,
+                    new FakeMcpBudgetService(),
+                    fakeSdkAlignment,
+                    fakeAiContextUpdate,
+                    fakeSecretScan);
 
             CommandResult result =
-                command.Execute(options);
+                command.Execute(
+                    CreateOptions(
+                        tempDir,
+                        apply: true,
+                        dryRun: false,
+                        shell: ScriptShell.Bash,
+                        skipSecurityScan: true));
 
-            Assert.True(result.Success);
-            Assert.Empty(fakeRunner.Calls);
+            Assert.True(
+                result.Success);
+
+            Assert.Empty(
+                fakeRunner.Calls);
 
             Assert.Equal(
                 1,
@@ -853,12 +1083,20 @@ public sealed class BootstrapCommandTests
                 1,
                 fakeSdkAlignment.InvocationCount);
 
+            Assert.Equal(
+                0,
+                fakeSecretScan.InvocationCount);
+
             Assert.Contains(
                 "ai-context-update: Passed",
                 result.Markdown);
 
             Assert.Contains(
                 "sdk-alignment: Passed",
+                result.Markdown);
+
+            Assert.Contains(
+                "secret-scan: Skipped by --skip-security-scan",
                 result.Markdown);
         }
         finally
@@ -961,61 +1199,96 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_FailureOfAnotherScript_DoesNotFalselyFailNativeAiContextUpdate()
+    public void Bootstrap_CodeInventoryFallbackFailure_StillRunsNativeSecretScan()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
+            List<string> events =
+                [];
+
             var fakeRunner =
                 new FakeScriptRunner
                 {
                     ResultHandler =
                         (definition, shell) =>
-                            definition.Name ==
-                            "check-secrets"
-                                ? new ProcessResult(
-                                    "pwsh",
-                                    string.Empty,
-                                    tempDir,
-                                    1,
-                                    string.Empty,
-                                    "check-secrets failed")
-                                : new ProcessResult(
-                                    "pwsh",
-                                    string.Empty,
-                                    tempDir,
-                                    0,
-                                    "ok",
-                                    string.Empty)
+                        {
+                            events.Add(
+                                definition.Name);
+
+                            return new ProcessResult(
+                                "pwsh",
+                                string.Empty,
+                                tempDir,
+                                1,
+                                string.Empty,
+                                "fallback failed");
+                        }
                 };
 
             var fakeAiContextUpdate =
                 new FakeAiContextUpdateService();
 
-            var command = CreateCommand(
-                fakeRunner,
-                new FakeMcpBudgetService(),
-                new FakeSdkAlignmentService(),
-                fakeAiContextUpdate);
+            var fakeSecretScan =
+                new FakeSecretScanService
+                {
+                    OnRun =
+                        _ =>
+                            events.Add(
+                                "secret-scan")
+                };
 
-            BootstrapOptions options =
-                CreateOptions(
-                    tempDir,
-                    apply: true,
-                    dryRun: false,
-                    shell: ScriptShell.Auto);
+            var command =
+                CreateCommand(
+                    fakeRunner,
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService(),
+                    fakeAiContextUpdate,
+                    fakeSecretScan);
 
             CommandResult result =
-                command.Execute(options);
+                command.Execute(
+                    CreateOptions(
+                        tempDir,
+                        apply: true,
+                        dryRun: false,
+                        shell: ScriptShell.Auto,
+                        skipCodeInventory: false,
+                        format: "invalid"));
 
-            Assert.False(result.Success);
+            Assert.False(
+                result.Success);
 
             Assert.Equal(
                 1,
                 fakeAiContextUpdate.InvocationCount);
 
+            Assert.Equal(
+                1,
+                fakeSecretScan.InvocationCount);
+
+            int fallbackIndex =
+                events.IndexOf(
+                    "update-code-inventory");
+
+            int secretIndex =
+                events.IndexOf(
+                    "secret-scan");
+
+            Assert.True(
+                fallbackIndex >= 0);
+
+            Assert.True(
+                secretIndex > fallbackIndex);
+
             Assert.Contains(
-                "Tools/AiContext/CheckSecrets.ps1: Failed exit 1",
+                "Tools/AiContext/UpdateCodeInventory.ps1: Failed exit 1",
+                result.Markdown);
+
+            Assert.Contains(
+                "secret-scan: Passed",
                 result.Markdown);
 
             Assert.Contains(
@@ -1074,7 +1347,8 @@ public sealed class BootstrapCommandTests
         IScriptRunner scriptRunner,
         IMcpBudgetService? mcpBudgetService = null,
         ISdkAlignmentService? sdkAlignmentService = null,
-        IAiContextUpdateService? aiContextUpdateService = null)
+        IAiContextUpdateService? aiContextUpdateService = null,
+        ISecretScanService? secretScanService = null)
     {
         return new BootstrapCommand(
             scriptRunner,
@@ -1083,7 +1357,9 @@ public sealed class BootstrapCommandTests
             sdkAlignmentService ??
                 new FakeSdkAlignmentService(),
             aiContextUpdateService ??
-                new FakeAiContextUpdateService());
+                new FakeAiContextUpdateService(),
+            secretScanService ??
+                new FakeSecretScanService());
     }
 
     private static BootstrapOptions CreateOptions(
@@ -1330,6 +1606,59 @@ public sealed class BootstrapCommandTests
                         DotNetSdkVersion = "10.0.111",
                         DotNetSdks = ["10.0.111 [/sdk]"],
                         Projects = []
+                    });
+        }
+    }
+
+    private sealed class FakeSecretScanService :
+        ISecretScanService
+    {
+        public int InvocationCount
+        {
+            get;
+            private set;
+        }
+
+        public Action<string>? OnRun
+        {
+            get;
+            init;
+        }
+
+        public Exception? ExceptionToThrow
+        {
+            get;
+            init;
+        }
+
+        public SecretScanRunResult? ResultToReturn
+        {
+            get;
+            init;
+        }
+
+        public SecretScanRunResult Run(
+            string repoRoot)
+        {
+            InvocationCount++;
+
+            OnRun?.Invoke(
+                repoRoot);
+
+            if (ExceptionToThrow is not null)
+            {
+                throw ExceptionToThrow;
+            }
+
+            return ResultToReturn ??
+                SecretScanRunResult.Success(
+                    new SecretScanReport
+                    {
+                        SecretsExposed = false,
+                        SecretValuesReturned = false,
+                        RedactedOnly = true,
+                        FindingCount = 0,
+                        Findings = []
                     });
         }
     }
