@@ -216,6 +216,10 @@ public sealed class SelfCheckCommandTests
                 result.Markdown);
 
             Assert.DoesNotContain(
+                "required-file:Tools/AiContext/UpdateCodeInventory.ps1",
+                result.Markdown);
+
+            Assert.DoesNotContain(
                 "required-file:Tools/AiContext/CheckSdkAlignment.ps1",
                 result.Markdown);
 

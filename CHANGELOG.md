@@ -41,10 +41,15 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - Bootstrap runs AI-context update and SDK alignment natively.
 - Bootstrap runs secret scanning natively and no longer executes
   `CheckSecrets.ps1` for product runtime behavior.
+- RoslynLite code indexing is authoritative in Bootstrap; native code-index
+  failures are explicit errors and no longer fall back to
+  `UpdateCodeInventory.ps1`.
 - SelfCheck no longer requires the secret-scan PowerShell compatibility script
   to exist at runtime.
 - SelfCheck no longer requires the build-diagnostics PowerShell compatibility
   script to exist at runtime.
+- SelfCheck no longer requires the code-inventory PowerShell compatibility script
+  to exist at runtime.
 - Native build diagnostics explicitly preserves the historical Windows
   PowerShell `*.sln` filesystem wildcard behavior, including matching root
   `.slnx` files, consistently across platforms.
@@ -69,6 +74,8 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   artifact until P03 but is no longer used by Bootstrap product runtime.
 - `Tools/AiContext/InvokeBuildDiagnostics.ps1` remains available unchanged as
   a compatibility artifact until P03; native C# is the runtime source of truth.
+- `Tools/AiContext/UpdateCodeInventory.ps1` remains available unchanged as a
+  compatibility artifact until P03 and is no longer a Bootstrap runtime fallback.
 - ConfigGenerator continues to generate the historical compatibility artifacts.
 
 #### Validation
@@ -98,6 +105,10 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   precedence, and bounded diagnostic output tails.
 - P02.4 WSL acceptance full test suite: 241 passing.
 - P02.4 Windows acceptance full test suite: 241 passing.
+- Native RoslynLite code indexing validated with real execution on Windows and WSL.
+- Explicit native code-index failure behavior validated on Windows and WSL.
+- P02.5 WSL acceptance full test suite: 241 passing.
+- P02.5 Windows acceptance full test suite: 241 passing.
 
 ### Release policy
 

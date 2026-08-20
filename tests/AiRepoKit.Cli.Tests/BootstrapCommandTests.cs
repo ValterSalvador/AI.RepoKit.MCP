@@ -12,7 +12,7 @@ namespace AiRepoKit.Cli.Tests;
 public sealed class BootstrapCommandTests
 {
     [Fact]
-    public void Bootstrap_PassesScriptShellToScriptRunner()
+    public void Bootstrap_FailedCodeIndex_DoesNotInvokePowerShellFallback()
     {
         string tempDir =
             CreateTempRepoWithScripts();
@@ -42,27 +42,26 @@ public sealed class BootstrapCommandTests
                     skipCodeInventory: false,
                     format: "invalid");
 
-            command.Execute(options);
+            CommandResult result =
+                command.Execute(options);
 
-            Assert.NotEmpty(
+            Assert.False(
+                result.Success);
+
+            Assert.Empty(
                 fakeRunner.Calls);
-
-            Assert.All(
-                fakeRunner.Calls,
-                call =>
-                    Assert.Equal(
-                        ScriptShell.PowerShell,
-                        call.RequestedShell));
-
-            Assert.DoesNotContain(
-                fakeRunner.Calls,
-                call =>
-                    call.Definition.Name ==
-                    "check-secrets");
 
             Assert.Equal(
                 1,
                 fakeSecretScan.InvocationCount);
+
+            Assert.Contains(
+                "RoslynLite code-index failed with exit 1.",
+                result.Markdown);
+
+            Assert.DoesNotContain(
+                "UpdateCodeInventory.ps1",
+                result.Markdown);
         }
         finally
         {
@@ -1199,46 +1198,21 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_CodeInventoryFallbackFailure_StillRunsNativeSecretScan()
+    public void Bootstrap_CodeIndexFailure_StillRunsNativeSecretScanWithoutFallback()
     {
         string tempDir =
             CreateTempRepoWithScripts();
 
         try
         {
-            List<string> events =
-                [];
-
             var fakeRunner =
-                new FakeScriptRunner
-                {
-                    ResultHandler =
-                        (definition, shell) =>
-                        {
-                            events.Add(
-                                definition.Name);
-
-                            return new ProcessResult(
-                                "pwsh",
-                                string.Empty,
-                                tempDir,
-                                1,
-                                string.Empty,
-                                "fallback failed");
-                        }
-                };
+                new FakeScriptRunner();
 
             var fakeAiContextUpdate =
                 new FakeAiContextUpdateService();
 
             var fakeSecretScan =
-                new FakeSecretScanService
-                {
-                    OnRun =
-                        _ =>
-                            events.Add(
-                                "secret-scan")
-                };
+                new FakeSecretScanService();
 
             var command =
                 CreateCommand(
@@ -1261,6 +1235,9 @@ public sealed class BootstrapCommandTests
             Assert.False(
                 result.Success);
 
+            Assert.Empty(
+                fakeRunner.Calls);
+
             Assert.Equal(
                 1,
                 fakeAiContextUpdate.InvocationCount);
@@ -1269,22 +1246,8 @@ public sealed class BootstrapCommandTests
                 1,
                 fakeSecretScan.InvocationCount);
 
-            int fallbackIndex =
-                events.IndexOf(
-                    "update-code-inventory");
-
-            int secretIndex =
-                events.IndexOf(
-                    "secret-scan");
-
-            Assert.True(
-                fallbackIndex >= 0);
-
-            Assert.True(
-                secretIndex > fallbackIndex);
-
             Assert.Contains(
-                "Tools/AiContext/UpdateCodeInventory.ps1: Failed exit 1",
+                "RoslynLite code-index failed with exit 1.",
                 result.Markdown);
 
             Assert.Contains(
@@ -1302,19 +1265,38 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_SuccessfulCodeIndex_SuppressesUpdateCodeInventoryFallback()
+    public void Bootstrap_SkipCodeInventory_DoesNotInvokeCompatibilityScript()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
-            var fakeRunner = new FakeScriptRunner();
-            var command = CreateCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
-            BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto, skipCodeInventory: true);
+            var fakeRunner =
+                new FakeScriptRunner();
 
-            CommandResult result = command.Execute(options);
+            var command =
+                CreateCommand(
+                    fakeRunner,
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService());
 
-            List<string> scriptNames = fakeRunner.Calls.Select(c => c.Definition.Name).ToList();
-            Assert.DoesNotContain("update-code-inventory", scriptNames);
+            BootstrapOptions options =
+                CreateOptions(
+                    tempDir,
+                    apply: true,
+                    dryRun: false,
+                    shell: ScriptShell.Auto,
+                    skipCodeInventory: true);
+
+            CommandResult result =
+                command.Execute(options);
+
+            Assert.True(
+                result.Success);
+
+            Assert.Empty(
+                fakeRunner.Calls);
         }
         finally
         {
@@ -1323,19 +1305,47 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_FailedCodeIndex_RetainsUpdateCodeInventoryFallback()
+    public void Bootstrap_FailedCodeIndex_FailsWithoutCompatibilityFallback()
     {
-        string tempDir = CreateTempRepoWithScripts();
+        string tempDir =
+            CreateTempRepoWithScripts();
+
         try
         {
-            var fakeRunner = new FakeScriptRunner();
-            var command = CreateCommand(fakeRunner, new FakeMcpBudgetService(), new FakeSdkAlignmentService());
-            BootstrapOptions options = CreateOptions(tempDir, apply: true, dryRun: false, shell: ScriptShell.Auto, skipCodeInventory: false, format: "invalid");
+            var fakeRunner =
+                new FakeScriptRunner();
 
-            CommandResult result = command.Execute(options);
+            var command =
+                CreateCommand(
+                    fakeRunner,
+                    new FakeMcpBudgetService(),
+                    new FakeSdkAlignmentService());
 
-            List<string> scriptNames = fakeRunner.Calls.Select(c => c.Definition.Name).ToList();
-            Assert.Contains("update-code-inventory", scriptNames);
+            BootstrapOptions options =
+                CreateOptions(
+                    tempDir,
+                    apply: true,
+                    dryRun: false,
+                    shell: ScriptShell.Auto,
+                    skipCodeInventory: false,
+                    format: "invalid");
+
+            CommandResult result =
+                command.Execute(options);
+
+            Assert.False(
+                result.Success);
+
+            Assert.Empty(
+                fakeRunner.Calls);
+
+            Assert.Contains(
+                "RoslynLite code-index failed with exit 1.",
+                result.Markdown);
+
+            Assert.DoesNotContain(
+                "UpdateCodeInventory.ps1",
+                result.Markdown);
         }
         finally
         {

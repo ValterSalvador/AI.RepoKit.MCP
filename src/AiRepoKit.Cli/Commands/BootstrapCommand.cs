@@ -85,7 +85,6 @@ public sealed class BootstrapCommand
         }
 
         string codeIndexStatus = "Skipped";
-        bool codeIndexPassed = false;
 
         if (!doctor.Success)
         {
@@ -108,12 +107,11 @@ public sealed class BootstrapCommand
             {
                 progress.StartPhase("Running code index");
                 CommandResult codeIndex = new CodeIndexCommand().Execute(options_);
-                codeIndexPassed = codeIndex.Success;
-                codeIndexStatus = codeIndex.Success ? "Passed" : $"Warning exit {codeIndex.ExitCode}";
+                codeIndexStatus = codeIndex.Success ? "Passed" : $"Failed exit {codeIndex.ExitCode}";
                 if (!codeIndex.Success)
                 {
-                    warnings.Add("RoslynLite code-index failed. PowerShell inventory fallback will run if the script exists.");
-                    progress.WarnPhase("Code index completed with warnings");
+                    errors.Add($"RoslynLite code-index failed with exit {codeIndex.ExitCode}.");
+                    progress.FailPhase("Code index failed");
                 }
                 else
                 {
@@ -183,7 +181,7 @@ public sealed class BootstrapCommand
             }
         }
 
-        IReadOnlyList<ScriptPlan> scripts = GetScripts(options_, codeIndexPassed);
+        IReadOnlyList<ScriptPlan> scripts = [];
         HashSet<string> scriptRefreshEligiblePaths = apply
             ? GetCleanManagedScriptRefreshPaths(options_)
             : [];
@@ -633,26 +631,6 @@ public sealed class BootstrapCommand
     private static IReadOnlyList<string> GetScriptManagedRefreshPaths()
     {
         return [".ai/manifests/mcp-context-manifest.json"];
-    }
-
-    private static readonly ScriptDefinition UpdateCodeInventoryScript = new(
-        "update-code-inventory",
-        PowerShellRelativePath: "Tools/AiContext/UpdateCodeInventory.ps1",
-        BashRelativePath: null);
-
-    private static IReadOnlyList<ScriptPlan> GetScripts(BootstrapOptions options_, bool codeIndexPassed_)
-    {
-        List<ScriptPlan> scripts = [];
-
-        if (!options_.SkipCodeInventory && !codeIndexPassed_)
-        {
-            scripts.Add(new ScriptPlan(UpdateCodeInventoryScript));
-        }
-
-        // Note: mcp-budget is intentionally absent — it runs as a native IMcpBudgetService
-        // step separately from the script runner loop (P02.1).
-
-        return scripts;
     }
 
     private static string WriteReport(
