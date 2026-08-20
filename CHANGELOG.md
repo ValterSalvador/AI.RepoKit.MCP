@@ -23,6 +23,8 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   and generated context summary without requiring PowerShell.
 - Native secret-scan service preserving the historical filtering and report
   contract with deterministic cross-platform execution and redacted findings.
+- Dedicated native build-diagnostics service and CLI entrypoint preserving the
+  historical report, process, output-tail, and exit-code contracts.
 - Dedicated .NET SDK probe runner that preserves the historical successful
   `dotnet --version` and `dotnet --list-sdks` artifact contract while keeping
   diagnostic errors redacted.
@@ -41,6 +43,11 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   `CheckSecrets.ps1` for product runtime behavior.
 - SelfCheck no longer requires the secret-scan PowerShell compatibility script
   to exist at runtime.
+- SelfCheck no longer requires the build-diagnostics PowerShell compatibility
+  script to exist at runtime.
+- Native build diagnostics explicitly preserves the historical Windows
+  PowerShell `*.sln` filesystem wildcard behavior, including matching root
+  `.slnx` files, consistently across platforms.
 - `UpdateAiContext.ps1` and `CheckSdkAlignment.ps1` are no longer executed by
   Bootstrap for product runtime behavior.
 - SelfCheck no longer requires the migrated UpdateAiContext or SDK-alignment
@@ -60,6 +67,8 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   artifact but is no longer used for product runtime behavior.
 - `Tools/AiContext/CheckSecrets.ps1` remains available as a compatibility
   artifact until P03 but is no longer used by Bootstrap product runtime.
+- `Tools/AiContext/InvokeBuildDiagnostics.ps1` remains available unchanged as
+  a compatibility artifact until P03; native C# is the runtime source of truth.
 - ConfigGenerator continues to generate the historical compatibility artifacts.
 
 #### Validation
@@ -83,6 +92,12 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - SelfCheck tests: 8 passing.
 - P02.3 WSL acceptance full test suite: 223 passing.
 - P02.3 Windows acceptance full test suite: 223 passing.
+- Native build diagnostics validated with real execution on Windows and WSL.
+- Build-diagnostics semantic parity against the historical Windows PowerShell
+  implementation passed for no-solution, target selection, failure exit-code
+  precedence, and bounded diagnostic output tails.
+- P02.4 WSL acceptance full test suite: 241 passing.
+- P02.4 Windows acceptance full test suite: 241 passing.
 
 ### Release policy
 

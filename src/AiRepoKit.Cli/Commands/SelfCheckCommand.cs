@@ -248,7 +248,6 @@ public sealed class SelfCheckCommand
             ".ai/README.md",
             ".ai/manifests/mcp-context-manifest.json",
             "Tools/AiContext/UpdateCodeInventory.ps1",
-            "Tools/AiContext/InvokeBuildDiagnostics.ps1",
             "Tools/AiContextMcp/Program.cs",
             "Tools/AiContextMcp/README.md"
         ];

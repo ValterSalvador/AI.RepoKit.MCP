@@ -37,6 +37,7 @@ public static class Program
                 "doctor" => new DoctorCommand().Execute(options),
                 "sample" => new SampleCommand().Execute(options),
                 "bootstrap" => new BootstrapCommand().Execute(options),
+                "build-diagnostics" => new BuildDiagnosticsCommand().Execute(options),
                 "code-index" => new CodeIndexCommand().Execute(options),
                 "context-pack" => new ContextPackCommand().Execute(options),
                 "graph" => new GraphCommand().Execute(options),
@@ -949,6 +950,7 @@ public static class Program
 
         ```text
         airepo bootstrap [--repo <path>] --clients codex,vscode,vs [--mcp] [--agents] [--profile generic] [--apply] [--no-hooks] [--backup|--force|--force-managed]
+        airepo build-diagnostics [--repo <path>]
         airepo setup [--repo <path>] [--apply] [--no-hooks] [--profile name] [--clients codex,vscode,vs] [--strict] [--summary] [--timings]
         airepo detect [--repo <path>] [--json]
         airepo sanitize [--repo <path>] --term <term> --replacement <value> [--apply --backup]
