@@ -61,6 +61,11 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   the PowerShell wrappers.
 - Security-review context recommendations use native `airepo secret-scan`
   rather than a Windows-only PowerShell invocation.
+- Stale MCP host discovery no longer launches Windows PowerShell; Windows
+  process discovery uses the native .NET `System.Management` WMI API over
+  `Win32_Process`, while process termination remains handled by `System.Diagnostics`.
+- `--stop-stale-mcp-hosts` remains explicitly Windows-only; Linux and WSL
+  return the existing unsupported result without attempting process discovery.
 - `UpdateAiContext.ps1` and `CheckSdkAlignment.ps1` are no longer executed by
   Bootstrap for product runtime behavior.
 - SelfCheck no longer requires the migrated UpdateAiContext or SDK-alignment
@@ -123,6 +128,14 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   matrix.
 - P03 wrapper/template parity, ConfigGenerator integration, managed-files
   tracking, and Unix executable-bit behavior validated.
+- P04 stale-MCP-host handling validated with 8 deterministic service tests
+  covering platform behavior, candidate matching, path-boundary protection,
+  successful termination, termination failure, and current-process protection.
+- P04 real Windows acceptance validated native WMI discovery and selective
+  termination of the matching MCP `dotnet` host while preserving a sibling
+  path-prefix collision process.
+- P04 WSL acceptance full test suite: 257 passing.
+- P04 Windows acceptance full test suite: 257 passing.
 
 ### Release policy
 
