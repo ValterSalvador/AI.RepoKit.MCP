@@ -8,5 +8,5 @@ public sealed record ScriptDefinition(
     public static ScriptDefinition McpBudget { get; } = new(
         "mcp-budget",
         PowerShellRelativePath: "Tools/AiContext/MeasureMcpResponseBudget.ps1",
-        BashRelativePath: null);
+        BashRelativePath: "Tools/AiContext/MeasureMcpResponseBudget.sh");
 }

@@ -37,6 +37,10 @@ public static class Program
                 "doctor" => new DoctorCommand().Execute(options),
                 "sample" => new SampleCommand().Execute(options),
                 "bootstrap" => new BootstrapCommand().Execute(options),
+                "ai-context-update" => new AiContextUpdateCommand().Execute(options),
+                "sdk-alignment" => new SdkAlignmentCommand().Execute(options),
+                "secret-scan" => new SecretScanCommand().Execute(options),
+                "mcp-budget" => new McpBudgetCommand().Execute(options),
                 "build-diagnostics" => new BuildDiagnosticsCommand().Execute(options),
                 "code-index" => new CodeIndexCommand().Execute(options),
                 "context-pack" => new ContextPackCommand().Execute(options),
@@ -378,6 +382,8 @@ public static class Program
         string since = string.Empty;
         bool changedFiles = false;
         int maxDepth = 3;
+        int startupTimeoutSeconds = 20;
+        int toolTimeoutSeconds = 30;
 
         int firstOptionIndex = 1;
         if (string.Equals(command, "org", StringComparison.OrdinalIgnoreCase) && args_.Length > 1 && !args_[1].StartsWith("-", StringComparison.Ordinal))
@@ -658,6 +664,36 @@ public static class Program
                 continue;
             }
 
+            if (string.Equals(value, "--startup-timeout-seconds", StringComparison.OrdinalIgnoreCase)
+                && index + 1 < args_.Length)
+            {
+                if (int.TryParse(args_[++index], out int parsed) && parsed > 0)
+                {
+                    startupTimeoutSeconds = parsed;
+                }
+                else
+                {
+                    unknownOptions.Add("--startup-timeout-seconds requires a positive integer.");
+                }
+
+                continue;
+            }
+
+            if (string.Equals(value, "--tool-timeout-seconds", StringComparison.OrdinalIgnoreCase)
+                && index + 1 < args_.Length)
+            {
+                if (int.TryParse(args_[++index], out int parsed) && parsed > 0)
+                {
+                    toolTimeoutSeconds = parsed;
+                }
+                else
+                {
+                    unknownOptions.Add("--tool-timeout-seconds requires a positive integer.");
+                }
+
+                continue;
+            }
+
             if (string.Equals(value, "--include-private-members", StringComparison.OrdinalIgnoreCase))
             {
                 includePrivateMembers = true;
@@ -896,7 +932,7 @@ public static class Program
             unknownOptions.Add(exception.Message);
         }
 
-        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks, scriptShell);
+        BootstrapOptions parsedOptions = new(command, resolvedRepoPath, clients.Distinct().ToArray(), includeMcp, apply, dryRun, backup, force, forceManaged, profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, includeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, string.Empty, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks, scriptShell, startupTimeoutSeconds, toolTimeoutSeconds);
         if (command is "--help" or "--version" or "help" or "version" or "")
         {
             return parsedOptions;
@@ -910,7 +946,7 @@ public static class Program
             }
 
             ResolvedDefaults resolvedDefaults = new CommandDefaultsResolver().Resolve(parsedOptions);
-            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks, parsedOptions.ScriptShell);
+            return new BootstrapOptions(command, resolvedDefaults.Detection.RepoRoot, resolvedDefaults.Clients, resolvedDefaults.IncludeMcp, apply, dryRun, backup, force, forceManaged, resolvedDefaults.Profile, targetFramework, mcpServerName, toolCommandName, mcpProjectName, mcpNamespace, mcpAssemblyName, mcpProjectRelativePath, skipBuildMcp, skipAiContext, skipCodeInventory, skipSecurityScan, skipBudget, skipSmoke, skipScripts, maxFiles, maxItems, includePrivateMembers, noCache, rebuildCache, output, format, verbose, summary, auditJson, timings, includeSource, createAuditBaseline, updateAuditBaseline, showAuditBaseline, failOnAccepted, skipAudit, resolvedDefaults.IncludeAgents, task, target, limit, requireContextPacks, unknownOptions, noProgress, refresh, noRefresh, sampleQuery, profileExplicit, forbiddenTerms, sanitizeTerm, sanitizeReplacement, strict, quick, full, resolvedDefaults.Summary, budget, kind, since, changedFiles, rootPath, orgSubcommand, maxDepth, false, strictStdio, stopStaleMcpHosts, testTarget, skipHooks, parsedOptions.ScriptShell, startupTimeoutSeconds, toolTimeoutSeconds);
         }
         catch
         {
@@ -950,6 +986,10 @@ public static class Program
 
         ```text
         airepo bootstrap [--repo <path>] --clients codex,vscode,vs [--mcp] [--agents] [--profile generic] [--apply] [--no-hooks] [--backup|--force|--force-managed]
+        airepo ai-context-update [--repo <path>] [--target-framework net10.0] [--mcp-server-name name] [--mcp-project-relative-path path]
+        airepo sdk-alignment [--repo <path>]
+        airepo secret-scan [--repo <path>]
+        airepo mcp-budget [--repo <path>] [--startup-timeout-seconds 20] [--tool-timeout-seconds 30] [--json] [--verbose]
         airepo build-diagnostics [--repo <path>]
         airepo setup [--repo <path>] [--apply] [--no-hooks] [--profile name] [--clients codex,vscode,vs] [--strict] [--summary] [--timings]
         airepo detect [--repo <path>] [--json]

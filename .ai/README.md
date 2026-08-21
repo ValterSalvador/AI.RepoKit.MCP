@@ -33,7 +33,7 @@ airepo update --quick
 Applied `setup` and `bootstrap` runs install the managed pre-commit, post-merge, and post-rewrite Git hooks by default. Use `--no-hooks` (alias `--skip-hooks`) when the repository manages hooks elsewhere.
 ## Code Inventory Lite
 
-`airepo code-index --apply` creates a lightweight structural inventory with RoslynLite syntax parsing under `.ai/generated/inventories/`. It does not require restoring or building the target repo, does not execute project code, and does not read restricted config, key, upload, build, Docker, or data paths. `Tools/AiContext/UpdateCodeInventory.ps1` remains a fallback heuristic generator. Use the inventory to reduce tokens by asking MCP for `get_context symbols brief` or `get_context endpoints brief` before opening source files.
+`airepo code-index --apply` creates a lightweight structural inventory with RoslynLite syntax parsing under `.ai/generated/inventories/`. It does not require restoring or building the target repo, does not execute project code, and does not read restricted config, key, upload, build, Docker, or data paths. `Tools/AiContext/UpdateCodeInventory.ps1` and `UpdateCodeInventory.sh` are thin compatibility wrappers over the native `airepo code-index` command. Use the inventory to reduce tokens by asking MCP for `get_context symbols brief` or `get_context endpoints brief` before opening source files.
 
 ## Safety
 

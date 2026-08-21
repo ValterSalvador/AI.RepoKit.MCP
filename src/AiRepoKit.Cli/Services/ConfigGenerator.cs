@@ -35,12 +35,18 @@ public sealed class ConfigGenerator
 
     private static readonly IReadOnlyList<TemplatePlanItem> ToolsAiContextTemplates =
     [
-        new("tools-ai-context/UpdateAiContext.ps1.tpl", "Tools/AiContext/UpdateAiContext.ps1", "tools-ai-context", "Create AI context update script."),
-        new("tools-ai-context/CheckSdkAlignment.ps1.tpl", "Tools/AiContext/CheckSdkAlignment.ps1", "tools-ai-context", "Create SDK alignment check script."),
-        new("tools-ai-context/UpdateCodeInventory.ps1.tpl", "Tools/AiContext/UpdateCodeInventory.ps1", "tools-ai-context", "Create code inventory script."),
-        new("tools-ai-context/InvokeBuildDiagnostics.ps1.tpl", "Tools/AiContext/InvokeBuildDiagnostics.ps1", "tools-ai-context", "Create build diagnostics script."),
-        new("tools-ai-context/CheckSecrets.ps1.tpl", "Tools/AiContext/CheckSecrets.ps1", "tools-ai-context", "Create secrets check script."),
-        new("tools-ai-context/MeasureMcpResponseBudget.ps1.tpl", "Tools/AiContext/MeasureMcpResponseBudget.ps1", "tools-ai-context", "Create MCP response budget script.")
+        new("tools-ai-context/UpdateAiContext.ps1.tpl", "Tools/AiContext/UpdateAiContext.ps1", "tools-ai-context", "Create AI context update PowerShell wrapper."),
+        new("tools-ai-context/UpdateAiContext.sh.tpl", "Tools/AiContext/UpdateAiContext.sh", "tools-ai-context", "Create AI context update Bash wrapper."),
+        new("tools-ai-context/CheckSdkAlignment.ps1.tpl", "Tools/AiContext/CheckSdkAlignment.ps1", "tools-ai-context", "Create SDK alignment check PowerShell wrapper."),
+        new("tools-ai-context/CheckSdkAlignment.sh.tpl", "Tools/AiContext/CheckSdkAlignment.sh", "tools-ai-context", "Create SDK alignment check Bash wrapper."),
+        new("tools-ai-context/UpdateCodeInventory.ps1.tpl", "Tools/AiContext/UpdateCodeInventory.ps1", "tools-ai-context", "Create code inventory PowerShell wrapper."),
+        new("tools-ai-context/UpdateCodeInventory.sh.tpl", "Tools/AiContext/UpdateCodeInventory.sh", "tools-ai-context", "Create code inventory Bash wrapper."),
+        new("tools-ai-context/InvokeBuildDiagnostics.ps1.tpl", "Tools/AiContext/InvokeBuildDiagnostics.ps1", "tools-ai-context", "Create build diagnostics PowerShell wrapper."),
+        new("tools-ai-context/InvokeBuildDiagnostics.sh.tpl", "Tools/AiContext/InvokeBuildDiagnostics.sh", "tools-ai-context", "Create build diagnostics Bash wrapper."),
+        new("tools-ai-context/CheckSecrets.ps1.tpl", "Tools/AiContext/CheckSecrets.ps1", "tools-ai-context", "Create secrets check PowerShell wrapper."),
+        new("tools-ai-context/CheckSecrets.sh.tpl", "Tools/AiContext/CheckSecrets.sh", "tools-ai-context", "Create secrets check Bash wrapper."),
+        new("tools-ai-context/MeasureMcpResponseBudget.ps1.tpl", "Tools/AiContext/MeasureMcpResponseBudget.ps1", "tools-ai-context", "Create MCP response budget PowerShell wrapper."),
+        new("tools-ai-context/MeasureMcpResponseBudget.sh.tpl", "Tools/AiContext/MeasureMcpResponseBudget.sh", "tools-ai-context", "Create MCP response budget Bash wrapper.")
     ];
 
     private static readonly IReadOnlyList<TemplatePlanItem> AiContextMcpTemplates =
@@ -117,12 +123,18 @@ public sealed class ConfigGenerator
 
         this.AddPresencePlan(changes, analysis_, options_, ".ai", "AI context root", false);
         this.AddPresencePlan(changes, analysis_, options_, ".ai/manifests/mcp-context-manifest.json", "MCP context manifest", true);
-        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/UpdateAiContext.ps1", "AI context updater", true);
-        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/CheckSdkAlignment.ps1", "SDK alignment checker", true);
-        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/UpdateCodeInventory.ps1", "code inventory updater", true);
-        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/InvokeBuildDiagnostics.ps1", "build diagnostics helper", true);
-        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/CheckSecrets.ps1", "secrets checker", true);
-        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/MeasureMcpResponseBudget.ps1", "MCP response budget checker", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/UpdateAiContext.ps1", "AI context update PowerShell wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/UpdateAiContext.sh", "AI context update Bash wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/CheckSdkAlignment.ps1", "SDK alignment check PowerShell wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/CheckSdkAlignment.sh", "SDK alignment check Bash wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/UpdateCodeInventory.ps1", "code inventory PowerShell wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/UpdateCodeInventory.sh", "code inventory Bash wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/InvokeBuildDiagnostics.ps1", "build diagnostics PowerShell wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/InvokeBuildDiagnostics.sh", "build diagnostics Bash wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/CheckSecrets.ps1", "secrets check PowerShell wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/CheckSecrets.sh", "secrets check Bash wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/MeasureMcpResponseBudget.ps1", "MCP response budget PowerShell wrapper", true);
+        this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContext/MeasureMcpResponseBudget.sh", "MCP response budget Bash wrapper", true);
         this.AddPresencePlan(changes, analysis_, options_, "Tools/AiContextMcp", "MCP project root", false);
         this.AddPresencePlan(changes, analysis_, options_, ".codex/config.toml", "Codex configuration", true);
         this.AddPresencePlan(changes, analysis_, options_, ".vscode/mcp.json", "VS Code MCP configuration", true);

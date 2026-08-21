@@ -55,6 +55,9 @@ public sealed class FileSystemService
         }
 
         File.WriteAllText(fullPath, content_);
+        MakeExecutableIfShellScript(
+            fullPath,
+            relativePath_);
     }
 
     public bool FileExists(string rootPath_, string relativePath_)
@@ -147,6 +150,30 @@ public sealed class FileSystemService
         return OperatingSystem.IsWindows()
             ? $"Windows {Environment.OSVersion.Version}"
             : Environment.OSVersion.ToString();
+    }
+
+    private static void MakeExecutableIfShellScript(
+        string fullPath_,
+        string relativePath_)
+    {
+        if (OperatingSystem.IsWindows() ||
+            !relativePath_.EndsWith(
+                ".sh",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        UnixFileMode mode =
+            File.GetUnixFileMode(
+                fullPath_);
+
+        File.SetUnixFileMode(
+            fullPath_,
+            mode |
+            UnixFileMode.UserExecute |
+            UnixFileMode.GroupExecute |
+            UnixFileMode.OtherExecute);
     }
 
     private static string RunAndRead(string fileName_, string argument_)

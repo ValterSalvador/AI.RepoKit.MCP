@@ -118,11 +118,17 @@ public sealed class ReportWriter
         builder.AppendLine($"- .ai/README.md: `{FileExists(analysis_, ".ai/README.md")}`");
         builder.AppendLine($"- .ai manifest: `{HasMcpManifest(analysis_)}`");
         builder.AppendLine($"- Tools/AiContext/UpdateAiContext.ps1: `{FileExists(analysis_, "Tools/AiContext/UpdateAiContext.ps1")}`");
+        builder.AppendLine($"- Tools/AiContext/UpdateAiContext.sh: `{FileExists(analysis_, "Tools/AiContext/UpdateAiContext.sh")}`");
         builder.AppendLine($"- Tools/AiContext/CheckSdkAlignment.ps1: `{FileExists(analysis_, "Tools/AiContext/CheckSdkAlignment.ps1")}`");
+        builder.AppendLine($"- Tools/AiContext/CheckSdkAlignment.sh: `{FileExists(analysis_, "Tools/AiContext/CheckSdkAlignment.sh")}`");
         builder.AppendLine($"- Tools/AiContext/UpdateCodeInventory.ps1: `{FileExists(analysis_, "Tools/AiContext/UpdateCodeInventory.ps1")}`");
+        builder.AppendLine($"- Tools/AiContext/UpdateCodeInventory.sh: `{FileExists(analysis_, "Tools/AiContext/UpdateCodeInventory.sh")}`");
         builder.AppendLine($"- Tools/AiContext/InvokeBuildDiagnostics.ps1: `{FileExists(analysis_, "Tools/AiContext/InvokeBuildDiagnostics.ps1")}`");
+        builder.AppendLine($"- Tools/AiContext/InvokeBuildDiagnostics.sh: `{FileExists(analysis_, "Tools/AiContext/InvokeBuildDiagnostics.sh")}`");
         builder.AppendLine($"- Tools/AiContext/CheckSecrets.ps1: `{FileExists(analysis_, "Tools/AiContext/CheckSecrets.ps1")}`");
+        builder.AppendLine($"- Tools/AiContext/CheckSecrets.sh: `{FileExists(analysis_, "Tools/AiContext/CheckSecrets.sh")}`");
         builder.AppendLine($"- Tools/AiContext/MeasureMcpResponseBudget.ps1: `{FileExists(analysis_, "Tools/AiContext/MeasureMcpResponseBudget.ps1")}`");
+        builder.AppendLine($"- Tools/AiContext/MeasureMcpResponseBudget.sh: `{FileExists(analysis_, "Tools/AiContext/MeasureMcpResponseBudget.sh")}`");
         builder.AppendLine($"- .ai/generated/inventories/symbol-inventory.json: `{FileExists(analysis_, ".ai/generated/inventories/symbol-inventory.json")}`");
         builder.AppendLine($"- .ai/generated/inventories/endpoint-inventory.json: `{FileExists(analysis_, ".ai/generated/inventories/endpoint-inventory.json")}`");
         builder.AppendLine($"- Tools/AiContextMcp: `{DirectoryExists(analysis_, "Tools/AiContextMcp")}`");
@@ -164,7 +170,7 @@ public sealed class ReportWriter
         builder.AppendLine($"- TemplatesFound: `{templatesFound_}`");
         builder.AppendLine($"- TemplatesAvailable: `{templatesAvailable_}`");
         builder.AppendLine($"- Essential .ai templates: `{TemplateExists(templatesRoot_, "ai/README.md.tpl") && TemplateExists(templatesRoot_, "ai/manifests/mcp-context-manifest.json.tpl")}`");
-        builder.AppendLine($"- Essential tools-ai-context templates: `{TemplateExists(templatesRoot_, "tools-ai-context/UpdateAiContext.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/UpdateCodeInventory.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/CheckSecrets.ps1.tpl")}`");
+        builder.AppendLine($"- Essential tools-ai-context templates: `{TemplateExists(templatesRoot_, "tools-ai-context/UpdateAiContext.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/UpdateAiContext.sh.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/CheckSdkAlignment.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/CheckSdkAlignment.sh.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/UpdateCodeInventory.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/UpdateCodeInventory.sh.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/InvokeBuildDiagnostics.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/InvokeBuildDiagnostics.sh.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/CheckSecrets.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/CheckSecrets.sh.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/MeasureMcpResponseBudget.ps1.tpl") && TemplateExists(templatesRoot_, "tools-ai-context/MeasureMcpResponseBudget.sh.tpl")}`");
         builder.AppendLine($"- Essential ai-context-mcp templates: `{TemplateExists(templatesRoot_, "ai-context-mcp/Program.cs.tpl") && TemplateExists(templatesRoot_, "ai-context-mcp/Tools/RepositoryContextTools.cs.tpl") && TemplateExists(templatesRoot_, "ai-context-mcp/Resources/RepositoryContextResources.cs.tpl") && TemplateExists(templatesRoot_, "ai-context-mcp/Prompts/RepositoryContextPrompts.cs.tpl")}`");
         builder.AppendLine($"- Essential client-configs templates: `{TemplateExists(templatesRoot_, "client-configs/codex.config.toml.tpl") && TemplateExists(templatesRoot_, "client-configs/vscode.mcp.json.tpl")}`");
         if (!string.IsNullOrWhiteSpace(templatesError_))

@@ -7,7 +7,7 @@
 
 ## Checks
 
-Use `Tools/AiContext/CheckSdkAlignment.ps1` to compare project target frameworks and local SDK discovery.
+Use `airepo sdk-alignment --repo .` for native SDK alignment. `CheckSdkAlignment.ps1` and `CheckSdkAlignment.sh` remain thin compatibility wrappers.
 
 ## Notes
 

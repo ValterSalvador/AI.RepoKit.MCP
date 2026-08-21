@@ -509,7 +509,7 @@ public sealed class ContextPackCommand
             "fix-build" => ["dotnet build -c Debug"],
             "update-package" => ["dotnet restore", "dotnet build"],
             "review-risk" => ["airepo audit --repo .", "airepo self-check --repo . --skip-build-mcp"],
-            "security-review" => ["airepo audit --repo .", "powershell -ExecutionPolicy Bypass -File Tools/AiContext/CheckSecrets.ps1"],
+            "security-review" => ["airepo audit --repo .", "airepo secret-scan --repo ."],
             "test-generation" => symbols_.Any(item_ => item_.File.Contains("Tests", StringComparison.OrdinalIgnoreCase)) ? ["dotnet build", "dotnet test"] : ["dotnet build", "dotnet test when explicitly allowed"],
             "change-api" => symbols_.Any(item_ => item_.File.Contains("Tests", StringComparison.OrdinalIgnoreCase)) ? ["dotnet build", "relevant dotnet test project"] : ["dotnet build"],
             _ => ["dotnet build"]

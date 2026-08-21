@@ -53,6 +53,14 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - Native build diagnostics explicitly preserves the historical Windows
   PowerShell `*.sln` filesystem wildcard behavior, including matching root
   `.slnx` files, consistently across platforms.
+- Dedicated native CLI entrypoints now expose AI-context update, SDK alignment,
+  secret scan, and MCP response-budget functionality for compatibility wrappers.
+- Historical AI-context PowerShell helpers are thin wrappers over native
+  `airepo` commands instead of containing product business logic.
+- Equivalent Bash compatibility wrappers are generated and managed alongside
+  the PowerShell wrappers.
+- Security-review context recommendations use native `airepo secret-scan`
+  rather than a Windows-only PowerShell invocation.
 - `UpdateAiContext.ps1` and `CheckSdkAlignment.ps1` are no longer executed by
   Bootstrap for product runtime behavior.
 - SelfCheck no longer requires the migrated UpdateAiContext or SDK-alignment
@@ -65,18 +73,17 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 
 #### Compatibility
 
-- Historical PowerShell compatibility artifacts are retained until P03.
-- `Tools/AiContext/CheckSdkAlignment.ps1` remains available as a compatibility
-  artifact but is no longer used for product runtime behavior.
-- `Tools/AiContext/UpdateAiContext.ps1` remains available as a compatibility
-  artifact but is no longer used for product runtime behavior.
-- `Tools/AiContext/CheckSecrets.ps1` remains available as a compatibility
-  artifact until P03 but is no longer used by Bootstrap product runtime.
-- `Tools/AiContext/InvokeBuildDiagnostics.ps1` remains available unchanged as
-  a compatibility artifact until P03; native C# is the runtime source of truth.
-- `Tools/AiContext/UpdateCodeInventory.ps1` remains available unchanged as a
-  compatibility artifact until P03 and is no longer a Bootstrap runtime fallback.
-- ConfigGenerator continues to generate the historical compatibility artifacts.
+- Historical PowerShell helpers remain available as thin compatibility wrappers
+  over native AI.RepoKit CLI entrypoints.
+- Bash equivalents are available for all six historical AI-context helpers.
+- PowerShell and Bash wrappers are generated from paired templates and tracked
+  through the managed-files system.
+- `UpdateAiContext.ps1` continues accepting the historical `-Apply` switch while
+  delegating to the native AI-context update command.
+- `MeasureMcpResponseBudget.ps1` continues accepting the historical
+  `-FailOnBudget` switch while preserving the native `0/1/2` exit contract.
+- Generated Bash wrappers are marked executable on Unix-like platforms.
+- ConfigGenerator manages both PowerShell and Bash compatibility artifacts.
 
 #### Validation
 
@@ -109,6 +116,13 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - Explicit native code-index failure behavior validated on Windows and WSL.
 - P02.5 WSL acceptance full test suite: 241 passing.
 - P02.5 Windows acceptance full test suite: 241 passing.
+- P03 Bash compatibility wrappers validated with real execution on WSL,
+  including argument forwarding and the 12-call MCP budget matrix.
+- P03 PowerShell compatibility wrappers validated with real Windows PowerShell
+  execution, including legacy parameter acceptance and the 12-call MCP budget
+  matrix.
+- P03 wrapper/template parity, ConfigGenerator integration, managed-files
+  tracking, and Unix executable-bit behavior validated.
 
 ### Release policy
 
