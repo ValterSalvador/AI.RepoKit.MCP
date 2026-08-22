@@ -34,6 +34,86 @@ public sealed class McpDiagnoseCommandTests
     }
 
     [Fact]
+    public void McpDiagnose_PortableClientConfig_IsAcceptedWithoutTargetDllRequirement()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            string configPath = Path.Combine(tempDir, ".mcp.json");
+            File.WriteAllText(configPath, """
+            {
+              "servers": {
+                "ai_repo_context": {
+                  "transport": "stdio",
+                  "command": "airepo",
+                  "args": ["mcp", "serve", "--repo", "${workspaceFolder}"],
+                  "cwd": "${workspaceFolder}"
+                }
+              }
+            }
+            """);
+
+            var fakeBudget = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateSuccessResult(tempDir)
+            };
+            var command = new McpDiagnoseCommand(fakeBudget);
+            BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
+
+            CommandResult result = command.Execute(options);
+            McpDiagnosticResult jsonResult = JsonSerializer.Deserialize<McpDiagnosticResult>(result.Markdown)!;
+            McpDiagnosticItem configCheck = jsonResult.Checks.First(c => c.Name == "vs-config");
+
+            Assert.Equal("Passed", configCheck.Status);
+            Assert.DoesNotContain("AiRepo.ContextMcp.dll", result.Markdown, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void McpDiagnose_LegacyClientConfig_IsAcceptedWithMigrationHint()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            string configPath = Path.Combine(tempDir, ".mcp.json");
+            File.WriteAllText(configPath, """
+            {
+              "servers": {
+                "ai_repo_context": {
+                  "transport": "stdio",
+                  "command": "dotnet",
+                  "args": ["Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll", "--repo", "${workspaceFolder}"],
+                  "cwd": "${workspaceFolder}"
+                }
+              }
+            }
+            """);
+
+            var fakeBudget = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateSuccessResult(tempDir)
+            };
+            var command = new McpDiagnoseCommand(fakeBudget);
+            BootstrapOptions options = CreateOptions(tempDir, shell: ScriptShell.Auto);
+
+            CommandResult result = command.Execute(options);
+            McpDiagnosticResult jsonResult = JsonSerializer.Deserialize<McpDiagnosticResult>(result.Markdown)!;
+            McpDiagnosticItem configCheck = jsonResult.Checks.First(c => c.Name == "vs-config");
+
+            Assert.Equal("Warning", configCheck.Status);
+            Assert.Contains("airepo mcp serve --repo <repo>", configCheck.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
     public void McpDiagnose_SuccessfulNativeBudget_ProducesPassedBudgetDiagnostic()
     {
         string tempDir = CreateTempRepo();

@@ -202,7 +202,7 @@ public sealed class BuildDiagnosticsCommandTests
     }
 
     [Fact]
-    public void Program_MainRegistersBuildDiagnosticsCommand()
+    public async Task Program_MainRegistersBuildDiagnosticsCommand()
     {
         using TempRepo repo =
             new();
@@ -219,7 +219,7 @@ public sealed class BuildDiagnosticsCommandTests
                 writer);
 
             int exitCode =
-                Program.Main(
+                await Program.Main(
                     [
                         "build-diagnostics",
                         "--repo",
@@ -258,7 +258,7 @@ public sealed class BuildDiagnosticsCommandTests
     }
 
     [Fact]
-    public void Program_HelpIncludesBuildDiagnosticsCommand()
+    public async Task Program_HelpIncludesBuildDiagnosticsCommand()
     {
         TextWriter previousOut =
             Console.Out;
@@ -272,7 +272,7 @@ public sealed class BuildDiagnosticsCommandTests
                 writer);
 
             int exitCode =
-                Program.Main(
+                await Program.Main(
                     ["--help"]);
 
             Assert.Equal(

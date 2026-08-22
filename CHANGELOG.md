@@ -28,6 +28,9 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - Dedicated .NET SDK probe runner that preserves the historical successful
   `dotnet --version` and `dotnet --list-sdks` artifact contract while keeping
   diagnostic errors redacted.
+- Portable MCP runtime hosted by the AI.RepoKit CLI through `airepo mcp serve`
+  and `airepo mcp serve --repo <path>`, without requiring an MCP DLL inside
+  the target repository.
 - Deterministic SDK-alignment tests covering project discovery, target
   frameworks, ignored paths, report generation, and process failures.
 - Deterministic AI-context update tests covering generated artifacts, project
@@ -36,6 +39,11 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 
 #### Changed
 
+- Generated MCP client configurations now launch the portable `airepo mcp serve`
+  runtime instead of a target-repository `AiRepo.ContextMcp.dll`.
+- MCP diagnostics, SelfCheck, Bootstrap, and MCP budget execution are portable-first;
+  legacy repo-local MCP build/runtime state is compatibility information rather
+  than a prerequisite for portable operation.
 - SelfCheck, Efficiency, Bootstrap, and MCP diagnostics use the native MCP
   budget service instead of PowerShell product business logic.
 - Bootstrap runs AI-context update and SDK alignment natively.
@@ -78,6 +86,9 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 
 #### Compatibility
 
+- Existing repo-local MCP launch remains supported as an explicit legacy
+  compatibility path during migration; portable runtime failures do not silently
+  fall back to the legacy runtime.
 - Historical PowerShell helpers remain available as thin compatibility wrappers
   over native AI.RepoKit CLI entrypoints.
 - Bash equivalents are available for all six historical AI-context helpers.
@@ -136,6 +147,14 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
   path-prefix collision process.
 - P04 WSL acceptance full test suite: 257 passing.
 - P04 Windows acceptance full test suite: 257 passing.
+- R01 portable MCP acceptance passed on WSL and Windows with the exact existing
+  MCP surface preserved: 5 tools, 9 resources, and 17 prompts.
+- R01 real protocol acceptance passed on WSL and Windows with strict JSON-RPC
+  stdout, empty stderr, zero target-repository mutations, and no target-repository
+  MCP DLL dependency.
+- R01 explicit legacy repo-local MCP compatibility passed on WSL and Windows.
+- R01 focused test suite: 103 passing on both WSL and Windows.
+- R01 closure full test suite: 279 passing on both WSL and Windows.
 
 ### Release policy
 

@@ -465,7 +465,7 @@ public sealed class BootstrapCommandTests
     }
 
     [Fact]
-    public void Bootstrap_McpBuildFailure_DoesNotInvokeNativeSdkAlignment()
+    public void Bootstrap_McpBuildFailure_DoesNotGateLaterPortablePhases()
     {
         string tempDir = CreateTempRepoWithScripts();
         try
@@ -508,15 +508,10 @@ public sealed class BootstrapCommandTests
             CommandResult result =
                 command.Execute(options);
 
-            Assert.False(result.Success);
-
-            Assert.Equal(
-                0,
-                fakeSdkAlignment.InvocationCount);
-
-            Assert.Contains(
-                "Skipped because MCP build did not pass.",
-                result.Markdown);
+            Assert.True(result.Success);
+            Assert.Equal(1, fakeSdkAlignment.InvocationCount);
+            Assert.Contains("Legacy MCP compatibility build failed; portable bootstrap continues", result.Markdown);
+            Assert.DoesNotContain("Skipped because MCP build did not pass.", result.Markdown);
         }
         finally
         {
@@ -664,13 +659,15 @@ public sealed class BootstrapCommandTests
                         dryRun: false,
                         shell: ScriptShell.Auto));
 
-            Assert.False(result.Success);
-
+            Assert.True(result.Success);
             Assert.Equal(
-                0,
+                1,
                 fakeAiContextUpdate.InvocationCount);
 
             Assert.Contains(
+                "Legacy MCP compatibility build failed; portable bootstrap continues",
+                result.Markdown);
+            Assert.DoesNotContain(
                 "Skipped because MCP build did not pass.",
                 result.Markdown);
         }

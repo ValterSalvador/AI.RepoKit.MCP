@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Models.McpDiagnostics;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.McpBudget;
+using AiRepoKit.Cli.Services.McpLaunch;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -54,26 +56,25 @@ public sealed class McpDiagnoseCommand
                 string reason = options_.SkipBuildMcp
                     ? "Skipped by --skip-build."
                     : "Skipped in quick mode to avoid Release MCP build.";
-                checks.Add(Skipped("mcp-build", !string.Equals(mode, "quick", StringComparison.OrdinalIgnoreCase), reason));
+                checks.Add(Skipped("mcp-build", false, reason));
             }
             else
             {
-                progress.StartPhase("Building MCP project");
+                progress.StartPhase("Checking legacy MCP compatibility");
                 (McpBuildResult buildResult, McpHostProcessStopResult? stopResult) = Measure(out long elapsedMilliseconds, () => BuildMcpWithOptionalStaleHostRetry(options_, repoPath));
                 McpDiagnosticItem buildCheck = CreateBuildCheck(buildResult, stopResult);
                 checks.Add(WithTiming(buildCheck, elapsedMilliseconds, "external-process"));
                 rebuilt = buildResult.State == "Built";
                 if (buildCheck.Status is "Passed" or "Warning")
                 {
-                    progress.CompletePhase("MCP project build completed");
+                    progress.CompletePhase("Legacy MCP compatibility checks completed");
                 }
                 else
                 {
-                    progress.FailPhase("MCP project build failed");
+                    progress.WarnPhase("Legacy MCP compatibility checks reported a warning or failure without blocking portable diagnose");
                 }
             }
 
-            string dllPath = McpBuildService.GetDllPath(repoPath, options_);
             bool expandedSmoke = !string.Equals(mode, "quick", StringComparison.OrdinalIgnoreCase);
             if (options_.SkipSmoke)
             {
@@ -83,7 +84,11 @@ public sealed class McpDiagnoseCommand
             {
                 progress.StartPhase("Running MCP smoke test");
                 McpSmokeTestDepth smokeDepth = expandedSmoke ? McpSmokeTestDepth.Expanded : McpSmokeTestDepth.Minimal;
-                McpSmokeTestResult smokeResult = Measure(out long elapsedMilliseconds, () => new McpSmokeTestService().Run(repoPath, dllPath, options_.Verbose, options_.StrictStdio, smokeDepth));
+                McpSmokeTestResult smokeResult = Measure(out long elapsedMilliseconds, () => new McpSmokeTestService().Run(
+                    McpServerLaunchSpecResolver.ResolvePortable(repoPath),
+                    options_.Verbose,
+                    options_.StrictStdio,
+                    smokeDepth));
                 checks.Add(WithTiming(CreateSmokeCheck(smokeResult), elapsedMilliseconds, expandedSmoke ? "expanded-smoke" : "external-process"));
                 McpDiagnosticItem smoke = checks[^1];
                 if (smoke.Status is "Passed" or "Warning")
@@ -177,8 +182,26 @@ public sealed class McpDiagnoseCommand
         string mcpProjectRoot = Path.Combine(repoPath_, "Tools", "AiContextMcp");
         bool mcpRootExists = Directory.Exists(mcpProjectRoot);
         bool hasProject = mcpRootExists && Directory.EnumerateFiles(mcpProjectRoot, "*.csproj", SearchOption.TopDirectoryOnly).Any();
-        checks_.Add(Check("mcp-project", true, mcpRootExists && hasProject, "Tools/AiContextMcp exists and contains a .csproj."));
-        checks_.Add(Check("mcp-release-dll", true, File.Exists(GetMcpDllPath(repoPath_)), "Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll exists."));
+        bool legacyDllExists = File.Exists(GetMcpDllPath(repoPath_));
+
+        checks_.Add(new McpDiagnosticItem(
+            "mcp-project",
+            mcpRootExists && hasProject ? "Passed" : "Warning",
+            false,
+            mcpRootExists && hasProject
+                ? "Legacy MCP project is present; portable runtime is preferred and does not require it."
+                : "Legacy MCP project is absent; portable runtime remains the normal/default MCP path.",
+            "Legacy MCP project is compatibility-only and not required for portable diagnose.",
+            []));
+        checks_.Add(new McpDiagnosticItem(
+            "mcp-release-dll",
+            legacyDllExists ? "Passed" : "Warning",
+            false,
+            legacyDllExists
+                ? "Legacy release DLL is present; portable runtime is preferred and does not require it."
+                : "Legacy release DLL is absent; portable runtime remains the normal/default MCP path.",
+            "Legacy release DLL is compatibility-only and not required for portable diagnose.",
+            []));
     }
 
     private static void AddClientChecks(List<McpDiagnosticItem> checks_, string repoPath_, IReadOnlyList<ClientKind> clients_)
@@ -232,6 +255,12 @@ public sealed class McpDiagnoseCommand
             return Failed("vs-config", true, string.Join(" ", messages), null, details);
         }
 
+        bool hasLegacyConfig = messages.Any(message_ => message_.Contains("legacy MCP config", StringComparison.OrdinalIgnoreCase));
+        if (hasLegacyConfig)
+        {
+            return Warning("vs-config", true, string.Join(" ", messages), null, details);
+        }
+
         return Passed("vs-config", true, string.Join(" ", messages), null, details);
     }
 
@@ -248,29 +277,27 @@ public sealed class McpDiagnoseCommand
             return Failed(checkName_, true, displayPath_ + " is not readable JSON.");
         }
 
-        List<string> missing = [];
-        if (!content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase))
+        using JsonDocument document = JsonDocument.Parse(content);
+        JsonElement? server = TryGetAiRepoContextServer(document.RootElement);
+        if (!server.HasValue)
         {
-            missing.Add("ai_repo_context");
+            return Failed(checkName_, true, displayPath_ + " is missing the ai_repo_context server entry.");
         }
 
-        if (!content.Contains("Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll", StringComparison.OrdinalIgnoreCase)
-            && !content.Contains("${workspaceFolder}", StringComparison.OrdinalIgnoreCase))
+        string? command = GetJsonString(server.Value, "command");
+        List<string> arguments = GetJsonStringArray(server.Value, "args");
+        McpClientLaunchClassification classification = McpClientLaunchClassifier.Classify(command, arguments);
+        if (classification.Kind == McpClientLaunchKind.Portable)
         {
-            missing.Add("MCP Release DLL path or ${workspaceFolder}");
+            return Passed(checkName_, true, displayPath_ + " uses the portable launch contract: 'mcp serve --repo <repo>'.", null, UsesWorkspaceFolder(content) ? ["Uses ${workspaceFolder}."] : []);
         }
 
-        if (!content.Contains("--repo", StringComparison.OrdinalIgnoreCase))
+        if (classification.Kind == McpClientLaunchKind.Legacy)
         {
-            missing.Add("--repo");
+            return Warning(checkName_, true, displayPath_ + " uses a legacy MCP config. " + classification.MigrationHint, null, [classification.MigrationHint ?? "Use the portable runtime."]);
         }
 
-        if (missing.Count > 0)
-        {
-            return Failed(checkName_, true, displayPath_ + " is present but missing: " + string.Join(", ", missing) + ".");
-        }
-
-        return Passed(checkName_, true, displayPath_ + " contains ai_repo_context, repo argument, and the MCP DLL path or ${workspaceFolder}.", null, UsesWorkspaceFolder(content) ? ["Uses ${workspaceFolder}."] : []);
+        return Failed(checkName_, true, displayPath_ + " is present but does not match a valid portable or legacy MCP launch definition: " + classification.Reason);
     }
 
     private static (bool Exists, bool Valid, string Message, bool UsesWorkspaceFolder) CheckVisualStudioConfig(string path_, string displayPath_)
@@ -287,82 +314,28 @@ public sealed class McpDiagnoseCommand
         }
 
         using JsonDocument document = JsonDocument.Parse(content);
-        if (!document.RootElement.TryGetProperty("servers", out JsonElement servers)
-            || servers.ValueKind != JsonValueKind.Object)
-        {
-            return (true, false, displayPath_ + " is missing the Visual Studio MCP `servers` object.", false);
-        }
-
-        if (!servers.TryGetProperty("ai_repo_context", out JsonElement server)
-            || server.ValueKind != JsonValueKind.Object)
+        JsonElement? server = TryGetAiRepoContextServer(document.RootElement);
+        if (!server.HasValue)
         {
             return (true, false, displayPath_ + " is missing the `ai_repo_context` server entry.", false);
         }
 
-        List<string> missing = [];
-        bool hasStdioTransport = server.TryGetProperty("transport", out JsonElement transport)
-            && transport.ValueKind == JsonValueKind.String
-            && string.Equals(transport.GetString(), "stdio", StringComparison.Ordinal);
-        bool hasStdioType = server.TryGetProperty("type", out JsonElement type)
-            && type.ValueKind == JsonValueKind.String
-            && string.Equals(type.GetString(), "stdio", StringComparison.Ordinal);
-        if (!hasStdioTransport && !hasStdioType)
+        string? command = GetJsonString(server.Value, "command");
+        List<string> arguments = GetJsonStringArray(server.Value, "args");
+        McpClientLaunchClassification classification = McpClientLaunchClassifier.Classify(command, arguments);
+        bool usesWorkspaceFolder = content.Contains("${workspaceFolder}", StringComparison.OrdinalIgnoreCase);
+
+        if (classification.Kind == McpClientLaunchKind.Portable)
         {
-            missing.Add("type=stdio or transport=stdio");
+            return (true, true, displayPath_ + " uses the portable launch contract: 'mcp serve --repo <repo>'.", usesWorkspaceFolder);
         }
 
-        if (!server.TryGetProperty("command", out JsonElement command)
-            || command.ValueKind != JsonValueKind.String
-            || !string.Equals(command.GetString(), "dotnet", StringComparison.Ordinal))
+        if (classification.Kind == McpClientLaunchKind.Legacy)
         {
-            missing.Add("command=dotnet");
+            return (true, true, displayPath_ + " uses a legacy MCP config; migration recommended: " + (classification.MigrationHint ?? "Use 'airepo mcp serve --repo <repo>'."), usesWorkspaceFolder);
         }
 
-        bool usesWorkspaceFolder = false;
-        bool hasRepoArgument = false;
-        bool hasDllArgument = false;
-        if (!server.TryGetProperty("args", out JsonElement args)
-            || args.ValueKind != JsonValueKind.Array)
-        {
-            missing.Add("args");
-        }
-        else
-        {
-            foreach (JsonElement arg in args.EnumerateArray())
-            {
-                if (arg.ValueKind != JsonValueKind.String)
-                {
-                    continue;
-                }
-
-                string? value = arg.GetString();
-                if (string.IsNullOrWhiteSpace(value))
-                {
-                    continue;
-                }
-
-                usesWorkspaceFolder |= value.Contains("${workspaceFolder}", StringComparison.OrdinalIgnoreCase);
-                hasRepoArgument |= string.Equals(value, "--repo", StringComparison.Ordinal);
-                hasDllArgument |= value.EndsWith("AiRepo.ContextMcp.dll", StringComparison.OrdinalIgnoreCase);
-            }
-
-            if (!hasDllArgument)
-            {
-                missing.Add("AiRepo.ContextMcp.dll arg");
-            }
-
-            if (!hasRepoArgument)
-            {
-                missing.Add("--repo");
-            }
-        }
-
-        if (missing.Count > 0)
-        {
-            return (true, false, displayPath_ + " is present but missing: " + string.Join(", ", missing) + ".", usesWorkspaceFolder);
-        }
-
-        return (true, true, displayPath_ + " uses the Visual Studio MCP schema with ai_repo_context, command, args, stdio transport/type, and --repo.", usesWorkspaceFolder);
+        return (true, false, displayPath_ + " is present but does not match a valid portable or legacy MCP launch definition: " + classification.Reason, usesWorkspaceFolder);
     }
 
     private static void AppendVisualStudioConfigResult(
@@ -393,21 +366,35 @@ public sealed class McpDiagnoseCommand
         if (File.Exists(localPath))
         {
             string content = File.ReadAllText(localPath);
-            bool valid = content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase)
-                && content.Contains("--repo", StringComparison.OrdinalIgnoreCase);
-            return valid
-                ? Passed("codex-config", true, ".codex/config.toml exists and contains ai_repo_context plus --repo.")
-                : Failed("codex-config", true, ".codex/config.toml exists but is missing ai_repo_context or --repo.");
+            McpClientLaunchClassification classification = ClassifyTomlLaunch(content);
+            if (classification.Kind == McpClientLaunchKind.Portable)
+            {
+                return Passed("codex-config", true, ".codex/config.toml uses the portable launch contract: 'mcp serve --repo <repo>'.");
+            }
+
+            if (classification.Kind == McpClientLaunchKind.Legacy)
+            {
+                return Warning("codex-config", true, ".codex/config.toml uses a legacy MCP configuration. " + (classification.MigrationHint ?? "Use the portable runtime."));
+            }
+
+            return Failed("codex-config", true, ".codex/config.toml exists but does not match a valid portable or legacy MCP launch definition: " + classification.Reason);
         }
 
         if (File.Exists(snippetPath))
         {
             string content = File.ReadAllText(snippetPath);
-            bool valid = content.Contains("ai_repo_context", StringComparison.OrdinalIgnoreCase)
-                && content.Contains("--repo", StringComparison.OrdinalIgnoreCase);
-            return valid
-                ? Warning("codex-config", true, ".codex/config.toml is not present. This file may be local or ignored; .ai/client-configs/codex.config.toml is the versionable snippet.")
-                : Failed("codex-config", true, ".ai/client-configs/codex.config.toml exists but is missing ai_repo_context or --repo.");
+            McpClientLaunchClassification classification = ClassifyTomlLaunch(content);
+            if (classification.Kind == McpClientLaunchKind.Portable)
+            {
+                return Warning("codex-config", true, ".codex/config.toml is not present. The versionable .ai/client-configs/codex.config.toml is valid and uses the portable launch contract.");
+            }
+
+            if (classification.Kind == McpClientLaunchKind.Legacy)
+            {
+                return Warning("codex-config", true, ".codex/config.toml is not present. The versionable snippet is a legacy MCP config; migration recommended: " + (classification.MigrationHint ?? "Use 'airepo mcp serve --repo <repo>'."));
+            }
+
+            return Failed("codex-config", true, ".ai/client-configs/codex.config.toml exists but does not match a valid portable or legacy MCP launch definition: " + classification.Reason);
         }
 
         return Failed("codex-config", true, ".codex/config.toml is missing and .ai/client-configs/codex.config.toml was not found.");
@@ -433,6 +420,87 @@ public sealed class McpDiagnoseCommand
         }
 
         return Passed("client-config-discovery", false, "Discovered client config paths: " + string.Join("; ", states) + ".");
+    }
+
+    private static JsonElement? TryGetAiRepoContextServer(JsonElement rootElement_)
+    {
+        if (rootElement_.ValueKind == JsonValueKind.Object)
+        {
+            if (rootElement_.TryGetProperty("servers", out JsonElement servers)
+                && servers.ValueKind == JsonValueKind.Object
+                && servers.TryGetProperty("ai_repo_context", out JsonElement server))
+            {
+                return server;
+            }
+
+            if (rootElement_.TryGetProperty("ai_repo_context", out JsonElement directServer))
+            {
+                return directServer;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetJsonString(JsonElement element_, string propertyName_)
+    {
+        if (element_.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!element_.TryGetProperty(propertyName_, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String ? property.GetString() : null;
+    }
+
+    private static List<string> GetJsonStringArray(JsonElement element_, string propertyName_)
+    {
+        List<string> values = [];
+        if (element_.ValueKind != JsonValueKind.Object)
+        {
+            return values;
+        }
+
+        if (!element_.TryGetProperty(propertyName_, out JsonElement property)
+            || property.ValueKind != JsonValueKind.Array)
+        {
+            return values;
+        }
+
+        foreach (JsonElement item in property.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                values.Add(item.GetString() ?? string.Empty);
+            }
+        }
+
+        return values;
+    }
+
+    private static McpClientLaunchClassification ClassifyTomlLaunch(string content_)
+    {
+        Match commandMatch = Regex.Match(content_, @"(?im)^\s*command\s*=\s*""([^""]+)""",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        Match argsMatch = Regex.Match(content_, @"(?im)^\s*args\s*=\s*\[(.*?)]\s*$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Singleline);
+
+        string? command = commandMatch.Success ? commandMatch.Groups[1].Value : null;
+        List<string> arguments = [];
+        if (argsMatch.Success)
+        {
+            MatchCollection matches = Regex.Matches(argsMatch.Groups[1].Value, "\"([^\"]*)\"");
+            foreach (Match match in matches)
+            {
+                arguments.Add(match.Groups[1].Value);
+            }
+        }
+
+        return McpClientLaunchClassifier.Classify(command, arguments);
     }
 
     private static void AddDotnetCheck(List<McpDiagnosticItem> checks_)

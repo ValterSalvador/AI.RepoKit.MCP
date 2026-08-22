@@ -38,6 +38,44 @@ public sealed class SelfCheckCommandTests
     }
 
     [Fact]
+    public void SelfCheck_PortableVisualStudioConfig_PassesValidation()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(tempDir, ".vs"));
+            File.WriteAllText(Path.Combine(tempDir, ".mcp.json"), """
+            {
+              "servers": {
+                "ai_repo_context": {
+                  "transport": "stdio",
+                  "command": "airepo",
+                  "args": ["mcp", "serve", "--repo", "${workspaceFolder}"],
+                  "cwd": "${workspaceFolder}"
+                }
+              }
+            }
+            """);
+
+            var fakeService = new FakeMcpBudgetService
+            {
+                ResultToReturn = CreateBudgetResult(tempDir, McpBudgetExitClass.Success, passed: true)
+            };
+
+            var command = new SelfCheckCommand(fakeService);
+            BootstrapOptions options = CreateOptions(tempDir, ScriptShell.Auto);
+
+            CommandResult result = command.Execute(options);
+            Assert.Contains("portable MCP launch contract", result.Markdown, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("AiRepo.ContextMcp.dll", result.Markdown, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
     public void SelfCheck_SuccessfulMcpBudget_ProducesPassedCheck()
     {
         string tempDir = CreateTempRepo();

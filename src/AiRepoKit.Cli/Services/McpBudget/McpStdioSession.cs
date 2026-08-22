@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using AiRepoKit.Cli.Services.McpLaunch;
 
 namespace AiRepoKit.Cli.Services.McpBudget;
 
 /// <summary>
-/// Real MCP stdio session backed by a dotnet process with redirected stdio.
+/// Real MCP stdio session backed by a process with redirected stdio.
 /// Matches the process setup pattern used in McpSmokeTestService:
 /// ArgumentList-based argument passing, UTF-8 encoding, no shell.
 /// </summary>
@@ -23,24 +24,40 @@ internal sealed class McpStdioSession : IMcpSession
     }
 
     /// <summary>
-    /// Starts a new MCP process session for the given DLL and repository root.
+    /// Builds a ProcessStartInfo from the launch spec so tests can verify the
+    /// exact process launch contract without starting a real process.
+    /// </summary>
+    internal static ProcessStartInfo CreateProcessStartInfo(McpServerLaunchSpec launchSpec_)
+    {
+        ProcessStartInfo processStartInfo = new()
+        {
+            FileName = launchSpec_.FileName,
+            WorkingDirectory = launchSpec_.WorkingDirectory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        foreach (string argument in launchSpec_.Arguments)
+        {
+            processStartInfo.ArgumentList.Add(argument);
+        }
+
+        return processStartInfo;
+    }
+
+    /// <summary>
+    /// Starts a new MCP process session using the given launch spec.
     /// Uses ArgumentList (no shell string building) and UTF-8 stdio encoding.
     /// </summary>
-    public static McpStdioSession Start(string dllPath, string repoRoot)
+    public static McpStdioSession Start(McpServerLaunchSpec launchSpec_)
     {
         Process process = new();
-        process.StartInfo.FileName = "dotnet";
-        process.StartInfo.WorkingDirectory = repoRoot;
-        process.StartInfo.UseShellExecute = false;
-        process.StartInfo.RedirectStandardInput = true;
-        process.StartInfo.RedirectStandardOutput = true;
-        process.StartInfo.RedirectStandardError = true;
-        process.StartInfo.CreateNoWindow = true;
-        process.StartInfo.StandardOutputEncoding = Encoding.UTF8;
-        process.StartInfo.StandardErrorEncoding = Encoding.UTF8;
-        process.StartInfo.ArgumentList.Add(dllPath);
-        process.StartInfo.ArgumentList.Add("--repo");
-        process.StartInfo.ArgumentList.Add(repoRoot);
+        process.StartInfo = CreateProcessStartInfo(launchSpec_);
 
         McpStdioSession session = new(process);
 

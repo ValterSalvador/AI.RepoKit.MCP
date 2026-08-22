@@ -1,3 +1,5 @@
+using AiRepoKit.Cli.Services.McpLaunch;
+
 namespace AiRepoKit.Cli.Services.McpBudget;
 
 /// <summary>
@@ -7,8 +9,8 @@ namespace AiRepoKit.Cli.Services.McpBudget;
 internal interface IMcpSessionFactory
 {
     /// <summary>
-    /// Creates and starts a new MCP session by launching the given DLL.
+    /// Creates and starts a new MCP session using the given launch spec.
     /// The caller is responsible for disposing the returned session.
     /// </summary>
-    IMcpSession Create(string dllPath, string repoRoot, int startupTimeoutSeconds);
+    IMcpSession Create(McpServerLaunchSpec launchSpec_, int startupTimeoutSeconds_);
 }

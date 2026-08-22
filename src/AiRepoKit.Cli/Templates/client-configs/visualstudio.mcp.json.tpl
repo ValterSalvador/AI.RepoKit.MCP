@@ -2,9 +2,10 @@
   "servers": {
     "{{McpServerName}}": {
       "type": "stdio",
-      "command": "dotnet",
+      "command": "{{ToolCommandName}}",
       "args": [
-        "${workspaceFolder}/Tools/AiContextMcp/bin/Release/{{TargetFramework}}/{{McpAssemblyName}}.dll",
+        "mcp",
+        "serve",
         "--repo",
         "${workspaceFolder}"
       ],

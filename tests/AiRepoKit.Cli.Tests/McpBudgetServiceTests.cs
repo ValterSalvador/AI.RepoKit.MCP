@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using AiRepoKit.Cli.Services.McpLaunch;
 using AiRepoKit.Cli.Services.McpBudget;
 using Xunit;
 
@@ -21,13 +22,10 @@ public sealed class McpBudgetServiceTests
         return path;
     }
 
-    /// <summary>Creates a minimal repo with a DLL placeholder and primary manifest.</summary>
+    /// <summary>Creates a minimal repo with manifests only.</summary>
     private static string CreateRepoWithDll(bool withPrimaryManifest = true, bool withFallbackManifest = false)
     {
         string path = TempDir();
-        string dllDir = Path.Combine(path, "Tools", "AiContextMcp", "bin", "Release", "net10.0");
-        Directory.CreateDirectory(dllDir);
-        File.WriteAllText(Path.Combine(dllDir, "AiRepo.ContextMcp.dll"), "dummy");
 
         if (withPrimaryManifest)
         {
@@ -106,24 +104,74 @@ public sealed class McpBudgetServiceTests
     // ── Phase 2 contract tests ────────────────────────────────────────────────
 
     [Fact]
-    public void McpBudgetService_MissingDll_ReturnsFatalFailure()
+    public void McpBudgetService_MissingDll_DoesNotBlockPortableRun()
     {
         string path = TempDir();
         try
         {
-            // DLL absent — no DLL created
             Directory.CreateDirectory(Path.Combine(path, ".ai", "manifests"));
             File.WriteAllText(Path.Combine(path, ".ai", "manifests", "mcp-context-manifest.json"), "{}");
 
-            var session = new FakeMcpSession();
-            var service = new McpBudgetService(new FakeMcpSessionFactory(session));
+            var session = BuildPassingSession();
+            var factory = new FakeMcpSessionFactory(session);
+            var service = new McpBudgetService(factory);
             McpBudgetRunResult result = service.Run(path);
 
-            Assert.Equal(McpBudgetExitClass.FatalFailure, result.ExitClass);
-            Assert.False(result.IsSuccess);
-            Assert.False(result.Report.Passed);
-            Assert.NotEmpty(result.Report.Failures);
-            Assert.Equal(0, session.CreateCount); // No session created
+            Assert.Equal(McpBudgetExitClass.Success, result.ExitClass);
+            Assert.True(result.IsSuccess);
+            Assert.True(result.Report.Passed);
+            Assert.Equal(1, session.CreateCount);
+            Assert.Equal(1, factory.CreateCount);
+        }
+        finally
+        {
+            DeleteDir(path);
+        }
+    }
+
+    [Fact]
+    public void McpBudgetService_PortableDefault_DoesNotRequireTargetDll()
+    {
+        string path = TempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(path, ".ai", "manifests"));
+            File.WriteAllText(Path.Combine(path, ".ai", "manifests", "mcp-context-manifest.json"), "{}");
+
+            string targetDll = Path.Combine(path, "Tools", "AiContextMcp", "bin", "Release", "net10.0", "AiRepo.ContextMcp.dll");
+            var session = BuildPassingSession();
+            var factory = new FakeMcpSessionFactory(session);
+            var service = new McpBudgetService(factory);
+
+            McpBudgetRunResult result = service.Run(path);
+
+            Assert.Equal(McpBudgetExitClass.Success, result.ExitClass);
+            Assert.True(result.IsSuccess);
+            Assert.True(result.Report.Passed);
+            Assert.False(File.Exists(targetDll));
+            Assert.Equal(1, factory.CreateCount);
+            Assert.NotNull(factory.LastLaunchSpec);
+            Assert.Equal(McpRuntimeKind.Portable, factory.LastLaunchSpec!.RuntimeKind);
+            Assert.Equal(Path.GetFullPath(path), factory.LastLaunchSpec.WorkingDirectory);
+            int repoArgIndex = factory.LastLaunchSpec.Arguments.Count - 1;
+            Assert.True(repoArgIndex is 3 or 4);
+            if (repoArgIndex == 4)
+            {
+                Assert.EndsWith(".dll", factory.LastLaunchSpec.Arguments[0], StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("AiRepoKit.Cli", factory.LastLaunchSpec.Arguments[0], StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                Assert.Equal("mcp", factory.LastLaunchSpec.Arguments[0]);
+            }
+
+            Assert.Equal("mcp", factory.LastLaunchSpec.Arguments[repoArgIndex - 3]);
+            Assert.Equal("serve", factory.LastLaunchSpec.Arguments[repoArgIndex - 2]);
+            Assert.Equal("--repo", factory.LastLaunchSpec.Arguments[repoArgIndex - 1]);
+            Assert.Equal(Path.GetFullPath(path), factory.LastLaunchSpec.Arguments[repoArgIndex]);
+            Assert.DoesNotContain(factory.LastLaunchSpec.Arguments, arg => arg.Contains("AiRepo.ContextMcp.dll", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(File.Exists(result.Report.McpAssembly), result.Report.McpAssemblyExists);
+            Assert.DoesNotContain("Tools" + Path.DirectorySeparatorChar + "AiContextMcp", result.Report.McpAssembly, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -1126,8 +1174,13 @@ public sealed class McpBudgetServiceTests
 
     private sealed class FakeMcpSessionFactory(FakeMcpSession session) : IMcpSessionFactory
     {
-        public IMcpSession Create(string dllPath, string repoRoot, int startupTimeoutSeconds)
+        public McpServerLaunchSpec? LastLaunchSpec { get; private set; }
+        public int CreateCount { get; private set; }
+
+        public IMcpSession Create(McpServerLaunchSpec launchSpec, int startupTimeoutSeconds)
         {
+            LastLaunchSpec = launchSpec;
+            CreateCount++;
             session.CreateCount++;
             return session;
         }

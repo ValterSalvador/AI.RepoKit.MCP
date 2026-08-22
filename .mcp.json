@@ -2,9 +2,10 @@
   "servers": {
     "ai_repo_context": {
       "transport": "stdio",
-      "command": "dotnet",
+      "command": "airepo",
       "args": [
-        "${workspaceFolder}/Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll",
+        "mcp",
+        "serve",
         "--repo",
         "${workspaceFolder}"
       ],

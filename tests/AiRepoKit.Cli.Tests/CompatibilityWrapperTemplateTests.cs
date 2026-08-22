@@ -84,6 +84,54 @@ public sealed class CompatibilityWrapperTemplateTests
     }
 
     [Fact]
+    public void ClientConfigTemplates_UsePortableMcpLaunchShape()
+    {
+        string root =
+            new TemplateService()
+                .GetTemplateRoot();
+
+        string[] clientConfigTemplates =
+        [
+            "client-configs/codex.config.toml.tpl",
+            "client-configs/codex.config.snippet.toml.tpl",
+            "client-configs/visualstudio-mcp.snippet.json.tpl",
+            "client-configs/visualstudio.mcp.json.tpl",
+            "client-configs/visualstudio.local.mcp.json.tpl",
+            "client-configs/vscode.mcp.json.tpl",
+            "client-configs/claude_desktop_config.snippet.json.tpl",
+            "client-configs/cursor-mcp.snippet.json.tpl",
+            "client-configs/gemini-mcp.snippet.json.tpl"
+        ];
+
+        string[] forbidden =
+        [
+            "AiRepo.ContextMcp.dll",
+            "Tools/AiContextMcp/bin"
+        ];
+
+        foreach (string relativePath in clientConfigTemplates)
+        {
+            string path =
+                Path.Combine(
+                    root,
+                    relativePath);
+
+            string content =
+                File.ReadAllText(path);
+
+            Assert.Contains("{{ToolCommandName}}", content);
+            Assert.Contains("mcp", content);
+            Assert.Contains("serve", content);
+            Assert.Contains("--repo", content);
+
+            foreach (string value in forbidden)
+            {
+                Assert.DoesNotContain(value, content, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
     public void McpBudgetScriptDefinition_ProvidesBothShellWrappers()
     {
         Assert.Equal(

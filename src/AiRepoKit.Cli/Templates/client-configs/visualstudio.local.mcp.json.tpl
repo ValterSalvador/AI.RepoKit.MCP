@@ -2,9 +2,10 @@
   "servers": {
     "{{McpServerName}}": {
       "type": "stdio",
-      "command": "dotnet",
+      "command": "{{ToolCommandName}}",
       "args": [
-        "{{McpDllPortable}}",
+        "mcp",
+        "serve",
         "--repo",
         "{{RepoRootPortable}}"
       ],

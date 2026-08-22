@@ -153,15 +153,16 @@ public sealed class BootstrapCommand
                     mcpBuildStatus = build.State;
                     if (build.State == "Failed")
                     {
-                        progress.FailPhase("MCP project build failed");
+                        progress.WarnPhase("Legacy MCP compatibility build failed; portable bootstrap continues without legacy fallback");
+                        warnings.Add("Legacy MCP compatibility build failed; portable bootstrap continues using the portable runtime.");
                         if (build.Process is not null && McpBuildFailureDiagnostics.IsLockedDllFailure(build.Process))
                         {
-                            errors.Add(McpBuildFailureDiagnostics.LockedDllMessage);
+                            warnings.Add(McpBuildFailureDiagnostics.LockedDllMessage);
                             warnings.Add(McpBuildFailureDiagnostics.LockedDllHint);
                         }
                         else
                         {
-                            errors.Add(build.Message);
+                            warnings.Add(build.Message);
                         }
                     }
                     else
@@ -195,8 +196,7 @@ public sealed class BootstrapCommand
             scriptStatuses.Add("sdk-alignment: Skipped by --skip-scripts");
             scriptStatuses.Add("secret-scan: Skipped by --skip-scripts");
         }
-        else if (options_.IncludeMcp &&
-            (mcpBuildStatus is "Built" or "SkippedCurrent" or "SkippedLockedSmokePassed" || !apply))
+        else if (options_.IncludeMcp)
         {
             if (options_.SkipAiContext)
             {
@@ -336,11 +336,6 @@ public sealed class BootstrapCommand
                 scriptStatuses.Add(
                     "secret-scan: Simulated");
             }
-        }
-        else if (options_.IncludeMcp)
-        {
-            scriptStatuses.Add(
-                "Skipped because MCP build did not pass.");
         }
         else
         {

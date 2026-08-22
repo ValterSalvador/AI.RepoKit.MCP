@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AiRepoKit.Cli.Models.McpDiagnostics;
+using AiRepoKit.Cli.Services.McpLaunch;
 
 namespace AiRepoKit.Cli.Services;
 
@@ -68,13 +69,17 @@ public sealed class McpSmokeTestService
             return new McpSmokeTestResult("Failed", "MCP Release DLL is missing.", [], []);
         }
 
-        string repoPath = Path.GetFullPath(repoPath_);
+        return Run(McpServerLaunchSpecResolver.ResolveLegacy(repoPath_, dllPath_), verbose_, strictStdio_, depth_);
+    }
+
+    internal McpSmokeTestResult Run(McpServerLaunchSpec launchSpec_, bool verbose_, bool strictStdio_ = false, McpSmokeTestDepth depth_ = McpSmokeTestDepth.Expanded)
+    {
         List<string> stdoutLines = [];
         List<string> stderrLines = [];
 
         using Process process = new();
-        process.StartInfo.FileName = "dotnet";
-        process.StartInfo.WorkingDirectory = repoPath;
+        process.StartInfo.FileName = launchSpec_.FileName;
+        process.StartInfo.WorkingDirectory = launchSpec_.WorkingDirectory;
         process.StartInfo.RedirectStandardInput = true;
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;
@@ -82,9 +87,10 @@ public sealed class McpSmokeTestService
         process.StartInfo.CreateNoWindow = true;
         process.StartInfo.StandardOutputEncoding = Encoding.UTF8;
         process.StartInfo.StandardErrorEncoding = Encoding.UTF8;
-        process.StartInfo.ArgumentList.Add(dllPath_);
-        process.StartInfo.ArgumentList.Add("--repo");
-        process.StartInfo.ArgumentList.Add(repoPath);
+        foreach (string argument in launchSpec_.Arguments)
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
 
         try
         {

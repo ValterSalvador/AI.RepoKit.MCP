@@ -7,6 +7,7 @@ using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.CodeIndex;
 using AiRepoKit.Cli.Services.ManagedFiles;
 using AiRepoKit.Cli.Services.McpBudget;
+using AiRepoKit.Cli.Services.McpLaunch;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -246,9 +247,7 @@ public sealed class SelfCheckCommand
         return
         [
             ".ai/README.md",
-            ".ai/manifests/mcp-context-manifest.json",
-            "Tools/AiContextMcp/Program.cs",
-            "Tools/AiContextMcp/README.md"
+            ".ai/manifests/mcp-context-manifest.json"
         ];
     }
 
@@ -299,64 +298,21 @@ public sealed class SelfCheckCommand
             return (true, false, displayPath_ + " is missing the `ai_repo_context` server entry.");
         }
 
-        List<string> missing = [];
-        if (!server.TryGetProperty("transport", out JsonElement transport)
-            || transport.ValueKind != JsonValueKind.String
-            || !string.Equals(transport.GetString(), "stdio", StringComparison.Ordinal))
+        string? command = GetJsonString(server, "command");
+        List<string> arguments = GetJsonStringArray(server, "args");
+        McpClientLaunchClassification classification = McpClientLaunchClassifier.Classify(command, arguments);
+
+        if (classification.Kind == McpClientLaunchKind.Portable)
         {
-            missing.Add("transport=stdio");
+            return (true, true, displayPath_ + " uses the portable MCP launch contract: 'mcp serve --repo <repo>'.");
         }
 
-        if (!server.TryGetProperty("command", out JsonElement command)
-            || command.ValueKind != JsonValueKind.String
-            || !string.Equals(command.GetString(), "dotnet", StringComparison.Ordinal))
+        if (classification.Kind == McpClientLaunchKind.Legacy)
         {
-            missing.Add("command=dotnet");
+            return (true, true, displayPath_ + " uses a legacy MCP launch; migration recommended: " + (classification.MigrationHint ?? "Use 'airepo mcp serve --repo <repo>'."));
         }
 
-        bool hasRepoArgument = false;
-        bool hasDllArgument = false;
-        if (!server.TryGetProperty("args", out JsonElement args)
-            || args.ValueKind != JsonValueKind.Array)
-        {
-            missing.Add("args");
-        }
-        else
-        {
-            foreach (JsonElement arg in args.EnumerateArray())
-            {
-                if (arg.ValueKind != JsonValueKind.String)
-                {
-                    continue;
-                }
-
-                string? value = arg.GetString();
-                if (string.IsNullOrWhiteSpace(value))
-                {
-                    continue;
-                }
-
-                hasRepoArgument |= string.Equals(value, "--repo", StringComparison.Ordinal);
-                hasDllArgument |= value.EndsWith("AiRepo.ContextMcp.dll", StringComparison.OrdinalIgnoreCase);
-            }
-
-            if (!hasDllArgument)
-            {
-                missing.Add("AiRepo.ContextMcp.dll arg");
-            }
-
-            if (!hasRepoArgument)
-            {
-                missing.Add("--repo");
-            }
-        }
-
-        if (missing.Count > 0)
-        {
-            return (true, false, displayPath_ + " is present but missing: " + string.Join(", ", missing) + ".");
-        }
-
-        return (true, true, displayPath_ + " uses the Visual Studio MCP schema with ai_repo_context, command, args, transport=stdio, and --repo.");
+        return (true, false, displayPath_ + " is present but does not match a valid portable or legacy MCP launch definition: " + classification.Reason);
     }
 
     private static void AppendVisualStudioConfigResult((bool exists, bool valid, string message) result_, List<string> messages_, ref bool passed_)
@@ -368,6 +324,46 @@ public sealed class SelfCheckCommand
 
         messages_.Add(result_.message);
         passed_ &= result_.valid;
+    }
+
+    private static string? GetJsonString(JsonElement element_, string propertyName_)
+    {
+        if (element_.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!element_.TryGetProperty(propertyName_, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String ? property.GetString() : null;
+    }
+
+    private static List<string> GetJsonStringArray(JsonElement element_, string propertyName_)
+    {
+        List<string> values = [];
+        if (element_.ValueKind != JsonValueKind.Object)
+        {
+            return values;
+        }
+
+        if (!element_.TryGetProperty(propertyName_, out JsonElement property)
+            || property.ValueKind != JsonValueKind.Array)
+        {
+            return values;
+        }
+
+        foreach (JsonElement item in property.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                values.Add(item.GetString() ?? string.Empty);
+            }
+        }
+
+        return values;
     }
 
     private static void AddGeneratedOutputChecks(List<SelfCheckItem> checks_, string repoPath_)

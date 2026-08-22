@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using AiRepoKit.Cli.Services.McpLaunch;
 
 namespace AiRepoKit.Cli.Services.McpBudget;
 
@@ -13,13 +13,10 @@ namespace AiRepoKit.Cli.Services.McpBudget;
 /// and writes JSON + Markdown reports to .ai/generated/reports/.
 ///
 /// ScriptShell independence: this service has no ScriptShell parameter.
-/// It starts dotnet directly — the caller's shell preference is irrelevant.
+/// It launches the portable runtime directly — the caller's shell preference is irrelevant.
 /// </summary>
 public sealed class McpBudgetService : IMcpBudgetService
 {
-    // Relative path components for the MCP DLL used at runtime.
-    private const string DllRelativePath = "Tools/AiContextMcp/bin/Release/net10.0/AiRepo.ContextMcp.dll";
-
     // clientInfo used in initialize — preserved from the PowerShell reference.
     private const string ClientInfoName = "MeasureMcpResponseBudget";
     private const string ClientInfoVersion = "1.0.0";
@@ -69,7 +66,8 @@ public sealed class McpBudgetService : IMcpBudgetService
     {
         options ??= new McpBudgetOptions();
         string fullRepoRoot = Path.GetFullPath(repoRoot);
-        string dll = Path.Combine(fullRepoRoot, DllRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        McpServerLaunchSpec launchSpec = McpServerLaunchSpecResolver.ResolvePortable(fullRepoRoot);
+        string mcpAssemblyPath = GetPortableAssemblyPath(launchSpec);
 
         string primaryManifest = Path.Combine(fullRepoRoot, ".ai", "manifests", "mcp-context-manifest.json");
         string fallbackManifest = Path.Combine(fullRepoRoot, ".ai", "mcp-context-manifest.json");
@@ -82,22 +80,11 @@ public sealed class McpBudgetService : IMcpBudgetService
         string jsonReportPath = Path.Combine(reportsDir, "mcp-budget-report.json");
         string mdReportPath = Path.Combine(reportsDir, "mcp-budget-report.md");
 
-        // Precondition: DLL must exist.
-        if (!File.Exists(dll))
-        {
-            McpBudgetReport fatalReport = BuildEmptyReport(
-                fullRepoRoot, dll, manifestPath,
-                failures: [$"MCP DLL not found: {DllRelativePath}"],
-                warnings: []);
-            WriteReports(fatalReport, jsonReportPath, mdReportPath);
-            return new McpBudgetRunResult(McpBudgetExitClass.FatalFailure, fatalReport);
-        }
-
         // Precondition: manifest must exist.
         if (manifestPath is null)
         {
             McpBudgetReport fatalReport = BuildEmptyReport(
-                fullRepoRoot, dll, null,
+                fullRepoRoot, mcpAssemblyPath, null,
                 failures: ["MCP manifest not found (.ai/manifests/mcp-context-manifest.json)."],
                 warnings: []);
             WriteReports(fatalReport, jsonReportPath, mdReportPath);
@@ -116,7 +103,7 @@ public sealed class McpBudgetService : IMcpBudgetService
         IMcpSession? session = null;
         try
         {
-            session = _sessionFactory.Create(dll, fullRepoRoot, options.StartupTimeoutSeconds);
+            session = _sessionFactory.Create(launchSpec, options.StartupTimeoutSeconds);
 
             // ── initialize ─────────────────────────────────────────────────────
             session.SendJson(JsonSerializer.Serialize(new
@@ -253,8 +240,8 @@ public sealed class McpBudgetService : IMcpBudgetService
         {
             GeneratedAtLocal = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             RepoRoot = fullRepoRoot,
-            McpAssembly = dll,
-            McpAssemblyExists = File.Exists(dll),
+            McpAssembly = mcpAssemblyPath,
+            McpAssemblyExists = File.Exists(mcpAssemblyPath),
             Manifest = manifestPath,
             ToolsListed = toolsListed,
             Results = results,
@@ -374,7 +361,7 @@ public sealed class McpBudgetService : IMcpBudgetService
         sb.AppendLine("# MCP Budget Report");
         sb.AppendLine();
         sb.AppendLine($"- RepoRoot: {report.RepoRoot}");
-        sb.AppendLine($"- MCP DLL: {report.McpAssembly}");
+        sb.AppendLine($"- MCP assembly: {report.McpAssembly}");
         sb.AppendLine($"- Manifest: {report.Manifest}");
         sb.AppendLine($"- Tools listed: {string.Join(", ", report.ToolsListed)}");
         sb.AppendLine();
@@ -427,7 +414,7 @@ public sealed class McpBudgetService : IMcpBudgetService
 
     private static McpBudgetReport BuildEmptyReport(
         string fullRepoRoot,
-        string dll,
+        string mcpAssemblyPath,
         string? manifest,
         IReadOnlyList<string> failures,
         IReadOnlyList<string> warnings)
@@ -436,8 +423,8 @@ public sealed class McpBudgetService : IMcpBudgetService
         {
             GeneratedAtLocal = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             RepoRoot = fullRepoRoot,
-            McpAssembly = dll,
-            McpAssemblyExists = File.Exists(dll),
+            McpAssembly = mcpAssemblyPath,
+            McpAssemblyExists = File.Exists(mcpAssemblyPath),
             Manifest = manifest,
             ToolsListed = [],
             Results = [],
@@ -447,6 +434,17 @@ public sealed class McpBudgetService : IMcpBudgetService
             StderrLineCount = 0,
             StdoutLineCount = 0
         };
+    }
+
+    private static string GetPortableAssemblyPath(McpServerLaunchSpec launchSpec_)
+    {
+        if (launchSpec_.FileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            || launchSpec_.Arguments.Count > 0 && launchSpec_.Arguments[0].EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.GetFullPath(launchSpec_.Arguments.Count > 0 ? launchSpec_.Arguments[0] : launchSpec_.FileName);
+        }
+
+        return Path.GetFullPath(launchSpec_.FileName);
     }
 
     private static void AddUnique(List<string> list, string value)

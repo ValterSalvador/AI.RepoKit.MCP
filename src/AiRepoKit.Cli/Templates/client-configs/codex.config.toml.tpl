@@ -1,4 +1,4 @@
 [mcp_servers.{{McpServerName}}]
-command = "dotnet"
-args = ["{{McpDllPortable}}", "--repo", "{{RepoRootPortable}}"]
+command = "{{ToolCommandName}}"
+args = ["mcp", "serve", "--repo", "{{RepoRootPortable}}"]
 cwd = "{{RepoRootPortable}}"

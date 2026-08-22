@@ -1,4 +1,5 @@
 using AiRepoKit.Cli.Commands;
+using AiRepoKit.Cli.McpRuntime;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.Profiles;
@@ -9,8 +10,13 @@ namespace AiRepoKit.Cli;
 
 public static class Program
 {
-    public static int Main(string[] args_)
+    public static async Task<int> Main(string[] args_)
     {
+        if (args_.Length >= 2 && string.Equals(args_[0], "mcp", StringComparison.OrdinalIgnoreCase) && string.Equals(args_[1], "serve", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunMcpServeAsync(args_).ConfigureAwait(false);
+        }
+
         if (args_.Length == 0)
         {
             return RunInteractive();
@@ -64,6 +70,53 @@ public static class Program
 
         Console.WriteLine(result.Markdown);
         return result.ExitCode;
+    }
+
+    internal static async Task<int> RunMcpServeAsync(string[] args_, CancellationToken cancellationToken_ = default)
+    {
+        string? repoPath = null;
+        bool stderrLogging = false;
+        List<string> unknownOptions = [];
+
+        for (int index = 2; index < args_.Length; index++)
+        {
+            string arg = args_[index];
+            if (string.Equals(arg, "--repo", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 < args_.Length)
+                {
+                    repoPath = args_[++index];
+                }
+                else
+                {
+                    Console.Error.WriteLine("Missing value for option '--repo'.");
+                    return 1;
+                }
+            }
+            else if (string.Equals(arg, "--debug", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase))
+            {
+                stderrLogging = true;
+            }
+            else
+            {
+                unknownOptions.Add(arg);
+            }
+        }
+
+        if (unknownOptions.Count > 0)
+        {
+            Console.Error.WriteLine($"Unknown option(s) for 'mcp serve': {string.Join(", ", unknownOptions)}");
+            return 1;
+        }
+
+        (bool success, string resolvedRoot, string errorMessage) = McpServeRepositoryResolver.Resolve(repoPath);
+        if (!success)
+        {
+            Console.Error.WriteLine(errorMessage);
+            return 1;
+        }
+
+        return await McpServerHost.RunAsync(resolvedRoot, stderrLogging, cancellationToken_).ConfigureAwait(false);
     }
 
     private static int RunInteractive()
@@ -1015,6 +1068,7 @@ public static class Program
         airepo validate [--repo <path>]
         airepo sample [--repo <path>] [--apply] [--force]
         airepo configs [--repo <path>] --clients codex,vscode,vs,claude,cursor,gemini
+        airepo mcp serve [--repo <path>] [--debug|--verbose]
         airepo --help
         airepo --version
         ```
