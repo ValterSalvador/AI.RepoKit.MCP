@@ -6,10 +6,12 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
-### v2.0.0 — Cross-platform runtime
+## [2.0.0] - 2026-08-24
 
-AI.RepoKit v2.0.0 is under active development. The release will not be
-published until the Windows, Ubuntu, and WSL acceptance gates are complete.
+### Cross-platform runtime
+
+AI.RepoKit v2.0.0 completes the cross-platform runtime migration for Windows,
+Ubuntu, and WSL, with product business logic no longer depending on PowerShell.
 
 #### Added
 
@@ -155,9 +157,11 @@ published until the Windows, Ubuntu, and WSL acceptance gates are complete.
 - R01 explicit legacy repo-local MCP compatibility passed on WSL and Windows.
 - R01 focused test suite: 103 passing on both WSL and Windows.
 - R01 closure full test suite: 279 passing on both WSL and Windows.
-
-### Release policy
-
-- Do not publish v1.9.0.
-- The next cross-platform release is v2.0.0.
-- Final release notes will be curated from this Unreleased section after P05.
+- P05 Windows Release acceptance full test suite: 280 passing.
+- P05 WSL Release acceptance full test suite: 280 passing.
+- P05 GitHub CI passed on Windows Server 2025 and Ubuntu 24.04.
+- P05 CLI install/update acceptance passed from v1.8.1 to v2.0.0 on Windows; v2.0.0 package installation also passed on WSL.
+- P05 Bootstrap, Update, SelfCheck, Efficiency, MCP smoke, and portable MCP runtime acceptance passed on Windows and WSL.
+- P05 WSL product acceptance passed with no `pwsh` installed, confirming no unexpected PowerShell product dependency.
+- P05 release workflow validation-only dispatch passed without creating a v2.0.0 tag or GitHub Release.
+- P05 release candidate artifact contract verified: 7 of 7 files, version 2.0.0 manifest, and all SHA256 hashes matched.
