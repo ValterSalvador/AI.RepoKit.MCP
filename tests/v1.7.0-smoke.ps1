@@ -54,15 +54,15 @@ function Assert-PathBoundaryMatch {
 
 $mcpHostProcessServicePath = Join-Path $RepoRoot 'src/AiRepoKit.Cli/Services/McpHostProcessService.cs'
 $mcpHostProcessServiceSource = Get-Content -LiteralPath $mcpHostProcessServicePath -Raw
-if ($mcpHostProcessServiceSource -notmatch 'IsCommandLinePathTokenMatch\(commandLine, normalizedRepoRoot_') {
+if ($mcpHostProcessServiceSource -notmatch 'IsCommandLinePathTokenMatch\s*\(\s*commandLine\s*,\s*normalizedRepoRoot_') {
     throw 'McpHostProcessService does not use path-boundary matching for the repo root.'
 }
 
-if ($mcpHostProcessServiceSource -notmatch 'IsCommandLinePathTokenMatch\(commandLine, normalizedMcpRoot_') {
+if ($mcpHostProcessServiceSource -notmatch 'IsCommandLinePathTokenMatch\s*\(\s*commandLine\s*,\s*normalizedMcpRoot_') {
     throw 'McpHostProcessService does not use path-boundary matching for Tools/AiContextMcp.'
 }
 
-if ($mcpHostProcessServiceSource -match 'commandLine\.Contains\(normalizedRepoRoot_') {
+if ($mcpHostProcessServiceSource -match 'commandLine\s*\.Contains\s*\(\s*normalizedRepoRoot_') {
     throw 'McpHostProcessService still uses raw substring matching for the repo root.'
 }
 
