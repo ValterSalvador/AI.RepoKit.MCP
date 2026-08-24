@@ -1,6 +1,6 @@
 # AiRepo.ContextMcp
 
-Generic read-only MCP context server for a local repository. It uses the stable `ModelContextProtocol` package and stdio transport. v1.8.1 keeps the compact MCP surface and documents the zero-config repository workflow used by the `airepo` CLI.
+Generic read-only MCP context server for a local repository. It uses the stable `ModelContextProtocol` package and stdio transport. The v2.0.0 release candidate keeps the compact MCP surface and documents the zero-config repository workflow used by the `airepo` CLI.
 
 ## CLI Onboarding
 

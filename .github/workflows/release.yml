@@ -64,6 +64,9 @@ jobs:
       - name: Build solution
         run: dotnet build AI.RepoKit.MCP.sln -c Release
 
+      - name: Run full automated tests
+        run: dotnet test tests/AiRepoKit.Cli.Tests/AiRepoKit.Cli.Tests.csproj -c Release --no-build
+
       - name: Run v1.4.2 smoke tests
         run: powershell -ExecutionPolicy Bypass -File tests/v1.4.2-smoke.ps1
 
@@ -84,6 +87,9 @@ jobs:
 
       - name: Run v1.8.1 smoke tests
         run: powershell -ExecutionPolicy Bypass -File tests/v1.8.1-smoke.ps1
+
+      - name: Run v2.0.0 smoke tests
+        run: powershell -ExecutionPolicy Bypass -File tests/v2.0.0-smoke.ps1
 
       - name: Build release assets
         run: powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version $env:RELEASE_VERSION
@@ -111,6 +117,7 @@ jobs:
           Get-ChildItem "artifacts/release" -File | Sort-Object Name | Format-Table Name,Length -AutoSize
 
       - name: Create or update GitHub Release
+        if: github.ref_type == 'tag'
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -146,3 +153,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to upload release assets for '$tag'."
           }
+
+      - name: Upload release validation artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-validation-${{ env.RELEASE_VERSION }}
+          path: artifacts/release/*
+          if-no-files-found: error

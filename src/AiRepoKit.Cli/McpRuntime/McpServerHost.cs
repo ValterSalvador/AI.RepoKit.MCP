@@ -12,10 +12,45 @@ namespace AiRepoKit.Cli.McpRuntime;
 public static class McpServerHost
 {
     public static string DefaultLogFile => Path.Combine(Path.GetTempPath(), "ai-repo-context-mcp.log");
+    internal static string? ResolveLogFile(string repoRoot_)
+    {
+        string defaultLogFile = Path.GetFullPath(DefaultLogFile);
+
+        return IsPathInsideOrEqual(defaultLogFile, repoRoot_)
+            ? null
+            : defaultLogFile;
+    }
+
+    private static bool IsPathInsideOrEqual(
+        string path_,
+        string root_)
+    {
+        string fullPath = Path.GetFullPath(path_);
+        string fullRoot = Path.GetFullPath(root_);
+        string relativePath = Path.GetRelativePath(
+            fullRoot,
+            fullPath);
+
+        return string.Equals(
+                relativePath,
+                ".",
+                StringComparison.Ordinal)
+            || (!Path.IsPathRooted(relativePath)
+                && !string.Equals(
+                    relativePath,
+                    "..",
+                    StringComparison.Ordinal)
+                && !relativePath.StartsWith(
+                    ".." + Path.DirectorySeparatorChar,
+                    StringComparison.Ordinal)
+                && !relativePath.StartsWith(
+                    ".." + Path.AltDirectorySeparatorChar,
+                    StringComparison.Ordinal));
+    }
 
     public static IHost CreateHost(string repoRoot_, bool stderrLogging_ = false)
     {
-        string resolvedLogFile = DefaultLogFile;
+        string? resolvedLogFile = ResolveLogFile(repoRoot_);
 
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
@@ -28,7 +63,11 @@ public static class McpServerHost
         builder.Logging.SetMinimumLevel(stderrLogging_ ? LogLevel.Trace : LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning);
         builder.Logging.AddFilter("ModelContextProtocol.Server", LogLevel.Warning);
-        builder.Logging.AddProvider(new FileLoggerProvider(resolvedLogFile));
+        if (resolvedLogFile is not null)
+        {
+            builder.Logging.AddProvider(
+                new FileLoggerProvider(resolvedLogFile));
+        }
 
         if (stderrLogging_)
         {
@@ -51,7 +90,7 @@ public static class McpServerHost
 
     public static async Task<int> RunAsync(string repoRoot_, bool stderrLogging_ = false, CancellationToken cancellationToken_ = default)
     {
-        string resolvedLogFile = DefaultLogFile;
+        string? resolvedLogFile = ResolveLogFile(repoRoot_);
         try
         {
             using IHost host = CreateHost(repoRoot_, stderrLogging_);
@@ -62,7 +101,12 @@ public static class McpServerHost
         {
             try
             {
-                File.AppendAllText(resolvedLogFile, $"{DateTimeOffset.UtcNow:O} startup failure: {exception}{Environment.NewLine}");
+                if (resolvedLogFile is not null)
+            {
+                File.AppendAllText(
+                    resolvedLogFile,
+                    $"{DateTimeOffset.UtcNow:O} startup failure: {exception}{Environment.NewLine}");
+            }
             }
             catch
             {

@@ -50,8 +50,22 @@ if ($help -notmatch '\[--repo <path>\]' -or $help -notmatch '--no-hooks') {
     throw 'CLI help does not document optional --repo and --no-hooks.'
 }
 
-if ((Invoke-AiRepo -Arguments @('--version')).Trim() -ne '1.8.1') {
-    throw 'CLI version is not 1.8.1.'
+[xml]$projectXml = Get-Content $project
+$expectedVersion = [string](
+    $projectXml.Project.PropertyGroup.Version |
+        Select-Object -First 1
+)
+
+if ([string]::IsNullOrWhiteSpace($expectedVersion)) {
+    throw 'Unable to resolve current CLI version from AiRepoKit.Cli.csproj.'
+}
+
+$actualVersion = (
+    Invoke-AiRepo -Arguments @('--version')
+).Trim()
+
+if ($actualVersion -ne $expectedVersion) {
+    throw "CLI version '$actualVersion' does not match project version '$expectedVersion'."
 }
 
 $bootstrapArgs = @(

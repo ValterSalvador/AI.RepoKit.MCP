@@ -140,6 +140,16 @@ public sealed class PortableMcpRuntimeTests
             Directory.Delete(targetRepo, true);
         }
     }
+    [Fact]
+    public void McpServerHost_DefaultLogFile_IsDisabledWhenTargetContainsDefaultLog()
+    {
+        string targetRepo = Path.GetTempPath();
+
+        string? resolvedLogFile =
+            McpServerHost.ResolveLogFile(targetRepo);
+
+        Assert.Null(resolvedLogFile);
+    }
 
     [Fact]
     public void PortableRuntime_HasNoDependencyOnToolsAiContextMcpBin()

@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v1.8.1 Release-ready with Git hooks enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
+Status: v2.0.0 release candidate with Git hooks enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
 
 ## Goals
 
@@ -52,20 +52,20 @@ Run commands from the repository root whenever you are targeting the current rep
 Before the GitHub Release exists, build the local package and update the already-installed global tool from the repository:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.1
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 2.0.0
 $packageSource = (Resolve-Path "artifacts/nuget").Path
-dotnet tool update --global AiRepoKit.Cli --version 1.8.1 --add-source $packageSource
+dotnet tool update --global AiRepoKit.Cli --version 2.0.0 --add-source $packageSource
 airepo --version
 ```
 
-After `v1.8.1` is published, download its `.nupkg` release asset and use it as a temporary package source:
+After the `v2.0.0` release candidate is published, download its `.nupkg` release asset and use it as a temporary package source:
 
 ```powershell
-$packageSource = Join-Path $env:TEMP "airepo-1.8.1"
+$packageSource = Join-Path $env:TEMP "airepo-2.0.0"
 New-Item -ItemType Directory -Force -Path $packageSource | Out-Null
 $releaseRepo = "owner/AI.RepoKit.MCP"
-gh release download v1.8.1 --repo $releaseRepo --pattern "AiRepoKit.Cli.1.8.1.nupkg" --dir $packageSource --clobber
-dotnet tool update --global AiRepoKit.Cli --version 1.8.1 --add-source $packageSource
+gh release download v2.0.0 --repo $releaseRepo --pattern "AiRepoKit.Cli.2.0.0.nupkg" --dir $packageSource --clobber
+dotnet tool update --global AiRepoKit.Cli --version 2.0.0 --add-source $packageSource
 airepo --version
 ```
 
@@ -180,7 +180,7 @@ The repository-local MCP server is read-only and stdio-only. During normal MCP o
 
 ## MCP Resources And Prompts
 
-v1.8.1 keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and enables the repository-local Git hooks introduced in v1.8.0 by default during applied `setup` and `bootstrap` runs. v1.7.0 added incremental code-index cache reuse, context-pack freshness checks, faster MCP diagnostics, and stale-host cleanup.
+The v2.0.0 release candidate keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and enables the repository-local Git hooks introduced in v1.8.0 by default during applied `setup` and `bootstrap` runs. v1.7.0 added incremental code-index cache reuse, context-pack freshness checks, faster MCP diagnostics, and stale-host cleanup.
 
 Resource URIs:
 
@@ -315,7 +315,7 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 1.8.1
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 2.0.0
 artifacts/publish/win-x64/airepo.exe --help
 artifacts/publish/win-x64/airepo.exe self-check --strict --timings
 artifacts/publish/win-x64/airepo.exe mcp-diagnose --clients codex,vscode,vs --strict --timings
