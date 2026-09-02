@@ -16,6 +16,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AiRepoKit.Cli\AiRepoKit.Cli.csproj" />
+    <ProjectReference Include="..\..\src\AiRepoKit.Spec\AiRepoKit.Spec.csproj" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <None Update="Fixtures/Spec/V1/**/*.json"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

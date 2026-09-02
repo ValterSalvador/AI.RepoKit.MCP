@@ -1,0 +1,10 @@
+{
+  "acceptanceCriterionIds": [
+    "AC-001"
+  ],
+  "description": "Focused Spec tests passed.",
+  "id": "EVD-001",
+  "planStepIds": [
+    "PLAN-STEP-001"
+  ]
+}

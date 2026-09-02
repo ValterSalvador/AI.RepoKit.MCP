@@ -1,0 +1,13 @@
+{
+  "artifactIdentity": "work-spec",
+  "artifactKind": "workSpec",
+  "artifactRevision": 5,
+  "canonicalSemanticRepresentation": "work-spec-semantic-v1",
+  "canonicalizationId": "ai.repokit.spec.semantic",
+  "canonicalizationVersion": 1,
+  "digestAlgorithm": "sha256",
+  "id": "APR-001",
+  "schemaId": "ai.repokit.spec",
+  "schemaVersion": 1,
+  "semanticDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

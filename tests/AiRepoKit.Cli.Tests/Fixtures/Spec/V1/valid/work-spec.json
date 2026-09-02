@@ -1,0 +1,25 @@
+{
+  "acceptanceCriteria": [
+    {
+      "id": "AC-001",
+      "requirementIds": [
+        "REQ-001"
+      ],
+      "statement": "Stable identity validation passes."
+    }
+  ],
+  "artifactIdentity": "work-spec",
+  "constraints": [
+    {
+      "id": "CON-001",
+      "requirementIds": [
+        "REQ-001"
+      ],
+      "statement": "The contract remains client neutral."
+    }
+  ],
+  "requirementSetRevision": 3,
+  "revision": 5,
+  "schemaId": "ai.repokit.spec",
+  "schemaVersion": 1
+}

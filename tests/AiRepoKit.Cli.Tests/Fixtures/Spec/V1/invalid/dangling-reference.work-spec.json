@@ -1,0 +1,17 @@
+{
+  "acceptanceCriteria": [
+    {
+      "id": "AC-001",
+      "requirementIds": [
+        "REQ-999"
+      ],
+      "statement": "Dangling requirement."
+    }
+  ],
+  "artifactIdentity": "work-spec",
+  "constraints": [],
+  "requirementSetRevision": 3,
+  "revision": 5,
+  "schemaId": "ai.repokit.spec",
+  "schemaVersion": 1
+}

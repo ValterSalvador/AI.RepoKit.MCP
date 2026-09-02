@@ -1,0 +1,21 @@
+{
+  "artifactIdentity": "requirements",
+  "inputs": [
+    {
+      "id": "INPUT-001",
+      "text": "Define a deterministic Spec IR."
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "sourceInputIds": [
+        "INPUT-001"
+      ],
+      "statement": "Spec entities use stable identities."
+    }
+  ],
+  "revision": 3,
+  "schemaId": "ai.repokit.spec",
+  "schemaVersion": 1
+}

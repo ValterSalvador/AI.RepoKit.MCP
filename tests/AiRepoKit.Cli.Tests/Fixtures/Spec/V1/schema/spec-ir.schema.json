@@ -1,0 +1,457 @@
+{
+  "$defs": {
+    "acceptanceCriterion": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^AC-[0-9]{3,}$",
+          "type": "string"
+        },
+        "requirementIds": {
+          "items": {
+            "pattern": "^REQ-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "statement",
+        "requirementIds"
+      ],
+      "type": "object"
+    },
+    "approval": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "artifactKind": {
+                "const": "requirementSet"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "artifactIdentity": {
+                "const": "requirements"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "artifactKind": {
+                "const": "workSpec"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "artifactIdentity": {
+                "const": "work-spec"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "artifactKind": {
+                "const": "implementationPlan"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "artifactIdentity": {
+                "const": "implementation-plan"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "artifactIdentity": {
+          "enum": [
+            "requirements",
+            "work-spec",
+            "implementation-plan"
+          ]
+        },
+        "artifactKind": {
+          "enum": [
+            "requirementSet",
+            "workSpec",
+            "implementationPlan"
+          ]
+        },
+        "artifactRevision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "canonicalSemanticRepresentation": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "canonicalizationId": {
+          "const": "ai.repokit.spec.semantic"
+        },
+        "canonicalizationVersion": {
+          "const": 1
+        },
+        "digestAlgorithm": {
+          "const": "sha256"
+        },
+        "id": {
+          "pattern": "^APR-[0-9]{3,}$",
+          "type": "string"
+        },
+        "schemaId": {
+          "const": "ai.repokit.spec"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "semanticDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaId",
+        "schemaVersion",
+        "id",
+        "artifactKind",
+        "artifactIdentity",
+        "artifactRevision",
+        "canonicalizationId",
+        "canonicalizationVersion",
+        "digestAlgorithm",
+        "canonicalSemanticRepresentation",
+        "semanticDigest"
+      ],
+      "type": "object"
+    },
+    "constraint": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^CON-[0-9]{3,}$",
+          "type": "string"
+        },
+        "requirementIds": {
+          "items": {
+            "pattern": "^REQ-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "statement",
+        "requirementIds"
+      ],
+      "type": "object"
+    },
+    "implementationPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactIdentity": {
+          "const": "implementation-plan"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "schemaId": {
+          "const": "ai.repokit.spec"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/planStep"
+          },
+          "type": "array"
+        },
+        "workSpecRevision": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schemaId",
+        "schemaVersion",
+        "artifactIdentity",
+        "revision",
+        "workSpecRevision",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "planStep": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptanceCriterionIds": {
+          "items": {
+            "pattern": "^AC-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^PLAN-STEP-[0-9]{3,}$",
+          "type": "string"
+        },
+        "requirementIds": {
+          "items": {
+            "pattern": "^REQ-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "statement",
+        "requirementIds",
+        "acceptanceCriterionIds"
+      ],
+      "type": "object"
+    },
+    "requirement": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^REQ-[0-9]{3,}$",
+          "type": "string"
+        },
+        "sourceInputIds": {
+          "items": {
+            "pattern": "^INPUT-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "statement",
+        "sourceInputIds"
+      ],
+      "type": "object"
+    },
+    "requirementInput": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^INPUT-[0-9]{3,}$",
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "type": "object"
+    },
+    "requirementSet": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactIdentity": {
+          "const": "requirements"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/requirementInput"
+          },
+          "type": "array"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/requirement"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "schemaId": {
+          "const": "ai.repokit.spec"
+        },
+        "schemaVersion": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schemaId",
+        "schemaVersion",
+        "artifactIdentity",
+        "revision",
+        "inputs",
+        "requirements"
+      ],
+      "type": "object"
+    },
+    "verificationEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptanceCriterionIds": {
+          "items": {
+            "pattern": "^AC-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^EVD-[0-9]{3,}$",
+          "type": "string"
+        },
+        "planStepIds": {
+          "items": {
+            "pattern": "^PLAN-STEP-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "acceptanceCriterionIds",
+        "planStepIds"
+      ],
+      "type": "object"
+    },
+    "verificationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptanceCriterionId": {
+          "pattern": "^AC-[0-9]{3,}$",
+          "type": "string"
+        },
+        "evidenceIds": {
+          "items": {
+            "pattern": "^EVD-[0-9]{3,}$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^VER-[0-9]{3,}$",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "notVerified",
+            "pass",
+            "fail"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "acceptanceCriterionId",
+        "status",
+        "evidenceIds",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "workSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptanceCriteria": {
+          "items": {
+            "$ref": "#/$defs/acceptanceCriterion"
+          },
+          "type": "array"
+        },
+        "artifactIdentity": {
+          "const": "work-spec"
+        },
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/constraint"
+          },
+          "type": "array"
+        },
+        "requirementSetRevision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "revision": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "schemaId": {
+          "const": "ai.repokit.spec"
+        },
+        "schemaVersion": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schemaId",
+        "schemaVersion",
+        "artifactIdentity",
+        "revision",
+        "requirementSetRevision",
+        "constraints",
+        "acceptanceCriteria"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://ai.repokit.dev/schemas/spec/v1/spec-ir.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/requirementSet"
+    },
+    {
+      "$ref": "#/$defs/workSpec"
+    },
+    {
+      "$ref": "#/$defs/implementationPlan"
+    },
+    {
+      "$ref": "#/$defs/approval"
+    },
+    {
+      "$ref": "#/$defs/verificationEvidence"
+    },
+    {
+      "$ref": "#/$defs/verificationResult"
+    }
+  ],
+  "title": "AI.RepoKit Spec IR v1"
+}

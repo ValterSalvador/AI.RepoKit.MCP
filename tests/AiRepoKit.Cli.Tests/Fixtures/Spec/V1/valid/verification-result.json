@@ -1,0 +1,9 @@
+{
+  "acceptanceCriterionId": "AC-001",
+  "evidenceIds": [
+    "EVD-001"
+  ],
+  "id": "VER-001",
+  "status": "pass",
+  "summary": "The acceptance criterion passed."
+}

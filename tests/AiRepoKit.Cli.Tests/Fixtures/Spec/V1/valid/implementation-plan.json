@@ -1,0 +1,19 @@
+{
+  "artifactIdentity": "implementation-plan",
+  "revision": 2,
+  "schemaId": "ai.repokit.spec",
+  "schemaVersion": 1,
+  "steps": [
+    {
+      "acceptanceCriterionIds": [
+        "AC-001"
+      ],
+      "id": "PLAN-STEP-001",
+      "requirementIds": [
+        "REQ-001"
+      ],
+      "statement": "Implement the stable identity contract."
+    }
+  ],
+  "workSpecRevision": 5
+}
