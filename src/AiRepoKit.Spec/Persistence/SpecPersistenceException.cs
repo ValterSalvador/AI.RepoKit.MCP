@@ -21,6 +21,15 @@ public sealed class SpecPersistenceException :
     public const string ReadFailed =
         "read-failed";
 
+    public const string RevisionConflict =
+        "revision-conflict";
+
+    public const string StaleDependency =
+        "stale-dependency";
+
+    public const string WriteFailed =
+        "write-failed";
+
     public SpecPersistenceException(
         string errorCode_,
         string message_,

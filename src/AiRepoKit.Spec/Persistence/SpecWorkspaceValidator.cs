@@ -2,6 +2,48 @@ namespace AiRepoKit.Spec.Persistence;
 
 internal static class SpecWorkspaceValidator
 {
+    public static void ValidateForStore(
+        RequirementSet requirementSet_)
+    {
+        ThrowIfInvalid(
+            SpecArtifactKind.RequirementSet,
+            RunValidator(
+                SpecArtifactKind.RequirementSet,
+                () =>
+                    RequirementSetValidator.Validate(
+                        requirementSet_)));
+    }
+
+    public static void ValidateForStore(
+        WorkSpec workSpec_,
+        RequirementSet requirementSet_)
+    {
+        ThrowIfInvalid(
+            SpecArtifactKind.WorkSpec,
+            RunValidator(
+                SpecArtifactKind.WorkSpec,
+                () =>
+                    WorkSpecValidator.Validate(
+                        workSpec_,
+                        requirementSet_)));
+    }
+
+    public static void ValidateForStore(
+        ImplementationPlan implementationPlan_,
+        WorkSpec workSpec_,
+        RequirementSet requirementSet_)
+    {
+        ThrowIfInvalid(
+            SpecArtifactKind.ImplementationPlan,
+            RunValidator(
+                SpecArtifactKind.ImplementationPlan,
+                () =>
+                    ImplementationPlanValidator.Validate(
+                        implementationPlan_,
+                        workSpec_,
+                        requirementSet_)));
+    }
+
     public static SpecWorkspaceSnapshot Validate(
         RequirementSet? requirementSet_,
         WorkSpec? workSpec_,
