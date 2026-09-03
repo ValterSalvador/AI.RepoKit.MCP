@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AiRepoKit.Cli.Models;
+using AiRepoKit.Cli.Models.CodeIndex;
 using AiRepoKit.Cli.Models.Efficiency;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Cli.Services.CodeIndex;
@@ -18,15 +19,24 @@ public sealed class EfficiencyCommand
     };
 
     private readonly IMcpBudgetService _mcpBudgetService;
+    private readonly ICodeIndexFreshnessService _codeIndexFreshnessService;
 
     public EfficiencyCommand()
-        : this(new McpBudgetService())
+        : this(new McpBudgetService(), new CodeIndexFreshnessService())
     {
     }
 
-    internal EfficiencyCommand(IMcpBudgetService mcpBudgetService)
+    internal EfficiencyCommand(IMcpBudgetService mcpBudgetService_)
+        : this(mcpBudgetService_, new CodeIndexFreshnessService())
     {
-        _mcpBudgetService = mcpBudgetService ?? throw new ArgumentNullException(nameof(mcpBudgetService));
+    }
+
+    internal EfficiencyCommand(
+        IMcpBudgetService mcpBudgetService_,
+        ICodeIndexFreshnessService codeIndexFreshnessService_)
+    {
+        _mcpBudgetService = mcpBudgetService_ ?? throw new ArgumentNullException(nameof(mcpBudgetService_));
+        _codeIndexFreshnessService = codeIndexFreshnessService_ ?? throw new ArgumentNullException(nameof(codeIndexFreshnessService_));
     }
 
     private static readonly string[] IgnoredDirectories =
@@ -64,7 +74,7 @@ public sealed class EfficiencyCommand
 
             progress.StartPhase("Checking generated data freshness");
             SourceScan rawSource = ScanSource(repoPath);
-            FreshnessResult freshness = CheckFreshness(repoPath, options_.MaxFiles);
+            CodeIndexFreshnessResult freshness = _codeIndexFreshnessService.Check(repoPath, options_.MaxFiles);
             cacheStale = freshness.Stale;
             refreshReasons.AddRange(freshness.Reasons);
             progress.CompletePhase("Generated data freshness checked");
@@ -286,74 +296,6 @@ public sealed class EfficiencyCommand
                 }
             }
         }
-    }
-
-    private static FreshnessResult CheckFreshness(string repoPath_, int maxFiles_)
-    {
-        List<string> reasons = [];
-        string symbolPath = Path.Combine(repoPath_, ".ai", "generated", "inventories", "symbol-inventory.json");
-        string endpointPath = Path.Combine(repoPath_, ".ai", "generated", "inventories", "endpoint-inventory.json");
-        string cachePath = Path.Combine(repoPath_, ".ai", "generated", "cache", "code-index-cache.json");
-        if (!File.Exists(symbolPath))
-        {
-            reasons.Add("symbol inventory missing");
-        }
-
-        if (!File.Exists(endpointPath))
-        {
-            reasons.Add("endpoint inventory missing");
-        }
-
-        if (!File.Exists(cachePath))
-        {
-            reasons.Add("code-index cache missing");
-            return new FreshnessResult(reasons.Count > 0, reasons);
-        }
-
-        try
-        {
-            JsonObject? cache = JsonNode.Parse(File.ReadAllText(cachePath)) as JsonObject;
-            JsonArray files = GetArray(cache, "Files");
-            Dictionary<string, JsonObject> cached = files.OfType<JsonObject>().ToDictionary(file_ => GetString(file_, "File"), StringComparer.OrdinalIgnoreCase);
-            HashSet<string> current = new(new CodeFileDiscoveryService().Discover(repoPath_, maxFiles_).Files, StringComparer.OrdinalIgnoreCase);
-            if (current.Count != cached.Count)
-            {
-                reasons.Add("current C# file count differs from cache file count");
-            }
-
-            foreach (string file in current)
-            {
-                if (!cached.TryGetValue(file, out JsonObject? entry))
-                {
-                    reasons.Add("current C# file missing from cache");
-                    break;
-                }
-
-                FileInfo info = new(Path.Combine(repoPath_, file.Replace('/', Path.DirectorySeparatorChar)));
-                long cachedSize = GetLong(entry, "SizeBytes");
-                string cachedLastWrite = GetString(entry, "LastWriteTimeUtc");
-                if (cachedSize != info.Length || !string.Equals(cachedLastWrite, info.LastWriteTimeUtc.ToString("O"), StringComparison.Ordinal))
-                {
-                    reasons.Add("cached C# file size or last-write metadata differs");
-                    break;
-                }
-            }
-
-            foreach (string cachedFile in cached.Keys)
-            {
-                if (!current.Contains(cachedFile))
-                {
-                    reasons.Add("cached C# file no longer exists");
-                    break;
-                }
-            }
-        }
-        catch (Exception exception)
-        {
-            reasons.Add("code-index cache could not be read: " + exception.Message);
-        }
-
-        return new FreshnessResult(reasons.Count > 0, reasons.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
     private static IReadOnlyList<string> MissingContextPacks(string repoPath_)
@@ -579,8 +521,6 @@ public sealed class EfficiencyCommand
     }
 
     private sealed record SourceScan(IReadOnlyList<string> CSharpFiles, int CSharpFileCount, long Bytes);
-
-    private sealed record FreshnessResult(bool Stale, IReadOnlyList<string> Reasons);
 
     private sealed record GeneratedContext(EfficiencyMetric Context, EfficiencyMetric McpBudget, EfficiencyMetric CodeIndexCache, string CodeIndexCacheHitRate, EfficiencySafetySummary Safety);
 }

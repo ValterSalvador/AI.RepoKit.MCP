@@ -1,5 +1,7 @@
 using AiRepoKit.Cli.Commands;
 using AiRepoKit.Cli.Models;
+using AiRepoKit.Cli.Models.CodeIndex;
+using AiRepoKit.Cli.Services.CodeIndex;
 using AiRepoKit.Cli.Services.McpBudget;
 using Xunit;
 
@@ -7,6 +9,57 @@ namespace AiRepoKit.Cli.Tests;
 
 public sealed class EfficiencyCommandTests
 {
+    [Fact]
+    public void Efficiency_FreshnessService_IsInvokedOnceWithNormalizedRepoRootAndMaxFiles()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var fakeFreshness = new FakeCodeIndexFreshnessService
+            {
+                ResultToReturn = new CodeIndexFreshnessResult(false, [])
+            };
+            var command = new EfficiencyCommand(new FakeMcpBudgetService(), fakeFreshness);
+            BootstrapOptions options = CreateOptions(tempDir, skipBudget: true, noRefresh: true);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.True(result.Success);
+            Assert.Equal(1, fakeFreshness.InvocationCount);
+            Assert.Equal(Path.GetFullPath(tempDir), fakeFreshness.LastRepoRoot);
+            Assert.Equal(options.MaxFiles, fakeFreshness.LastMaxFiles);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
+    [Fact]
+    public void Efficiency_StaleFreshnessResult_PreservesNoRefreshWarning()
+    {
+        string tempDir = CreateTempRepo();
+        try
+        {
+            var fakeFreshness = new FakeCodeIndexFreshnessService
+            {
+                ResultToReturn = new CodeIndexFreshnessResult(true, ["symbol inventory missing"])
+            };
+            var command = new EfficiencyCommand(new FakeMcpBudgetService(), fakeFreshness);
+            BootstrapOptions options = CreateOptions(tempDir, skipBudget: true, noRefresh: true);
+
+            CommandResult result = command.Execute(options);
+
+            Assert.True(result.Success);
+            Assert.Contains("Generated data is missing or stale: symbol inventory missing.", result.Markdown);
+            Assert.Contains("\"CacheStale\": true", result.Markdown);
+        }
+        finally
+        {
+            DeleteTempRepo(tempDir);
+        }
+    }
+
     [Fact]
     public void Efficiency_NativeBudgetService_IsInvokedWithRepoRoot()
     {
@@ -176,7 +229,11 @@ public sealed class EfficiencyCommandTests
             });
     }
 
-    private static BootstrapOptions CreateOptions(string repoPath, bool skipBudget, ScriptShell shell = ScriptShell.Auto)
+    private static BootstrapOptions CreateOptions(
+        string repoPath,
+        bool skipBudget,
+        ScriptShell shell = ScriptShell.Auto,
+        bool noRefresh = false)
     {
         return new BootstrapOptions(
             command_: "efficiency",
@@ -228,7 +285,7 @@ public sealed class EfficiencyCommandTests
             unknownOptions_: [],
             noProgress_: true,
             refresh_: true,
-            noRefresh_: false,
+            noRefresh_: noRefresh,
             sampleQuery_: "test",
             profileExplicit_: false,
             forbiddenTerms_: [],
@@ -284,6 +341,22 @@ public sealed class EfficiencyCommandTests
             LastRepoRoot = repoRoot;
             LastOptions = options;
             if (ExceptionToThrow is not null) throw ExceptionToThrow;
+            return ResultToReturn ?? throw new InvalidOperationException("No result configured.");
+        }
+    }
+
+    private sealed class FakeCodeIndexFreshnessService : ICodeIndexFreshnessService
+    {
+        public int InvocationCount { get; private set; }
+        public string? LastRepoRoot { get; private set; }
+        public int? LastMaxFiles { get; private set; }
+        public CodeIndexFreshnessResult? ResultToReturn { get; set; }
+
+        public CodeIndexFreshnessResult Check(string repoRoot_, int maxFiles_)
+        {
+            InvocationCount++;
+            LastRepoRoot = repoRoot_;
+            LastMaxFiles = maxFiles_;
             return ResultToReturn ?? throw new InvalidOperationException("No result configured.");
         }
     }
