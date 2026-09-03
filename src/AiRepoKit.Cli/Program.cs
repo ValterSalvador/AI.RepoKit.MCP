@@ -17,6 +17,13 @@ public static class Program
             return await RunMcpServeAsync(args_).ConfigureAwait(false);
         }
 
+        if (args_.Length >= 1 && string.Equals(args_[0], "spec", StringComparison.OrdinalIgnoreCase))
+        {
+            CommandResult specResult = RouteSpec(args_);
+            Console.WriteLine(specResult.Markdown);
+            return specResult.ExitCode;
+        }
+
         if (args_.Length == 0)
         {
             return RunInteractive();
@@ -70,6 +77,11 @@ public static class Program
 
         Console.WriteLine(result.Markdown);
         return result.ExitCode;
+    }
+
+    internal static CommandResult RouteSpec(IReadOnlyList<string> arguments_)
+    {
+        return new SpecCommand().Execute(arguments_.Skip(1).ToArray());
     }
 
     internal static async Task<int> RunMcpServeAsync(string[] args_, CancellationToken cancellationToken_ = default)
@@ -1051,6 +1063,7 @@ public static class Program
         airepo hooks [--repo <path>] [--apply] [--force]
         airepo init [--repo <path>] --clients codex,vscode,vs --mcp [--agents] [--profile generic] [--apply] [--backup|--force|--force-managed]
         airepo plan [--repo <path>] [--clients codex,vscode,vs] [--mcp] [--agents] [--profile generic]
+        airepo spec <subcommand>
         airepo code-index [--repo <path>] [--apply] [--max-files 3000] [--max-items 10000] [--include-private-members] [--format json|markdown|all] [--no-cache|--rebuild-cache|--rebuild-index] [--summary] [--timings]
         airepo context-pack [--repo <path>] [--task change-api|change-ui|fix-build|update-package|review-risk|security-review|test-generation|changed-files] [--target name] [--apply] [--format json|markdown|all] [--limit 20] [--budget 12000] [--skip-code-index|--rebuild-index]
         airepo graph [--repo <path>] [--kind project|symbol|risk] [--format json|markdown|all] [--apply] [--limit 20] [--budget 12000]
