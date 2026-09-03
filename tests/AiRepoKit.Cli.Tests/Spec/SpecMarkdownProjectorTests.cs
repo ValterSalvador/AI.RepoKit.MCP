@@ -353,6 +353,17 @@ public sealed class SpecMarkdownProjectorTests
     [Fact]
     public void ArbitraryText_IsVisiblyEscapedOnOnePhysicalLine()
     {
+        char backslash =
+            (char)92;
+        string inputText =
+            string.Concat(
+                "slash",
+                backslash,
+                "\r\nline\n\t<tag>&`*_",
+                '\u0001',
+                '\u007f',
+                " café 漢字");
+
         RequirementSet artifact =
             CreateRequirementSet() with
             {
@@ -361,8 +372,7 @@ public sealed class SpecMarkdownProjectorTests
                     new RequirementInput
                     {
                         Id = Id("INPUT-001"),
-                        Text =
-                            "slash\\\r\nline\n\t<tag>&`*_\u0001\u007f café 漢字"
+                        Text = inputText
                     }
                 ],
                 Requirements = []
@@ -371,9 +381,30 @@ public sealed class SpecMarkdownProjectorTests
         string projection =
             SpecMarkdownProjector.Project(
                 artifact);
+        string visibleBackslash =
+            backslash.ToString();
+        string expected =
+            string.Concat(
+                "<code>slash",
+                visibleBackslash,
+                visibleBackslash,
+                visibleBackslash,
+                "r",
+                visibleBackslash,
+                "n",
+                "line",
+                visibleBackslash,
+                "n",
+                visibleBackslash,
+                "t",
+                "&lt;tag&gt;&amp;`*_",
+                visibleBackslash,
+                "u0001",
+                visibleBackslash,
+                "u007F café 漢字</code>");
 
         Assert.Contains(
-            """<code>slash\\\r\nline\n\t&lt;tag&gt;&amp;`*_\u0001\u007F café 漢字</code>""",
+            expected,
             projection,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
