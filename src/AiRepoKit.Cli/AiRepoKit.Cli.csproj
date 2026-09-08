@@ -29,5 +29,8 @@
     <PackageReference Include="System.Management" Version="10.0.11" />
   </ItemGroup>
 
-</Project>
+  <ItemGroup>
+    <ProjectReference Include="..\AiRepoKit.Spec\AiRepoKit.Spec.csproj" />
+  </ItemGroup>
 
+</Project>
