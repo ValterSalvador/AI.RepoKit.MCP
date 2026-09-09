@@ -14,6 +14,28 @@ internal static class SpecWorkspaceWriteCoordinator
         SpecArtifactKind artifactKind_,
         Func<T> action_)
     {
+        try
+        {
+            return Execute(
+                specDirectory_,
+                action_);
+        }
+        catch (SpecPersistenceException exception) when (
+            exception.ArtifactKind is null)
+        {
+            throw new SpecPersistenceException(
+                exception.ErrorCode,
+                exception.Message,
+                artifactKind_,
+                exception.ValidationErrors,
+                exception.InnerException);
+        }
+    }
+
+    public static T Execute<T>(
+        string specDirectory_,
+        Func<T> action_)
+    {
         ArgumentNullException.ThrowIfNull(
             action_);
 
@@ -59,8 +81,7 @@ internal static class SpecWorkspaceWriteCoordinator
             {
                 throw new SpecPersistenceException(
                     SpecPersistenceException.WriteFailed,
-                    "The spec workspace write lock could not be acquired within the allowed time.",
-                    artifactKind_);
+                    "The spec workspace write lock could not be acquired within the allowed time.");
             }
 
             try
@@ -85,7 +106,6 @@ internal static class SpecWorkspaceWriteCoordinator
             throw new SpecPersistenceException(
                 SpecPersistenceException.WriteFailed,
                 "The spec workspace write lock could not be used.",
-                artifactKind_,
                 innerException_: exception);
         }
     }

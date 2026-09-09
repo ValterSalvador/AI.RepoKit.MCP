@@ -240,6 +240,30 @@ public sealed class SpecPersistenceTests
     }
 
     [Fact]
+    public void ArtifactPaths_GetApprovalLedgerPath_CreateNoDirectoryOrFile()
+    {
+        string repositoryRoot =
+            Path.Combine(
+                Path.GetTempPath(),
+                "airepokit-spec-ledger-no-create-" + Guid.NewGuid().ToString("N"));
+
+        SpecArtifactPaths paths =
+            new(
+                repositoryRoot,
+                new SpecId(
+                    "spec-1"));
+        string ledgerPath =
+            paths.GetApprovalLedgerPath();
+
+        Assert.False(
+            Directory.Exists(
+                repositoryRoot));
+        Assert.False(
+            File.Exists(
+                ledgerPath));
+    }
+
+    [Fact]
     public void ArtifactPaths_RejectExistingSymbolicLinkComponentWhereSupported()
     {
         string repositoryRoot =

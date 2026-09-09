@@ -195,12 +195,23 @@ public static class SpecApprovalLedgerValidator
         HashSet<string> seenApprovalIds =
             new(
                 StringComparer.Ordinal);
+        Dictionary<(SpecArtifactKind, string, ArtifactRevision), Approval> seenArtifactApprovals =
+            [];
 
-        foreach (Approval approval in
+        foreach (Approval? approval in
                  ledger_.Approvals)
         {
             if (approval is null)
             {
+                errors_.Add(
+                    new SpecValidationError
+                    {
+                        Code =
+                            SpecApprovalLedgerValidationErrorCodes.NullApprovalEntry,
+                        Message =
+                            "Spec approval ledger contains a null approval entry."
+                    });
+
                 continue;
             }
 
@@ -227,6 +238,100 @@ public static class SpecApprovalLedgerValidator
                         Message =
                             $"Duplicate approval ID '{approvalId}'."
                     });
+            }
+
+            if (approvalErrors.Count == 0)
+            {
+                string expectedDigest =
+                    SpecSemanticDigest.ComputeFromCanonicalRepresentation(
+                        approval.CanonicalSemanticRepresentation);
+
+                if (!string.Equals(
+                        approval.SemanticDigest,
+                        expectedDigest,
+                        StringComparison.Ordinal))
+                {
+                    errors_.Add(
+                        new SpecValidationError
+                        {
+                            Code =
+                                SpecApprovalLedgerValidationErrorCodes.InconsistentSemanticDigest,
+                            SourceEntityId =
+                                approvalId,
+                            Message =
+                                $"Approval '{approvalId}' semantic digest does not match its canonical semantic representation."
+                        });
+                }
+            }
+
+            if (approval.ArtifactRevision.IsValid &&
+                !string.IsNullOrEmpty(
+                    approval.ArtifactIdentity))
+            {
+                (SpecArtifactKind, string, ArtifactRevision) artifactKey =
+                    (approval.ArtifactKind, approval.ArtifactIdentity, approval.ArtifactRevision);
+
+                if (seenArtifactApprovals.TryGetValue(
+                        artifactKey,
+                        out Approval? existingApproval))
+                {
+                    bool sameSemantics =
+                        string.Equals(
+                            existingApproval.CanonicalizationId,
+                            approval.CanonicalizationId,
+                            StringComparison.Ordinal) &&
+                        existingApproval.CanonicalizationVersion ==
+                        approval.CanonicalizationVersion &&
+                        string.Equals(
+                            existingApproval.DigestAlgorithm,
+                            approval.DigestAlgorithm,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            existingApproval.CanonicalSemanticRepresentation,
+                            approval.CanonicalSemanticRepresentation,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            existingApproval.SemanticDigest,
+                            approval.SemanticDigest,
+                            StringComparison.Ordinal);
+
+                    if (sameSemantics)
+                    {
+                        errors_.Add(
+                            new SpecValidationError
+                            {
+                                Code =
+                                    SpecApprovalLedgerValidationErrorCodes.DuplicateApprovalBinding,
+                                SourceEntityId =
+                                    approvalId,
+                                TargetEntityId =
+                                    existingApproval.Id.Value,
+                                Message =
+                                    $"Spec approval ledger contains duplicate approval binding for artifact '{approval.ArtifactKind}' revision '{approval.ArtifactRevision.Value}'."
+                            });
+                    }
+                    else
+                    {
+                        errors_.Add(
+                            new SpecValidationError
+                            {
+                                Code =
+                                    SpecApprovalLedgerValidationErrorCodes.ConflictingApprovalBinding,
+                                SourceEntityId =
+                                    approvalId,
+                                TargetEntityId =
+                                    existingApproval.Id.Value,
+                                Message =
+                                    $"Spec approval ledger contains conflicting approval binding for artifact '{approval.ArtifactKind}' revision '{approval.ArtifactRevision.Value}'."
+                            });
+                    }
+                }
+                else
+                {
+                    seenArtifactApprovals.Add(
+                        artifactKey,
+                        approval);
+                }
             }
         }
     }

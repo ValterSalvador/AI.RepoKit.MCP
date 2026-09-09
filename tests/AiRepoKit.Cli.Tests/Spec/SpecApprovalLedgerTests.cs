@@ -671,6 +671,154 @@ public sealed class SpecApprovalLedgerTests
                     null!));
     }
 
+    [Fact]
+    public void Validate_RejectsNullApprovalEntry()
+    {
+        SpecApprovalLedger ledger =
+            CreateLedger(
+                [null!]);
+
+        SpecValidationError error =
+            Assert.Single(
+                SpecApprovalLedgerValidator.Validate(
+                    ledger));
+
+        Assert.Equal(
+            SpecApprovalLedgerValidationErrorCodes.NullApprovalEntry,
+            error.Code);
+    }
+
+    [Fact]
+    public void Validate_RejectsInconsistentSemanticDigest()
+    {
+        Approval approval =
+            new()
+            {
+                Id =
+                    new StableEntityId("APR-001"),
+                ArtifactKind =
+                    SpecArtifactKind.RequirementSet,
+                ArtifactIdentity =
+                    SpecArtifactIdentity.RequirementSet,
+                ArtifactRevision =
+                    new ArtifactRevision(1),
+                CanonicalSemanticRepresentation =
+                    "some-canonical-representation",
+                SemanticDigest =
+                    new string('f', 64)
+            };
+
+        SpecApprovalLedger ledger =
+            CreateLedger(
+                [approval]);
+
+        SpecValidationError error =
+            Assert.Single(
+                SpecApprovalLedgerValidator.Validate(
+                    ledger));
+
+        Assert.Equal(
+            SpecApprovalLedgerValidationErrorCodes.InconsistentSemanticDigest,
+            error.Code);
+        Assert.Equal(
+            "APR-001",
+            error.SourceEntityId);
+    }
+
+    [Fact]
+    public void Validate_RejectsDuplicateApprovalBinding()
+    {
+        RequirementSet requirementSet =
+            CreateRequirementSet();
+
+        Approval approval1 =
+            SpecApprovalBinding.Create(
+                new StableEntityId("APR-001"),
+                requirementSet);
+        Approval approval2 =
+            SpecApprovalBinding.Create(
+                new StableEntityId("APR-002"),
+                requirementSet);
+
+        SpecApprovalLedger ledger =
+            CreateLedger(
+                [
+                    approval1,
+                    approval2
+                ]);
+
+        SpecValidationError error =
+            Assert.Single(
+                SpecApprovalLedgerValidator.Validate(
+                    ledger));
+
+        Assert.Equal(
+            SpecApprovalLedgerValidationErrorCodes.DuplicateApprovalBinding,
+            error.Code);
+        Assert.Equal(
+            "APR-002",
+            error.SourceEntityId);
+        Assert.Equal(
+            "APR-001",
+            error.TargetEntityId);
+    }
+
+    [Fact]
+    public void Validate_RejectsConflictingApprovalBinding()
+    {
+        RequirementSet set1 =
+            CreateRequirementSet();
+        RequirementSet set2 =
+            CreateRequirementSet() with
+            {
+                Requirements =
+                [
+                    new Requirement
+                    {
+                        Id =
+                            new StableEntityId("REQ-002"),
+                        Statement =
+                            "Different statement",
+                        SourceInputIds =
+                        [
+                            new StableEntityId("INPUT-001")
+                        ]
+                    }
+                ]
+            };
+
+        Approval approval1 =
+            SpecApprovalBinding.Create(
+                new StableEntityId("APR-001"),
+                set1);
+        Approval approval2 =
+            SpecApprovalBinding.Create(
+                new StableEntityId("APR-002"),
+                set2);
+
+        SpecApprovalLedger ledger =
+            CreateLedger(
+                [
+                    approval1,
+                    approval2
+                ]);
+
+        SpecValidationError error =
+            Assert.Single(
+                SpecApprovalLedgerValidator.Validate(
+                    ledger));
+
+        Assert.Equal(
+            SpecApprovalLedgerValidationErrorCodes.ConflictingApprovalBinding,
+            error.Code);
+        Assert.Equal(
+            "APR-002",
+            error.SourceEntityId);
+        Assert.Equal(
+            "APR-001",
+            error.TargetEntityId);
+    }
+
     private static void AssertNoStatusProperties(
         JsonElement element_)
     {

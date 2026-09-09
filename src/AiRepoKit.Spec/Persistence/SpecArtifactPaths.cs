@@ -75,6 +75,21 @@ public sealed class SpecArtifactPaths
         return artifactPath;
     }
 
+    public string GetApprovalLedgerPath()
+    {
+        string artifactPath =
+            this.GetContainedPath(
+                ".ai",
+                "specs",
+                this.SpecId.Value,
+                "approvals.json");
+
+        this.RejectExistingReparsePoints(
+            artifactPath);
+
+        return artifactPath;
+    }
+
     private string GetContainedPath(
         params string[] segments_)
     {
