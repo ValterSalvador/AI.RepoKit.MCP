@@ -94,7 +94,7 @@ public sealed class HooksCommand
         return CommandResult.Ok(builder.ToString().TrimEnd());
     }
 
-    private static string BuildHook(string preset_)
+    internal static string BuildHook(string preset_)
     {
         string preset = string.IsNullOrWhiteSpace(preset_) ? string.Empty : " " + preset_;
         return string.Join('\n',
@@ -105,12 +105,12 @@ public sealed class HooksCommand
             "  exit 0",
             "fi",
             string.Empty,
-            "if dotnet tool run airepo -- --version >/dev/null 2>&1; then",
+            "if dotnet tool run airepo -- --help 2>/dev/null | grep -F \"airepo update\" >/dev/null 2>&1; then",
             $"  dotnet tool run airepo -- update --repo .{preset} --no-progress",
-            "elif command -v airepo >/dev/null 2>&1; then",
+            "elif command -v airepo >/dev/null 2>&1 && airepo --help 2>/dev/null | grep -F \"airepo update\" >/dev/null 2>&1; then",
             $"  airepo update --repo .{preset} --no-progress",
             "else",
-            "  echo \"airepo was not found. Restore the local dotnet tool or set AIREPO_SKIP_HOOKS=1.\" >&2",
+            "  echo \"Compatible airepo with 'update' support was not found. Restore the local dotnet tool or set AIREPO_SKIP_HOOKS=1.\" >&2",
             "  exit 1",
             "fi",
             string.Empty
