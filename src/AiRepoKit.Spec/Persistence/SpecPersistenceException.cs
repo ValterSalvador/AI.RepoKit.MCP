@@ -30,6 +30,9 @@ public sealed class SpecPersistenceException :
     public const string WriteFailed =
         "write-failed";
 
+    public const string ApprovalPrerequisiteFailed =
+        "approval-prerequisite-failed";
+
     public SpecPersistenceException(
         string errorCode_,
         string message_,
