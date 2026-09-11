@@ -4,55 +4,141 @@ using AiRepoKit.Spec.Persistence;
 
 namespace AiRepoKit.Cli.Commands.Spec;
 
-public sealed record SpecInitOptions(
-    SpecId SpecId,
-    string FromPath,
-    string? RepoPath,
-    SpecWriteMode Mode,
-    bool IsJson);
+public sealed record SpecInitOptions
+{
+    public SpecInitOptions(
+        SpecId specId_,
+        string fromPath_,
+        string? repoPath_,
+        SpecWriteMode mode_,
+        bool isJson_)
+    {
+        this.SpecId = specId_;
+        this.FromPath = fromPath_;
+        this.RepoPath = repoPath_;
+        this.Mode = mode_;
+        this.IsJson = isJson_;
+    }
 
-public sealed record SpecShowOptions(
-    SpecId SpecId,
-    string? RepoPath,
-    string ArtifactSelector,
-    bool IsJson);
+    public SpecId SpecId { get; }
 
-public sealed record SpecRefineOptions(
-    SpecId SpecId,
-    string Artifact,
-    string FromPath,
-    ArtifactRevision? ExpectedRevision,
-    string? RepoPath,
-    SpecWriteMode Mode,
-    bool IsJson);
+    public string FromPath { get; }
 
-public sealed record SpecApproveOptions(
-    SpecId SpecId,
-    string Artifact,
-    ArtifactRevision Revision,
-    string? RepoPath,
-    SpecWriteMode Mode,
-    bool IsJson);
+    public string? RepoPath { get; }
+
+    public SpecWriteMode Mode { get; }
+
+    public bool IsJson { get; }
+}
+
+public sealed record SpecShowOptions
+{
+    public SpecShowOptions(
+        SpecId specId_,
+        string? repoPath_,
+        string artifactSelector_,
+        bool isJson_)
+    {
+        this.SpecId = specId_;
+        this.RepoPath = repoPath_;
+        this.ArtifactSelector = artifactSelector_;
+        this.IsJson = isJson_;
+    }
+
+    public SpecId SpecId { get; }
+
+    public string? RepoPath { get; }
+
+    public string ArtifactSelector { get; }
+
+    public bool IsJson { get; }
+}
+
+public sealed record SpecRefineOptions
+{
+    public SpecRefineOptions(
+        SpecId specId_,
+        string artifact_,
+        string fromPath_,
+        ArtifactRevision? expectedRevision_,
+        string? repoPath_,
+        SpecWriteMode mode_,
+        bool isJson_)
+    {
+        this.SpecId = specId_;
+        this.Artifact = artifact_;
+        this.FromPath = fromPath_;
+        this.ExpectedRevision = expectedRevision_;
+        this.RepoPath = repoPath_;
+        this.Mode = mode_;
+        this.IsJson = isJson_;
+    }
+
+    public SpecId SpecId { get; }
+
+    public string Artifact { get; }
+
+    public string FromPath { get; }
+
+    public ArtifactRevision? ExpectedRevision { get; }
+
+    public string? RepoPath { get; }
+
+    public SpecWriteMode Mode { get; }
+
+    public bool IsJson { get; }
+}
+
+public sealed record SpecApproveOptions
+{
+    public SpecApproveOptions(
+        SpecId specId_,
+        string artifact_,
+        ArtifactRevision revision_,
+        string? repoPath_,
+        SpecWriteMode mode_,
+        bool isJson_)
+    {
+        this.SpecId = specId_;
+        this.Artifact = artifact_;
+        this.Revision = revision_;
+        this.RepoPath = repoPath_;
+        this.Mode = mode_;
+        this.IsJson = isJson_;
+    }
+
+    public SpecId SpecId { get; }
+
+    public string Artifact { get; }
+
+    public ArtifactRevision Revision { get; }
+
+    public string? RepoPath { get; }
+
+    public SpecWriteMode Mode { get; }
+
+    public bool IsJson { get; }
+}
 
 public sealed class SpecCliParsingException : Exception
 {
     public bool IsJson { get; }
 
-    public SpecCliParsingException(string message, bool isJson) : base(message)
+    public SpecCliParsingException(string message_, bool isJson_) : base(message_)
     {
-        this.IsJson = isJson;
+        this.IsJson = isJson_;
     }
 }
 
 public static class SpecCommandParser
 {
-    public static SpecInitOptions ParseInit(IReadOnlyList<string> args)
+    public static SpecInitOptions ParseInit(IReadOnlyList<string> args_)
     {
         RawOptions options = ParseRawOptions(
             "init",
-            args,
-            allowedValuedOptions: ["--spec-id", "--from", "--repo"],
-            allowedFlagOptions: ["--dry-run", "--apply", "--json"]);
+            args_,
+            allowedValuedOptions_: ["--spec-id", "--from", "--repo"],
+            allowedFlagOptions_: ["--dry-run", "--apply", "--json"]);
 
         SpecId specId = ParseSpecId(options);
 
@@ -67,13 +153,13 @@ public static class SpecCommandParser
         return new SpecInitOptions(specId, fromPath, repoPath, mode, options.IsJson);
     }
 
-    public static SpecShowOptions ParseShow(IReadOnlyList<string> args)
+    public static SpecShowOptions ParseShow(IReadOnlyList<string> args_)
     {
         RawOptions options = ParseRawOptions(
             "show",
-            args,
-            allowedValuedOptions: ["--spec-id", "--repo", "--artifact"],
-            allowedFlagOptions: ["--json"]);
+            args_,
+            allowedValuedOptions_: ["--spec-id", "--repo", "--artifact"],
+            allowedFlagOptions_: ["--json"]);
 
         SpecId specId = ParseSpecId(options);
 
@@ -89,13 +175,13 @@ public static class SpecCommandParser
         return new SpecShowOptions(specId, repoPath, artifactSelector, options.IsJson);
     }
 
-    public static SpecRefineOptions ParseRefine(IReadOnlyList<string> args)
+    public static SpecRefineOptions ParseRefine(IReadOnlyList<string> args_)
     {
         RawOptions options = ParseRawOptions(
             "refine",
-            args,
-            allowedValuedOptions: ["--spec-id", "--artifact", "--from", "--expected-revision", "--repo"],
-            allowedFlagOptions: ["--dry-run", "--apply", "--json"]);
+            args_,
+            allowedValuedOptions_: ["--spec-id", "--artifact", "--from", "--expected-revision", "--repo"],
+            allowedFlagOptions_: ["--dry-run", "--apply", "--json"]);
 
         SpecId specId = ParseSpecId(options);
 
@@ -139,13 +225,13 @@ public static class SpecCommandParser
         return new SpecRefineOptions(specId, artifactLower, fromPath, expectedRevision, repoPath, mode, options.IsJson);
     }
 
-    public static SpecApproveOptions ParseApprove(IReadOnlyList<string> args)
+    public static SpecApproveOptions ParseApprove(IReadOnlyList<string> args_)
     {
         RawOptions options = ParseRawOptions(
             "approve",
-            args,
-            allowedValuedOptions: ["--spec-id", "--artifact", "--revision", "--repo"],
-            allowedFlagOptions: ["--dry-run", "--apply", "--json"]);
+            args_,
+            allowedValuedOptions_: ["--spec-id", "--artifact", "--revision", "--repo"],
+            allowedFlagOptions_: ["--dry-run", "--apply", "--json"]);
 
         SpecId specId = ParseSpecId(options);
 
@@ -184,42 +270,42 @@ public static class SpecCommandParser
         return new SpecApproveOptions(specId, artifactLower, requestedRevision, repoPath, mode, options.IsJson);
     }
 
-    private static SpecId ParseSpecId(RawOptions options)
+    private static SpecId ParseSpecId(RawOptions options_)
     {
-        if (!options.Valued.TryGetValue("--spec-id", out string? specIdRaw) || string.IsNullOrWhiteSpace(specIdRaw))
+        if (!options_.Valued.TryGetValue("--spec-id", out string? specIdRaw) || string.IsNullOrWhiteSpace(specIdRaw))
         {
-            throw new SpecCliParsingException("Missing required option: '--spec-id'.", options.IsJson);
+            throw new SpecCliParsingException("Missing required option: '--spec-id'.", options_.IsJson);
         }
 
         if (!SpecId.TryParse(specIdRaw, out SpecId specId))
         {
             throw new SpecCliParsingException(
                 $"Invalid Spec ID '{specIdRaw}'. Spec ID must be 1 through 64 lowercase ASCII letters, digits, or internal hyphens and must not be a Windows device name.",
-                options.IsJson);
+                options_.IsJson);
         }
 
         return specId;
     }
 
     private static RawOptions ParseRawOptions(
-        string subcommand,
-        IReadOnlyList<string> args,
-        HashSet<string> allowedValuedOptions,
-        HashSet<string> allowedFlagOptions)
+        string subcommand_,
+        IReadOnlyList<string> args_,
+        HashSet<string> allowedValuedOptions_,
+        HashSet<string> allowedFlagOptions_)
     {
-        bool isJson = args.Any(arg => string.Equals(arg, "--json", StringComparison.OrdinalIgnoreCase));
+        bool isJson = args_.Any(arg_ => string.Equals(arg_, "--json", StringComparison.OrdinalIgnoreCase));
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, string> valued = new(StringComparer.OrdinalIgnoreCase);
         bool dryRun = false;
         bool apply = false;
         bool json = false;
 
-        for (int i = 0; i < args.Count; i++)
+        for (int i = 0; i < args_.Count; i++)
         {
-            string arg = args[i];
+            string arg = args_[i];
             if (!arg.StartsWith('-'))
             {
-                throw new SpecCliParsingException($"Unexpected argument '{arg}' for 'spec {subcommand}'.", isJson);
+                throw new SpecCliParsingException($"Unexpected argument '{arg}' for 'spec {subcommand_}'.", isJson);
             }
 
             if (!seen.Add(arg))
@@ -229,43 +315,43 @@ public static class SpecCommandParser
 
             if (string.Equals(arg, "--dry-run", StringComparison.OrdinalIgnoreCase))
             {
-                if (!allowedFlagOptions.Contains(arg))
+                if (!allowedFlagOptions_.Contains(arg))
                 {
-                    throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand}'.", isJson);
+                    throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand_}'.", isJson);
                 }
 
                 dryRun = true;
             }
             else if (string.Equals(arg, "--apply", StringComparison.OrdinalIgnoreCase))
             {
-                if (!allowedFlagOptions.Contains(arg))
+                if (!allowedFlagOptions_.Contains(arg))
                 {
-                    throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand}'.", isJson);
+                    throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand_}'.", isJson);
                 }
 
                 apply = true;
             }
             else if (string.Equals(arg, "--json", StringComparison.OrdinalIgnoreCase))
             {
-                if (!allowedFlagOptions.Contains(arg))
+                if (!allowedFlagOptions_.Contains(arg))
                 {
-                    throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand}'.", isJson);
+                    throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand_}'.", isJson);
                 }
 
                 json = true;
             }
-            else if (allowedValuedOptions.Contains(arg))
+            else if (allowedValuedOptions_.Contains(arg))
             {
-                if (i + 1 >= args.Count || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                if (i + 1 >= args_.Count || args_[i + 1].StartsWith("--", StringComparison.Ordinal))
                 {
                     throw new SpecCliParsingException($"Missing value for option '{arg}'.", isJson);
                 }
 
-                valued[arg] = args[++i];
+                valued[arg] = args_[++i];
             }
             else
             {
-                throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand}'.", isJson);
+                throw new SpecCliParsingException($"Unknown option '{arg}' for 'spec {subcommand_}'.", isJson);
             }
         }
 
@@ -277,9 +363,26 @@ public static class SpecCommandParser
         return new RawOptions(valued, dryRun, apply, json);
     }
 
-    private sealed record RawOptions(
-        Dictionary<string, string> Valued,
-        bool DryRun,
-        bool Apply,
-        bool IsJson);
+    private sealed record RawOptions
+    {
+        public RawOptions(
+            Dictionary<string, string> valued_,
+            bool dryRun_,
+            bool apply_,
+            bool isJson_)
+        {
+            this.Valued = valued_;
+            this.DryRun = dryRun_;
+            this.Apply = apply_;
+            this.IsJson = isJson_;
+        }
+
+        public Dictionary<string, string> Valued { get; }
+
+        public bool DryRun { get; }
+
+        public bool Apply { get; }
+
+        public bool IsJson { get; }
+    }
 }

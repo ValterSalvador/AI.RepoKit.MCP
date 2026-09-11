@@ -20,7 +20,7 @@ public sealed record SpecMutationResultDto
 
     public required ArtifactRevision TargetRevision { get; init; }
 
-    public ArtifactRevision CurrentRevision => this.TargetRevision;
+    public ArtifactRevision? CurrentRevision { get; init; }
 
     public required string SemanticDigest { get; init; }
 }

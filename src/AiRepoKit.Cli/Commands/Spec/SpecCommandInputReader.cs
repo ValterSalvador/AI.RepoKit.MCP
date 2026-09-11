@@ -7,20 +7,20 @@ namespace AiRepoKit.Cli.Commands.Spec;
 
 public static class SpecCommandInputReader
 {
-    private static readonly UTF8Encoding StrictUtf8 =
+    private static readonly UTF8Encoding _strictUtf8 =
         new(
             encoderShouldEmitUTF8Identifier: false,
             throwOnInvalidBytes: true);
 
-    public static T ReadCandidate<T>(string filePath, SpecArtifactKind artifactKind)
+    public static T ReadCandidate<T>(string filePath_, SpecArtifactKind artifactKind_)
     {
-        string fullPath = Path.GetFullPath(filePath);
+        string fullPath = Path.GetFullPath(filePath_);
         if (!File.Exists(fullPath))
         {
             throw new SpecPersistenceException(
                 SpecPersistenceException.ReadFailed,
-                $"Candidate file '{filePath}' does not exist.",
-                artifactKind);
+                $"Candidate file '{filePath_}' does not exist.",
+                artifactKind_);
         }
 
         FileInfo fileInfo = new(fullPath);
@@ -28,8 +28,8 @@ public static class SpecCommandInputReader
         {
             throw new SpecPersistenceException(
                 SpecPersistenceException.ArtifactTooLarge,
-                $"Candidate artifact '{filePath}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.",
-                artifactKind);
+                $"Candidate artifact '{filePath_}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.",
+                artifactKind_);
         }
 
         byte[] bytes;
@@ -47,8 +47,8 @@ public static class SpecCommandInputReader
             {
                 throw new SpecPersistenceException(
                     SpecPersistenceException.ArtifactTooLarge,
-                    $"Candidate artifact '{filePath}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.",
-                    artifactKind);
+                    $"Candidate artifact '{filePath_}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.",
+                    artifactKind_);
             }
 
             byte[] buffer = new byte[SpecWorkspace.MaximumArtifactSizeBytes + 1];
@@ -68,8 +68,8 @@ public static class SpecCommandInputReader
             {
                 throw new SpecPersistenceException(
                     SpecPersistenceException.ArtifactTooLarge,
-                    $"Candidate artifact '{filePath}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.",
-                    artifactKind);
+                    $"Candidate artifact '{filePath_}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.",
+                    artifactKind_);
             }
 
             bytes = buffer[..totalRead];
@@ -86,8 +86,8 @@ public static class SpecCommandInputReader
         {
             throw new SpecPersistenceException(
                 SpecPersistenceException.ReadFailed,
-                $"Candidate artifact '{filePath}' could not be read.",
-                artifactKind,
+                $"Candidate artifact '{filePath_}' could not be read.",
+                artifactKind_,
                 innerException_: exception);
         }
 
@@ -95,14 +95,14 @@ public static class SpecCommandInputReader
         try
         {
             int offset = HasUtf8Bom(bytes) ? 3 : 0;
-            json = StrictUtf8.GetString(bytes, offset, bytes.Length - offset);
+            json = _strictUtf8.GetString(bytes, offset, bytes.Length - offset);
         }
         catch (DecoderFallbackException exception)
         {
             throw new SpecPersistenceException(
                 SpecPersistenceException.InvalidUtf8,
-                $"Candidate artifact '{filePath}' is not valid UTF-8.",
-                artifactKind,
+                $"Candidate artifact '{filePath_}' is not valid UTF-8.",
+                artifactKind_,
                 innerException_: exception);
         }
 
@@ -117,17 +117,17 @@ public static class SpecCommandInputReader
         {
             throw new SpecPersistenceException(
                 SpecPersistenceException.InvalidJson,
-                $"Candidate artifact '{filePath}' is not valid spec JSON.",
-                artifactKind,
+                $"Candidate artifact '{filePath_}' is not valid spec JSON.",
+                artifactKind_,
                 innerException_: exception);
         }
     }
 
-    private static bool HasUtf8Bom(byte[] bytes)
+    private static bool HasUtf8Bom(byte[] bytes_)
     {
-        return bytes.Length >= 3 &&
-               bytes[0] == 0xEF &&
-               bytes[1] == 0xBB &&
-               bytes[2] == 0xBF;
+        return bytes_.Length >= 3 &&
+               bytes_[0] == 0xEF &&
+               bytes_[1] == 0xBB &&
+               bytes_[2] == 0xBF;
     }
 }

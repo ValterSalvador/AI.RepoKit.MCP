@@ -212,6 +212,8 @@ public sealed class SpecCommandLifecycleTests
         Assert.True(root.GetProperty("changed").GetBoolean());
         Assert.False(root.GetProperty("applied").GetBoolean());
         Assert.Equal(1, root.GetProperty("targetRevision").GetInt32());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("currentRevision").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("previousRevision").ValueKind);
     }
 
     [Fact]
@@ -916,6 +918,245 @@ public sealed class SpecCommandLifecycleTests
         }
     }
 
+    [Fact]
+    public void Init_DryRun_Json_CurrentRevisionIsNull_TargetRevisionIsOne()
+    {
+        using TestRepo repo = new();
+        string candidatePath = repo.WriteCandidate("req.json", CreateRequirementSet());
+
+        CommandResult result = new SpecCommand().Execute([
+            "init",
+            "--spec-id", "spec-init-dry-json",
+            "--from", candidatePath,
+            "--repo", repo.Root,
+            "--dry-run",
+            "--json"
+        ]);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.ExitCode);
+
+        SpecMutationResultDto dto = SpecJsonSerializer.Deserialize<SpecMutationResultDto>(result.Markdown);
+        Assert.Null(dto.PreviousRevision);
+        Assert.Null(dto.CurrentRevision);
+        Assert.Equal(1, dto.TargetRevision.Value);
+        Assert.True(dto.Changed);
+        Assert.False(dto.Applied);
+
+        using JsonDocument doc = JsonDocument.Parse(result.Markdown);
+        JsonElement root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("previousRevision").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("currentRevision").ValueKind);
+        Assert.Equal(1, root.GetProperty("targetRevision").GetInt32());
+    }
+
+    [Fact]
+    public void Init_Apply_Json_CurrentRevisionIsOne_TargetRevisionIsOne()
+    {
+        using TestRepo repo = new();
+        string candidatePath = repo.WriteCandidate("req.json", CreateRequirementSet());
+
+        CommandResult result = new SpecCommand().Execute([
+            "init",
+            "--spec-id", "spec-init-apply-json",
+            "--from", candidatePath,
+            "--repo", repo.Root,
+            "--apply",
+            "--json"
+        ]);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.ExitCode);
+
+        SpecMutationResultDto dto = SpecJsonSerializer.Deserialize<SpecMutationResultDto>(result.Markdown);
+        Assert.Null(dto.PreviousRevision);
+        Assert.NotNull(dto.CurrentRevision);
+        Assert.Equal(1, dto.CurrentRevision.Value.Value);
+        Assert.Equal(1, dto.TargetRevision.Value);
+        Assert.True(dto.Changed);
+        Assert.True(dto.Applied);
+
+        using JsonDocument doc = JsonDocument.Parse(result.Markdown);
+        JsonElement root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("previousRevision").ValueKind);
+        Assert.Equal(1, root.GetProperty("currentRevision").GetInt32());
+        Assert.Equal(1, root.GetProperty("targetRevision").GetInt32());
+    }
+
+    [Fact]
+    public void Refine_SemanticChange_DryRun_Json_CurrentRemainsPersisted_TargetIsIncremented()
+    {
+        using TestRepo repo = new();
+        string candidatePath1 = repo.WriteCandidate("req1.json", CreateRequirementSet());
+
+        CommandResult initResult = new SpecCommand().Execute([
+            "init",
+            "--spec-id", "spec-refine-dry-json",
+            "--from", candidatePath1,
+            "--repo", repo.Root,
+            "--apply"
+        ]);
+        Assert.True(initResult.Success);
+
+        string candidatePath2 = repo.WriteCandidate("req2.json", CreateRequirementSet(requirementStatement_: "Semantic change statement"));
+
+        CommandResult refineResult = new SpecCommand().Execute([
+            "refine",
+            "--spec-id", "spec-refine-dry-json",
+            "--artifact", "requirements",
+            "--from", candidatePath2,
+            "--expected-revision", "1",
+            "--repo", repo.Root,
+            "--dry-run",
+            "--json"
+        ]);
+
+        Assert.True(refineResult.Success);
+        Assert.Equal(0, refineResult.ExitCode);
+
+        SpecMutationResultDto dto = SpecJsonSerializer.Deserialize<SpecMutationResultDto>(refineResult.Markdown);
+        Assert.NotNull(dto.PreviousRevision);
+        Assert.Equal(1, dto.PreviousRevision.Value.Value);
+        Assert.NotNull(dto.CurrentRevision);
+        Assert.Equal(1, dto.CurrentRevision.Value.Value);
+        Assert.Equal(2, dto.TargetRevision.Value);
+        Assert.True(dto.Changed);
+        Assert.False(dto.Applied);
+
+        using JsonDocument doc = JsonDocument.Parse(refineResult.Markdown);
+        JsonElement root = doc.RootElement;
+        Assert.Equal(1, root.GetProperty("previousRevision").GetInt32());
+        Assert.Equal(1, root.GetProperty("currentRevision").GetInt32());
+        Assert.Equal(2, root.GetProperty("targetRevision").GetInt32());
+    }
+
+    [Fact]
+    public void Refine_SemanticChange_Apply_Json_CurrentBecomesTarget()
+    {
+        using TestRepo repo = new();
+        string candidatePath1 = repo.WriteCandidate("req1.json", CreateRequirementSet());
+
+        CommandResult initResult = new SpecCommand().Execute([
+            "init",
+            "--spec-id", "spec-refine-apply-json",
+            "--from", candidatePath1,
+            "--repo", repo.Root,
+            "--apply"
+        ]);
+        Assert.True(initResult.Success);
+
+        string candidatePath2 = repo.WriteCandidate("req2.json", CreateRequirementSet(requirementStatement_: "Semantic change statement"));
+
+        CommandResult refineResult = new SpecCommand().Execute([
+            "refine",
+            "--spec-id", "spec-refine-apply-json",
+            "--artifact", "requirements",
+            "--from", candidatePath2,
+            "--expected-revision", "1",
+            "--repo", repo.Root,
+            "--apply",
+            "--json"
+        ]);
+
+        Assert.True(refineResult.Success);
+        Assert.Equal(0, refineResult.ExitCode);
+
+        SpecMutationResultDto dto = SpecJsonSerializer.Deserialize<SpecMutationResultDto>(refineResult.Markdown);
+        Assert.NotNull(dto.PreviousRevision);
+        Assert.Equal(1, dto.PreviousRevision.Value.Value);
+        Assert.NotNull(dto.CurrentRevision);
+        Assert.Equal(2, dto.CurrentRevision.Value.Value);
+        Assert.Equal(2, dto.TargetRevision.Value);
+        Assert.True(dto.Changed);
+        Assert.True(dto.Applied);
+
+        using JsonDocument doc = JsonDocument.Parse(refineResult.Markdown);
+        JsonElement root = doc.RootElement;
+        Assert.Equal(1, root.GetProperty("previousRevision").GetInt32());
+        Assert.Equal(2, root.GetProperty("currentRevision").GetInt32());
+        Assert.Equal(2, root.GetProperty("targetRevision").GetInt32());
+    }
+
+    [Fact]
+    public void Refine_SemanticNoOp_Json_CurrentAndTargetRemainConsistentWithPersistedRevision()
+    {
+        using TestRepo repo = new();
+        string candidatePath = repo.WriteCandidate("req.json", CreateRequirementSet());
+
+        CommandResult initResult = new SpecCommand().Execute([
+            "init",
+            "--spec-id", "spec-refine-noop-json",
+            "--from", candidatePath,
+            "--repo", repo.Root,
+            "--apply"
+        ]);
+        Assert.True(initResult.Success);
+
+        // Dry-run semantic no-op
+        CommandResult dryRunResult = new SpecCommand().Execute([
+            "refine",
+            "--spec-id", "spec-refine-noop-json",
+            "--artifact", "requirements",
+            "--from", candidatePath,
+            "--expected-revision", "1",
+            "--repo", repo.Root,
+            "--dry-run",
+            "--json"
+        ]);
+
+        Assert.True(dryRunResult.Success);
+        Assert.Equal(0, dryRunResult.ExitCode);
+
+        SpecMutationResultDto dryRunDto = SpecJsonSerializer.Deserialize<SpecMutationResultDto>(dryRunResult.Markdown);
+        Assert.NotNull(dryRunDto.PreviousRevision);
+        Assert.Equal(1, dryRunDto.PreviousRevision.Value.Value);
+        Assert.NotNull(dryRunDto.CurrentRevision);
+        Assert.Equal(1, dryRunDto.CurrentRevision.Value.Value);
+        Assert.Equal(1, dryRunDto.TargetRevision.Value);
+        Assert.False(dryRunDto.Changed);
+        Assert.False(dryRunDto.Applied);
+
+        using (JsonDocument doc = JsonDocument.Parse(dryRunResult.Markdown))
+        {
+            JsonElement root = doc.RootElement;
+            Assert.Equal(1, root.GetProperty("previousRevision").GetInt32());
+            Assert.Equal(1, root.GetProperty("currentRevision").GetInt32());
+            Assert.Equal(1, root.GetProperty("targetRevision").GetInt32());
+        }
+
+        // Apply semantic no-op
+        CommandResult applyResult = new SpecCommand().Execute([
+            "refine",
+            "--spec-id", "spec-refine-noop-json",
+            "--artifact", "requirements",
+            "--from", candidatePath,
+            "--expected-revision", "1",
+            "--repo", repo.Root,
+            "--apply",
+            "--json"
+        ]);
+
+        Assert.True(applyResult.Success);
+        Assert.Equal(0, applyResult.ExitCode);
+
+        SpecMutationResultDto applyDto = SpecJsonSerializer.Deserialize<SpecMutationResultDto>(applyResult.Markdown);
+        Assert.NotNull(applyDto.PreviousRevision);
+        Assert.Equal(1, applyDto.PreviousRevision.Value.Value);
+        Assert.NotNull(applyDto.CurrentRevision);
+        Assert.Equal(1, applyDto.CurrentRevision.Value.Value);
+        Assert.Equal(1, applyDto.TargetRevision.Value);
+        Assert.False(applyDto.Changed);
+        Assert.False(applyDto.Applied);
+
+        using (JsonDocument doc = JsonDocument.Parse(applyResult.Markdown))
+        {
+            JsonElement root = doc.RootElement;
+            Assert.Equal(1, root.GetProperty("previousRevision").GetInt32());
+            Assert.Equal(1, root.GetProperty("currentRevision").GetInt32());
+            Assert.Equal(1, root.GetProperty("targetRevision").GetInt32());
+        }
+    }
+
     private static RequirementSet CreateRequirementSet(
         int revision_ = 1,
         string inputStatement_ = "Original requirement",
@@ -995,10 +1236,10 @@ public sealed class SpecCommandLifecycleTests
             Directory.CreateDirectory(Path.Combine(this.Root, ".git"));
         }
 
-        public string WriteCandidate<T>(string fileName, T obj)
+        public string WriteCandidate<T>(string fileName_, T obj_)
         {
-            string path = Path.Combine(this.Root, fileName);
-            File.WriteAllText(path, SpecJsonSerializer.Serialize(obj));
+            string path = Path.Combine(this.Root, fileName_);
+            File.WriteAllText(path, SpecJsonSerializer.Serialize(obj_));
             return path;
         }
 

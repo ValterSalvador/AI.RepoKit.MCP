@@ -47,7 +47,7 @@ public sealed class SpecCommand
     {
         bool isJson = arguments_.Any(arg_ => string.Equals(arg_, "--json", StringComparison.OrdinalIgnoreCase));
         string error = $"Unsupported Spec subcommand: `{subcommand_}`.";
-        return SpecCommandRenderer.RenderError(error, isJson, includeUsage: true);
+        return SpecCommandRenderer.RenderError(error, isJson, includeUsage_: true);
     }
 
     private CommandResult ExecuteInit(IReadOnlyList<string> args_)
