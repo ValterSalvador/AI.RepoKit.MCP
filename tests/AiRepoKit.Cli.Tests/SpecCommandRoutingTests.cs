@@ -15,8 +15,10 @@ public sealed class SpecCommandRoutingTests
         Assert.True(result.Success);
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("airepo spec [help]", result.Markdown);
-        Assert.Contains("routing only", result.Markdown, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("No Spec lifecycle subcommand is implemented", result.Markdown);
+        Assert.Contains("airepo spec init", result.Markdown);
+        Assert.Contains("airepo spec show", result.Markdown);
+        Assert.Contains("airepo spec refine", result.Markdown);
+        Assert.Contains("airepo spec approve", result.Markdown);
     }
 
     [Theory]
@@ -33,6 +35,7 @@ public sealed class SpecCommandRoutingTests
         Assert.True(result.Success);
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("airepo spec [help]", result.Markdown);
+        Assert.Contains("airepo spec init", result.Markdown);
     }
 
     [Fact]
