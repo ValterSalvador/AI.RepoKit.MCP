@@ -38,6 +38,7 @@ public sealed class SpecCommand
             "init" => this.ExecuteInit(arguments_.Skip(1).ToArray()),
             "show" => this.ExecuteShow(arguments_.Skip(1).ToArray()),
             "refine" => this.ExecuteRefine(arguments_.Skip(1).ToArray()),
+            "plan" => this.ExecutePlan(arguments_.Skip(1).ToArray()),
             "approve" => this.ExecuteApprove(arguments_.Skip(1).ToArray()),
             _ => this.HandleUnknownSubcommand(subcommand, arguments_)
         };
@@ -255,6 +256,79 @@ public sealed class SpecCommand
         }
     }
 
+    private CommandResult ExecutePlan(IReadOnlyList<string> args_)
+    {
+        SpecPlanOptions options;
+        try
+        {
+            options =
+                SpecCommandParser.ParsePlan(
+                    args_);
+        }
+        catch (SpecCliParsingException exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                exception.Message,
+                exception.IsJson);
+        }
+
+        string repoRoot;
+        try
+        {
+            repoRoot =
+                ResolveRepo(
+                    options.RepoPath);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                "Repository path resolution failed: " +
+                exception.Message,
+                options.IsJson);
+        }
+
+        try
+        {
+            ImplementationPlan candidate =
+                SpecCommandInputReader.ReadCandidate<ImplementationPlan>(
+                    options.FromPath,
+                    SpecArtifactKind.ImplementationPlan);
+
+            SpecLifecycleService service =
+                new(
+                    repoRoot,
+                    options.SpecId);
+
+            SpecStoreResult result =
+                service.RefineImplementationPlan(
+                    candidate,
+                    new SpecStoreOptions
+                    {
+                        Mode =
+                            options.Mode,
+                        ExpectedCurrentRevision =
+                            options.ExpectedRevision
+                    });
+
+            return SpecCommandRenderer.RenderPlanResult(
+                options.SpecId,
+                result,
+                options.IsJson);
+        }
+        catch (SpecPersistenceException exception)
+        {
+            return SpecCommandRenderer.RenderPersistenceError(
+                exception,
+                options.IsJson);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                "Spec plan failed: " +
+                exception.Message,
+                options.IsJson);
+        }
+    }
     private CommandResult ExecuteApprove(IReadOnlyList<string> args_)
     {
         SpecApproveOptions options;

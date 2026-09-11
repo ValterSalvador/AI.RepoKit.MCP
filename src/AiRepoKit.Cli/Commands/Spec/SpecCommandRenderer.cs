@@ -22,6 +22,7 @@ public static class SpecCommandRenderer
         airepo spec init --spec-id <spec-id> --from <requirements.json> [--repo <path>] [--dry-run | --apply] [--json]
         airepo spec show --spec-id <spec-id> [--repo <path>] [--artifact requirements|work-spec|approvals|all] [--json]
         airepo spec refine --spec-id <spec-id> --artifact requirements|work-spec --from <candidate.json> [--expected-revision <n>] [--repo <path>] [--dry-run | --apply] [--json]
+        airepo spec plan --spec-id <spec-id> --from <candidate.json> [--expected-revision <n>] [--repo <path>] [--dry-run | --apply] [--json]
         airepo spec approve --spec-id <spec-id> --artifact requirements|work-spec --revision <n> [--repo <path>] [--dry-run | --apply] [--json]
         ```
 
@@ -30,6 +31,7 @@ public static class SpecCommandRenderer
         - `init`: Initializes a new RequirementSet artifact at revision 1 (dry-run by default).
         - `show`: Displays canonical lifecycle state and derived approval statuses (read-only).
         - `refine`: Refines an existing RequirementSet or initial/existing WorkSpec.
+        - `plan`: Creates or refines the canonical ImplementationPlan (dry-run by default).
         - `approve`: Records an approval for a RequirementSet or WorkSpec in the approval ledger.
         """;
     }
@@ -155,6 +157,76 @@ public static class SpecCommandRenderer
         return CommandResult.Ok(builder.ToString().TrimEnd());
     }
 
+    public static CommandResult RenderPlanResult(
+        SpecId specId_,
+        SpecStoreResult result_,
+        bool isJson_)
+    {
+        if (isJson_)
+        {
+            SpecMutationResultDto dto =
+                new()
+                {
+                    SpecId =
+                        specId_.Value,
+                    ArtifactKind =
+                        result_.ArtifactKind,
+                    Mode =
+                        result_.Mode,
+                    Changed =
+                        result_.Changed,
+                    Applied =
+                        result_.Applied,
+                    PreviousRevision =
+                        result_.PreviousRevision,
+                    TargetRevision =
+                        result_.TargetRevision,
+                    CurrentRevision =
+                        result_.Applied
+                            ? result_.TargetRevision
+                            : result_.PreviousRevision,
+                    SemanticDigest =
+                        result_.SemanticDigest
+                };
+
+            return CommandResult.Ok(
+                SpecJsonSerializer.Serialize(
+                    dto));
+        }
+
+        StringBuilder builder =
+            new();
+
+        builder.AppendLine(
+            $"# Spec Plan: `{specId_.Value}`");
+        builder.AppendLine();
+        builder.AppendLine(
+            $"- Spec ID: `{specId_.Value}`");
+        builder.AppendLine(
+            $"- Artifact: `{result_.ArtifactKind}`");
+        builder.AppendLine(
+            $"- Mode: `{result_.Mode}`");
+        builder.AppendLine(
+            $"- Changed: `{result_.Changed.ToString().ToLowerInvariant()}`");
+        builder.AppendLine(
+            $"- Applied: `{result_.Applied.ToString().ToLowerInvariant()}`");
+
+        if (result_.PreviousRevision is not null)
+        {
+            builder.AppendLine(
+                $"- Previous Revision: `{result_.PreviousRevision.Value.Value.ToString(CultureInfo.InvariantCulture)}`");
+        }
+
+        builder.AppendLine(
+            $"- Target Revision: `{result_.TargetRevision.Value.ToString(CultureInfo.InvariantCulture)}`");
+        builder.AppendLine(
+            $"- Semantic Digest: `{result_.SemanticDigest}`");
+
+        return CommandResult.Ok(
+            builder
+                .ToString()
+                .TrimEnd());
+    }
     public static CommandResult RenderApproveResult(
         SpecId specId_,
         SpecApprovalLedgerStoreResult result_,

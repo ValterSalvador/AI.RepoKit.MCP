@@ -18,6 +18,7 @@ public sealed class SpecCommandRoutingTests
         Assert.Contains("airepo spec init", result.Markdown);
         Assert.Contains("airepo spec show", result.Markdown);
         Assert.Contains("airepo spec refine", result.Markdown);
+        Assert.Contains("airepo spec plan", result.Markdown);
         Assert.Contains("airepo spec approve", result.Markdown);
     }
 
@@ -61,13 +62,24 @@ public sealed class SpecCommandRoutingTests
     }
 
     [Fact]
-    public void Execute_Plan_IsRejectedAsSpecSubcommand()
+    public void Execute_Plan_IsRecognizedAndRequiresOptions()
     {
-        CommandResult result = new SpecCommand().Execute(["plan"]);
+        CommandResult result =
+            new SpecCommand().Execute(
+                ["plan"]);
 
-        Assert.False(result.Success);
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("Unsupported Spec subcommand: `plan`", result.Markdown);
+        Assert.False(
+            result.Success);
+        Assert.Equal(
+            1,
+            result.ExitCode);
+        Assert.Contains(
+            "Missing required option: '--spec-id'.",
+            result.Markdown);
+        Assert.DoesNotContain(
+            "Unsupported Spec subcommand",
+            result.Markdown,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -81,13 +93,24 @@ public sealed class SpecCommandRoutingTests
     }
 
     [Fact]
-    public void ProgramRouteSpec_PlanDoesNotRouteToTopLevelPlan()
+    public void ProgramRouteSpec_PlanStaysInsideSpecCommand()
     {
-        CommandResult result = Program.RouteSpec(["spec", "plan"]);
+        CommandResult result =
+            Program.RouteSpec(
+                ["spec", "plan"]);
 
-        Assert.False(result.Success);
-        Assert.Equal(1, result.ExitCode);
-        Assert.Contains("Unsupported Spec subcommand: `plan`", result.Markdown);
+        Assert.False(
+            result.Success);
+        Assert.Equal(
+            1,
+            result.ExitCode);
+        Assert.Contains(
+            "Missing required option: '--spec-id'.",
+            result.Markdown);
+        Assert.DoesNotContain(
+            "Unsupported Spec subcommand",
+            result.Markdown,
+            StringComparison.Ordinal);
     }
 
     [Fact]

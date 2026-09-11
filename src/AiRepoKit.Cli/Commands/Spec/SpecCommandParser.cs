@@ -89,6 +89,60 @@ public sealed record SpecRefineOptions
     public bool IsJson { get; }
 }
 
+public sealed record SpecPlanOptions
+{
+    public SpecPlanOptions(
+        SpecId specId_,
+        string fromPath_,
+        ArtifactRevision? expectedRevision_,
+        string? repoPath_,
+        SpecWriteMode mode_,
+        bool isJson_)
+    {
+        this.SpecId =
+            specId_;
+        this.FromPath =
+            fromPath_;
+        this.ExpectedRevision =
+            expectedRevision_;
+        this.RepoPath =
+            repoPath_;
+        this.Mode =
+            mode_;
+        this.IsJson =
+            isJson_;
+    }
+
+    public SpecId SpecId
+    {
+        get;
+    }
+
+    public string FromPath
+    {
+        get;
+    }
+
+    public ArtifactRevision? ExpectedRevision
+    {
+        get;
+    }
+
+    public string? RepoPath
+    {
+        get;
+    }
+
+    public SpecWriteMode Mode
+    {
+        get;
+    }
+
+    public bool IsJson
+    {
+        get;
+    }
+}
 public sealed record SpecApproveOptions
 {
     public SpecApproveOptions(
@@ -225,6 +279,86 @@ public static class SpecCommandParser
         return new SpecRefineOptions(specId, artifactLower, fromPath, expectedRevision, repoPath, mode, options.IsJson);
     }
 
+    public static SpecPlanOptions ParsePlan(
+        IReadOnlyList<string> args_)
+    {
+        RawOptions options =
+            ParseRawOptions(
+                "plan",
+                args_,
+                allowedValuedOptions_:
+                [
+                    "--spec-id",
+                    "--from",
+                    "--expected-revision",
+                    "--repo"
+                ],
+                allowedFlagOptions_:
+                [
+                    "--dry-run",
+                    "--apply",
+                    "--json"
+                ]);
+
+        SpecId specId =
+            ParseSpecId(
+                options);
+
+        if (
+            !options.Valued.TryGetValue(
+                "--from",
+                out string? fromPath) ||
+            string.IsNullOrWhiteSpace(
+                fromPath))
+        {
+            throw new SpecCliParsingException(
+                "Missing required option: '--from'.",
+                options.IsJson);
+        }
+
+        ArtifactRevision? expectedRevision =
+            null;
+
+        if (
+            options.Valued.TryGetValue(
+                "--expected-revision",
+                out string? expectedRevisionRaw))
+        {
+            if (
+                !int.TryParse(
+                    expectedRevisionRaw,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out int revision) ||
+                revision < 1)
+            {
+                throw new SpecCliParsingException(
+                    "Expected revision must be a positive integer.",
+                    options.IsJson);
+            }
+
+            expectedRevision =
+                new ArtifactRevision(
+                    revision);
+        }
+
+        SpecWriteMode mode =
+            options.Apply
+                ? SpecWriteMode.Apply
+                : SpecWriteMode.DryRun;
+
+        string? repoPath =
+            options.Valued.GetValueOrDefault(
+                "--repo");
+
+        return new SpecPlanOptions(
+            specId,
+            fromPath,
+            expectedRevision,
+            repoPath,
+            mode,
+            options.IsJson);
+    }
     public static SpecApproveOptions ParseApprove(IReadOnlyList<string> args_)
     {
         RawOptions options = ParseRawOptions(

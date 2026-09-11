@@ -672,9 +672,6 @@ public sealed class SpecCommandLifecycleTests
         Assert.False(approvePlanShort.Success);
         Assert.Contains("Plan approval is not supported", approvePlanShort.Markdown);
 
-        CommandResult specPlan = new SpecCommand().Execute(["plan"]);
-        Assert.False(specPlan.Success);
-        Assert.Contains("Unsupported Spec subcommand: `plan`", specPlan.Markdown);
 
         BootstrapOptions topLevelPlan = Program.Parse(["plan"]);
         Assert.Equal("plan", topLevelPlan.Command);
@@ -1157,6 +1154,1141 @@ public sealed class SpecCommandLifecycleTests
         }
     }
 
+    [Fact]
+    public void Plan_InitialCreation_DryRun()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-init-dry";
+
+        PreparePlanPrerequisites(
+            repo,
+            specId);
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-init-dry.json",
+                CreateImplementationPlan());
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            result.Success,
+            result.Markdown);
+        Assert.Equal(
+            0,
+            result.ExitCode);
+        Assert.Contains(
+            "# Spec Plan: `spec-plan-init-dry`",
+            result.Markdown);
+        Assert.Contains(
+            "Artifact: `ImplementationPlan`",
+            result.Markdown);
+        Assert.Contains(
+            "Mode: `DryRun`",
+            result.Markdown);
+        Assert.Contains(
+            "Changed: `true`",
+            result.Markdown);
+        Assert.Contains(
+            "Applied: `false`",
+            result.Markdown);
+        Assert.Contains(
+            "Target Revision: `1`",
+            result.Markdown);
+
+        Assert.False(
+            File.Exists(
+                GetPlanPath(
+                    repo,
+                    specId)));
+    }
+
+    [Fact]
+    public void Plan_InitialCreation_Apply()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-init-apply";
+
+        PreparePlanPrerequisites(
+            repo,
+            specId);
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-init-apply.json",
+                CreateImplementationPlan());
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            result.Success,
+            result.Markdown);
+        Assert.Equal(
+            0,
+            result.ExitCode);
+        Assert.Contains(
+            "Mode: `Apply`",
+            result.Markdown);
+        Assert.Contains(
+            "Changed: `true`",
+            result.Markdown);
+        Assert.Contains(
+            "Applied: `true`",
+            result.Markdown);
+        Assert.Contains(
+            "Target Revision: `1`",
+            result.Markdown);
+
+        string canonicalPath =
+            GetPlanPath(
+                repo,
+                specId);
+
+        Assert.True(
+            File.Exists(
+                canonicalPath));
+
+        ImplementationPlan canonical =
+            SpecJsonSerializer.Deserialize<ImplementationPlan>(
+                File.ReadAllText(
+                    canonicalPath));
+
+        Assert.Equal(
+            1,
+            canonical.Revision.Value);
+    }
+
+    [Fact]
+    public void Plan_InitialCreation_WithExpectedRevision_Rejected()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-init-expected";
+
+        PreparePlanPrerequisites(
+            repo,
+            specId);
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-init-expected.json",
+                CreateImplementationPlan());
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--expected-revision", "1",
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            result.Success);
+        Assert.Equal(
+            1,
+            result.ExitCode);
+        Assert.Contains(
+            "revision-conflict",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "must not already exist",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Plan_Refine_DryRun_WithMatchingRevision()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-refine-dry";
+
+        ApplyInitialPlan(
+            repo,
+            specId,
+            "Initial plan statement");
+
+        string changedPath =
+            repo.WriteCandidate(
+                "plan-refine-dry.json",
+                CreateImplementationPlan(
+                    stepStatement_:
+                        "Changed plan statement"));
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", changedPath,
+                "--expected-revision", "1",
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            result.Success,
+            result.Markdown);
+        Assert.Contains(
+            "Mode: `DryRun`",
+            result.Markdown);
+        Assert.Contains(
+            "Previous Revision: `1`",
+            result.Markdown);
+        Assert.Contains(
+            "Target Revision: `2`",
+            result.Markdown);
+        Assert.Contains(
+            "Changed: `true`",
+            result.Markdown);
+        Assert.Contains(
+            "Applied: `false`",
+            result.Markdown);
+
+        ImplementationPlan canonical =
+            SpecJsonSerializer.Deserialize<ImplementationPlan>(
+                File.ReadAllText(
+                    GetPlanPath(
+                        repo,
+                        specId)));
+
+        Assert.Equal(
+            1,
+            canonical.Revision.Value);
+        Assert.Equal(
+            "Initial plan statement",
+            canonical.Steps[0].Statement);
+    }
+
+    [Fact]
+    public void Plan_Refine_Apply_WithMatchingRevision()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-refine-apply";
+
+        ApplyInitialPlan(
+            repo,
+            specId,
+            "Initial plan statement");
+
+        string changedPath =
+            repo.WriteCandidate(
+                "plan-refine-apply.json",
+                CreateImplementationPlan(
+                    stepStatement_:
+                        "Changed plan statement"));
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", changedPath,
+                "--expected-revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            result.Success,
+            result.Markdown);
+        Assert.Contains(
+            "Previous Revision: `1`",
+            result.Markdown);
+        Assert.Contains(
+            "Target Revision: `2`",
+            result.Markdown);
+        Assert.Contains(
+            "Applied: `true`",
+            result.Markdown);
+
+        ImplementationPlan canonical =
+            SpecJsonSerializer.Deserialize<ImplementationPlan>(
+                File.ReadAllText(
+                    GetPlanPath(
+                        repo,
+                        specId)));
+
+        Assert.Equal(
+            2,
+            canonical.Revision.Value);
+        Assert.Equal(
+            "Changed plan statement",
+            canonical.Steps[0].Statement);
+    }
+
+    [Fact]
+    public void Plan_Refine_WithoutExpectedRevision_Rejected()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-refine-no-expected";
+
+        ApplyInitialPlan(
+            repo,
+            specId);
+
+        string changedPath =
+            repo.WriteCandidate(
+                "plan-no-expected.json",
+                CreateImplementationPlan(
+                    stepStatement_:
+                        "Changed"));
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", changedPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            result.Success);
+        Assert.Contains(
+            "revision-conflict",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "requires the expected current revision",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Plan_Refine_WrongExpectedRevision_Rejected()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-refine-wrong";
+
+        ApplyInitialPlan(
+            repo,
+            specId);
+
+        string changedPath =
+            repo.WriteCandidate(
+                "plan-wrong-expected.json",
+                CreateImplementationPlan(
+                    stepStatement_:
+                        "Changed"));
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", changedPath,
+                "--expected-revision", "2",
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            result.Success);
+        Assert.Contains(
+            "revision-conflict",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "does not match current revision '1'",
+            result.Markdown,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Plan_SemanticNoOp()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-noop";
+
+        string originalCandidate =
+            ApplyInitialPlan(
+                repo,
+                specId,
+                "Stable plan statement");
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", originalCandidate,
+                "--expected-revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            result.Success,
+            result.Markdown);
+        Assert.Contains(
+            "Changed: `false`",
+            result.Markdown);
+        Assert.Contains(
+            "Applied: `false`",
+            result.Markdown);
+        Assert.Contains(
+            "Previous Revision: `1`",
+            result.Markdown);
+        Assert.Contains(
+            "Target Revision: `1`",
+            result.Markdown);
+
+        ImplementationPlan canonical =
+            SpecJsonSerializer.Deserialize<ImplementationPlan>(
+                File.ReadAllText(
+                    GetPlanPath(
+                        repo,
+                        specId)));
+
+        Assert.Equal(
+            1,
+            canonical.Revision.Value);
+    }
+
+    [Fact]
+    public void Plan_MissingPrerequisites_Rejected()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-missing-deps";
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-missing-deps.json",
+                CreateImplementationPlan());
+
+        CommandResult missingRequirementSet =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            missingRequirementSet.Success);
+        Assert.Contains(
+            "missing-dependency",
+            missingRequirementSet.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "canonical RequirementSet",
+            missingRequirementSet.Markdown);
+
+        string requirementPath =
+            repo.WriteCandidate(
+                "req-missing-workspec.json",
+                CreateRequirementSet());
+
+        CommandResult init =
+            new SpecCommand().Execute(
+            [
+                "init",
+                "--spec-id", specId,
+                "--from", requirementPath,
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            init.Success,
+            init.Markdown);
+
+        CommandResult missingWorkSpec =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            missingWorkSpec.Success);
+        Assert.Contains(
+            "missing-dependency",
+            missingWorkSpec.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "canonical WorkSpec",
+            missingWorkSpec.Markdown);
+    }
+
+    [Fact]
+    public void Plan_StaleWorkSpec_Rejected()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-stale-ws";
+
+        PreparePlanPrerequisites(
+            repo,
+            specId);
+
+        string requirementV2Path =
+            repo.WriteCandidate(
+                "req-stale-v2.json",
+                CreateRequirementSet(
+                    requirementStatement_:
+                        "Updated requirement"));
+
+        CommandResult refineRequirement =
+            new SpecCommand().Execute(
+            [
+                "refine",
+                "--spec-id", specId,
+                "--artifact", "requirements",
+                "--from", requirementV2Path,
+                "--expected-revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            refineRequirement.Success,
+            refineRequirement.Markdown);
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-stale.json",
+                CreateImplementationPlan());
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            result.Success);
+        Assert.Contains(
+            "stale-dependency",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "stale canonical WorkSpec",
+            result.Markdown);
+    }
+
+    [Fact]
+    public void Plan_WorkSpecRevisionMismatch_Rejected()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-ws-mismatch";
+
+        PreparePlanPrerequisites(
+            repo,
+            specId);
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-ws-mismatch.json",
+                CreateImplementationPlan(
+                    workSpecRevision_:
+                        2));
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            result.Success);
+        Assert.Contains(
+            "validation-failed",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "WorkSpec",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Plan_CandidateValidationFailure_Rejected()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-invalid-refs";
+
+        PreparePlanPrerequisites(
+            repo,
+            specId);
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-invalid-refs.json",
+                CreateImplementationPlan(
+                    requirementId_:
+                        "REQ-999",
+                    acceptanceCriterionId_:
+                        "AC-999"));
+
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            result.Success);
+        Assert.Contains(
+            "validation-failed",
+            result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(
+            result.Markdown.Contains(
+                "REQ-999",
+                StringComparison.Ordinal) ||
+            result.Markdown.Contains(
+                "AC-999",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Plan_MalformedInput_And_Boundaries()
+    {
+        using TestRepo repo =
+            new();
+
+        string validPath =
+            repo.WriteCandidate(
+                "plan-boundary-valid.json",
+                CreateImplementationPlan());
+
+        CommandResult missingFromOption =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", "spec-plan-boundary",
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            missingFromOption.Success);
+        Assert.Contains(
+            "Missing required option: '--from'.",
+            missingFromOption.Markdown);
+
+        string missingPath =
+            Path.Combine(
+                repo.Root,
+                "does-not-exist.json");
+
+        CommandResult missingFile =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", "spec-plan-boundary",
+                "--from", missingPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            missingFile.Success);
+        Assert.Contains(
+            "read-failed",
+            missingFile.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+
+        string hugePath =
+            Path.Combine(
+                repo.Root,
+                "plan-huge.json");
+
+        using (
+            FileStream stream =
+                File.Create(
+                    hugePath))
+        {
+            stream.SetLength(
+                SpecWorkspace.MaximumArtifactSizeBytes +
+                1);
+        }
+
+        CommandResult hugeResult =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", "spec-plan-boundary",
+                "--from", hugePath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            hugeResult.Success);
+        Assert.Contains(
+            "artifact-too-large",
+            hugeResult.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+
+        string invalidUtf8Path =
+            Path.Combine(
+                repo.Root,
+                "plan-invalid-utf8.json");
+
+        File.WriteAllBytes(
+            invalidUtf8Path,
+            [0xFF, 0xFE, 0xFD]);
+
+        CommandResult utf8Result =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", "spec-plan-boundary",
+                "--from", invalidUtf8Path,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            utf8Result.Success);
+        Assert.Contains(
+            "invalid-utf8",
+            utf8Result.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+
+        string malformedPath =
+            Path.Combine(
+                repo.Root,
+                "plan-malformed.json");
+
+        File.WriteAllText(
+            malformedPath,
+            "{ malformed json");
+
+        CommandResult malformedResult =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", "spec-plan-boundary",
+                "--from", malformedPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            malformedResult.Success);
+        Assert.Contains(
+            "invalid-json",
+            malformedResult.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(
+            File.Exists(
+                validPath));
+    }
+
+    [Fact]
+    public void Plan_ParserAndFlagValidation()
+    {
+        using TestRepo repo =
+            new();
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-parser.json",
+                CreateImplementationPlan());
+
+        CommandResult bothModes =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", "spec-plan-parser",
+                "--from", planPath,
+                "--repo", repo.Root,
+                "--dry-run",
+                "--apply"
+            ]);
+
+        Assert.False(
+            bothModes.Success);
+        Assert.Contains(
+            "Cannot specify both '--dry-run' and '--apply'.",
+            bothModes.Markdown);
+
+        CommandResult invalidSpecId =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", "INVALID_SPEC",
+                "--from", planPath,
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            invalidSpecId.Success);
+        Assert.Contains(
+            "Invalid Spec ID",
+            invalidSpecId.Markdown);
+
+        foreach (string invalidRevision in
+                 new[]
+                 {
+                     "abc",
+                     "0",
+                     "-1"
+                 })
+        {
+            CommandResult invalidExpected =
+                new SpecCommand().Execute(
+                [
+                    "plan",
+                    "--spec-id", "spec-plan-parser",
+                    "--from", planPath,
+                    "--expected-revision", invalidRevision,
+                    "--repo", repo.Root
+                ]);
+
+            Assert.False(
+                invalidExpected.Success);
+            Assert.Contains(
+                "Expected revision must be a positive integer.",
+                invalidExpected.Markdown);
+        }
+    }
+
+    [Fact]
+    public void Plan_JsonOutput_Stability()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-plan-json";
+
+        PreparePlanPrerequisites(
+            repo,
+            specId);
+
+        string planPath =
+            repo.WriteCandidate(
+                "plan-json.json",
+                CreateImplementationPlan());
+
+        CommandResult dryRunOne =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        CommandResult dryRunTwo =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        Assert.True(
+            dryRunOne.Success,
+            dryRunOne.Markdown);
+        Assert.True(
+            dryRunTwo.Success,
+            dryRunTwo.Markdown);
+        Assert.Equal(
+            dryRunOne.Markdown,
+            dryRunTwo.Markdown);
+        Assert.DoesNotContain(
+            "#",
+            dryRunOne.Markdown,
+            StringComparison.Ordinal);
+
+        SpecMutationResultDto dryRunDto =
+            SpecJsonSerializer.Deserialize<SpecMutationResultDto>(
+                dryRunOne.Markdown);
+
+        Assert.Equal(
+            specId,
+            dryRunDto.SpecId);
+        Assert.Equal(
+            SpecArtifactKind.ImplementationPlan,
+            dryRunDto.ArtifactKind);
+        Assert.Equal(
+            SpecWriteMode.DryRun,
+            dryRunDto.Mode);
+        Assert.True(
+            dryRunDto.Changed);
+        Assert.False(
+            dryRunDto.Applied);
+        Assert.Null(
+            dryRunDto.PreviousRevision);
+        Assert.Null(
+            dryRunDto.CurrentRevision);
+        Assert.Equal(
+            1,
+            dryRunDto.TargetRevision.Value);
+
+        using (
+            JsonDocument document =
+                JsonDocument.Parse(
+                    dryRunOne.Markdown))
+        {
+            Assert.Equal(
+                "implementationPlan",
+                document
+                    .RootElement
+                    .GetProperty(
+                        "artifactKind")
+                    .GetString());
+        }
+
+        CommandResult applyResult =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--repo", repo.Root,
+                "--apply",
+                "--json"
+            ]);
+
+        Assert.True(
+            applyResult.Success,
+            applyResult.Markdown);
+        Assert.DoesNotContain(
+            "#",
+            applyResult.Markdown,
+            StringComparison.Ordinal);
+
+        SpecMutationResultDto applyDto =
+            SpecJsonSerializer.Deserialize<SpecMutationResultDto>(
+                applyResult.Markdown);
+
+        Assert.True(
+            applyDto.Applied);
+        Assert.NotNull(
+            applyDto.CurrentRevision);
+        Assert.Equal(
+            1,
+            applyDto.CurrentRevision.Value.Value);
+        Assert.Equal(
+            1,
+            applyDto.TargetRevision.Value);
+
+        CommandResult failure =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planPath,
+                "--expected-revision", "2",
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        Assert.False(
+            failure.Success);
+        Assert.DoesNotContain(
+            "#",
+            failure.Markdown,
+            StringComparison.Ordinal);
+
+        SpecCliErrorDto errorDto =
+            SpecJsonSerializer.Deserialize<SpecCliErrorDto>(
+                failure.Markdown);
+
+        Assert.Equal(
+            "revision-conflict",
+            errorDto.ErrorCode);
+        Assert.Contains(
+            "does not match current revision",
+            errorDto.Error,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void PreparePlanPrerequisites(
+        TestRepo repo_,
+        string specId_)
+    {
+        string requirementPath =
+            repo_.WriteCandidate(
+                specId_ + "-requirements.json",
+                CreateRequirementSet());
+
+        CommandResult init =
+            new SpecCommand().Execute(
+            [
+                "init",
+                "--spec-id", specId_,
+                "--from", requirementPath,
+                "--repo", repo_.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            init.Success,
+            init.Markdown);
+
+        string workSpecPath =
+            repo_.WriteCandidate(
+                specId_ + "-work-spec.json",
+                CreateWorkSpec());
+
+        CommandResult workSpec =
+            new SpecCommand().Execute(
+            [
+                "refine",
+                "--spec-id", specId_,
+                "--artifact", "work-spec",
+                "--from", workSpecPath,
+                "--repo", repo_.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            workSpec.Success,
+            workSpec.Markdown);
+    }
+
+    private static string ApplyInitialPlan(
+        TestRepo repo_,
+        string specId_,
+        string stepStatement_ = "Initial plan statement")
+    {
+        PreparePlanPrerequisites(
+            repo_,
+            specId_);
+
+        string planPath =
+            repo_.WriteCandidate(
+                specId_ + "-implementation-plan.json",
+                CreateImplementationPlan(
+                    stepStatement_:
+                        stepStatement_));
+
+        CommandResult plan =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId_,
+                "--from", planPath,
+                "--repo", repo_.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            plan.Success,
+            plan.Markdown);
+
+        return planPath;
+    }
+
+    private static string GetPlanPath(
+        TestRepo repo_,
+        string specId_)
+    {
+        return Path.Combine(
+            repo_.Root,
+            ".ai",
+            "specs",
+            specId_,
+            "implementation-plan.json");
+    }
+
+    private static ImplementationPlan CreateImplementationPlan(
+        int revision_ = 1,
+        int workSpecRevision_ = 1,
+        string stepStatement_ = "Implementation plan step",
+        string requirementId_ = "REQ-001",
+        string acceptanceCriterionId_ = "AC-001")
+    {
+        return new ImplementationPlan
+        {
+            Revision =
+                new ArtifactRevision(
+                    revision_),
+            WorkSpecRevision =
+                new ArtifactRevision(
+                    workSpecRevision_),
+            Steps =
+            [
+                new PlanStep
+                {
+                    Id =
+                        new StableEntityId(
+                            "PLAN-STEP-001"),
+                    Statement =
+                        stepStatement_,
+                    RequirementIds =
+                    [
+                        new StableEntityId(
+                            requirementId_)
+                    ],
+                    AcceptanceCriterionIds =
+                    [
+                        new StableEntityId(
+                            acceptanceCriterionId_)
+                    ]
+                }
+            ]
+        };
+    }
     private static RequirementSet CreateRequirementSet(
         int revision_ = 1,
         string inputStatement_ = "Original requirement",
