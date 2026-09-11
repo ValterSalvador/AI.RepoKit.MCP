@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Spec;
+using AiRepoKit.Spec.Diff;
 using AiRepoKit.Spec.Lifecycle;
 using AiRepoKit.Spec.Persistence;
 using AiRepoKit.Spec.Projection;
@@ -25,6 +26,7 @@ public static class SpecCommandRenderer
         airepo spec plan --spec-id <spec-id> --from <candidate.json> [--expected-revision <n>] [--repo <path>] [--dry-run | --apply] [--json]
         airepo spec approve --spec-id <spec-id> --artifact requirements|work-spec|implementation-plan --revision <n> [--repo <path>] [--dry-run | --apply] [--json]
         airepo spec checklist --spec-id <spec-id> [--repo <path>] [--json]
+        airepo spec diff --spec-id <spec-id> --artifact requirements|work-spec|implementation-plan --from <candidate.json> [--repo <path>] [--json]
         ```
 
         Lifecycle subcommands:
@@ -35,6 +37,7 @@ public static class SpecCommandRenderer
         - `plan`: Creates or refines the canonical ImplementationPlan (dry-run by default).
         - `approve`: Records an approval for a RequirementSet, WorkSpec, or ImplementationPlan in the approval ledger.
         - `checklist`: Displays the derived implementation checklist projected from the canonical ImplementationPlan (read-only).
+        - `diff`: Semantically compares a candidate artifact against canonical state and analyzes downstream invalidation (read-only).
         """;
     }
 
@@ -497,6 +500,96 @@ public static class SpecCommandRenderer
                     }
                 }
                 break;
+        }
+
+        return CommandResult.Ok(builder.ToString().TrimEnd());
+    }
+
+    public static CommandResult RenderDiffResult(SpecDiffResult result_, bool isJson_)
+    {
+        if (isJson_)
+        {
+            return CommandResult.Ok(SpecJsonSerializer.Serialize(result_));
+        }
+
+        StringBuilder builder = new();
+        builder.AppendLine($"# Spec Diff: `{result_.SpecId}`");
+        builder.AppendLine();
+        builder.AppendLine($"- Artifact: `{result_.ArtifactKind}`");
+        builder.AppendLine($"- Current Revision: `{(result_.CurrentRevision is not null ? result_.CurrentRevision.Value.Value.ToString(CultureInfo.InvariantCulture) : "none")}`");
+        builder.AppendLine($"- Proposed Revision: `{result_.ProposedRevision.Value.ToString(CultureInfo.InvariantCulture)}`");
+        builder.AppendLine($"- Semantic Changed: `{result_.SemanticChanged.ToString().ToLowerInvariant()}`");
+        builder.AppendLine($"- Ordering Changed: `{result_.OrderingChanged.ToString().ToLowerInvariant()}`");
+        builder.AppendLine($"- Current Semantic Digest: `{(result_.CurrentSemanticDigest is not null ? result_.CurrentSemanticDigest : "none")}`");
+        builder.AppendLine($"- Candidate Semantic Digest: `{result_.CandidateSemanticDigest}`");
+
+        builder.AppendLine();
+        builder.AppendLine("## Entity Changes");
+        builder.AppendLine();
+        if (result_.EntityChanges.Count == 0)
+        {
+            builder.AppendLine("_None._");
+        }
+        else
+        {
+            foreach (SpecEntityChange change in result_.EntityChanges)
+            {
+                string label = change.ChangeKind switch
+                {
+                    SpecChangeKind.Added => "ADDED",
+                    SpecChangeKind.Modified => "MODIFIED",
+                    SpecChangeKind.Removed => "REMOVED",
+                    SpecChangeKind.Unchanged => "UNCHANGED",
+                    _ => change.ChangeKind.ToString().ToUpperInvariant()
+                };
+                builder.AppendLine($"- [{label}] `{change.EntityId}` ({change.EntityKind})");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Reference Impacts");
+        builder.AppendLine();
+        if (result_.ReferenceImpacts.Count == 0)
+        {
+            builder.AppendLine("_None._");
+        }
+        else
+        {
+            foreach (SpecReferenceImpact impact in result_.ReferenceImpacts)
+            {
+                string refs = string.Join(", ", impact.ReferencedChangedIds.Select(id_ => $"`{id_}`"));
+                builder.AppendLine($"- {impact.ArtifactKind} {impact.EntityKind} `{impact.EntityId}` references {refs}");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Approval Impacts");
+        builder.AppendLine();
+        if (result_.ApprovalImpacts.Count == 0)
+        {
+            builder.AppendLine("_None._");
+        }
+        else
+        {
+            foreach (SpecApprovalImpact impact in result_.ApprovalImpacts)
+            {
+                builder.AppendLine($"- {impact.ArtifactKind}: `{impact.CurrentStatus}` -> `{impact.ProposedStatus}` (affected: {impact.Affected.ToString().ToLowerInvariant()})");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Derived Artifact Impacts");
+        builder.AppendLine();
+        if (result_.DerivedArtifactImpacts.Count == 0)
+        {
+            builder.AppendLine("_None._");
+        }
+        else
+        {
+            foreach (SpecDerivedArtifactImpact impact in result_.DerivedArtifactImpacts)
+            {
+                builder.AppendLine($"- {impact.ArtifactKind}: affected: {impact.Affected.ToString().ToLowerInvariant()}");
+            }
         }
 
         return CommandResult.Ok(builder.ToString().TrimEnd());

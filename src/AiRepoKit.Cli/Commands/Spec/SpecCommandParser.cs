@@ -204,6 +204,33 @@ public sealed record SpecApproveOptions
     public bool IsJson { get; }
 }
 
+public sealed record SpecDiffOptions
+{
+    public SpecDiffOptions(
+        SpecId specId_,
+        string artifact_,
+        string fromPath_,
+        string? repoPath_,
+        bool isJson_)
+    {
+        this.SpecId = specId_;
+        this.Artifact = artifact_;
+        this.FromPath = fromPath_;
+        this.RepoPath = repoPath_;
+        this.IsJson = isJson_;
+    }
+
+    public SpecId SpecId { get; }
+
+    public string Artifact { get; }
+
+    public string FromPath { get; }
+
+    public string? RepoPath { get; }
+
+    public bool IsJson { get; }
+}
+
 public sealed class SpecCliParsingException : Exception
 {
     public bool IsJson { get; }
@@ -471,6 +498,45 @@ public static class SpecCommandParser
         string? repoPath = options.Valued.GetValueOrDefault("--repo");
 
         return new SpecApproveOptions(specId, artifactLower, requestedRevision, repoPath, mode, options.IsJson);
+    }
+
+    public static SpecDiffOptions ParseDiff(IReadOnlyList<string> args_)
+    {
+        RawOptions options = ParseRawOptions(
+            "diff",
+            args_,
+            allowedValuedOptions_: ["--spec-id", "--artifact", "--from", "--repo"],
+            allowedFlagOptions_: ["--json"]);
+
+        SpecId specId = ParseSpecId(options);
+
+        if (!options.Valued.TryGetValue("--artifact", out string? artifactRaw) || string.IsNullOrWhiteSpace(artifactRaw))
+        {
+            throw new SpecCliParsingException("Missing required option: '--artifact'.", options.IsJson);
+        }
+
+        string artifactLower = artifactRaw.ToLowerInvariant();
+
+        if (artifactLower == "plan")
+        {
+            artifactLower = "implementation-plan";
+        }
+
+        if (artifactLower is not ("requirements" or "work-spec" or "implementation-plan"))
+        {
+            throw new SpecCliParsingException(
+                $"Invalid or unsupported artifact selector '{artifactRaw}'. Allowed values: requirements, work-spec, implementation-plan.",
+                options.IsJson);
+        }
+
+        if (!options.Valued.TryGetValue("--from", out string? fromPath) || string.IsNullOrWhiteSpace(fromPath))
+        {
+            throw new SpecCliParsingException("Missing required option: '--from'.", options.IsJson);
+        }
+
+        string? repoPath = options.Valued.GetValueOrDefault("--repo");
+
+        return new SpecDiffOptions(specId, artifactLower, fromPath, repoPath, options.IsJson);
     }
 
     private static SpecId ParseSpecId(RawOptions options_)

@@ -2,6 +2,7 @@ using AiRepoKit.Cli.Commands.Spec;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
 using AiRepoKit.Spec;
+using AiRepoKit.Spec.Diff;
 using AiRepoKit.Spec.Lifecycle;
 using AiRepoKit.Spec.Persistence;
 using AiRepoKit.Spec.Projection;
@@ -42,6 +43,7 @@ public sealed class SpecCommand
             "plan" => this.ExecutePlan(arguments_.Skip(1).ToArray()),
             "checklist" => this.ExecuteChecklist(arguments_.Skip(1).ToArray()),
             "approve" => this.ExecuteApprove(arguments_.Skip(1).ToArray()),
+            "diff" => this.ExecuteDiff(arguments_.Skip(1).ToArray()),
             _ => this.HandleUnknownSubcommand(subcommand, arguments_)
         };
     }
@@ -504,6 +506,105 @@ public sealed class SpecCommand
         {
             return SpecCommandRenderer.RenderError("Spec approve failed: " + exception.Message, options.IsJson);
         }
+    }
+
+    private CommandResult ExecuteDiff(IReadOnlyList<string> args_)
+    {
+        SpecDiffOptions options;
+        try
+        {
+            options = SpecCommandParser.ParseDiff(args_);
+        }
+        catch (SpecCliParsingException exception)
+        {
+            return SpecCommandRenderer.RenderError(exception.Message, exception.IsJson);
+        }
+
+        string repoRoot;
+        try
+        {
+            repoRoot = ResolveRepo(options.RepoPath);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError("Repository path resolution failed: " + exception.Message, options.IsJson);
+        }
+
+        try
+        {
+            SpecLifecycleService service = new(repoRoot, options.SpecId);
+            SpecWorkspaceSnapshot snapshot = service.Workspace.Load();
+            SpecApprovalLedger? ledger = service.LedgerStore.Load();
+
+            SpecDiffResult diffResult = options.Artifact switch
+            {
+                "requirements" => ExecuteDiffRequirements(options, snapshot, ledger),
+                "work-spec" => ExecuteDiffWorkSpec(options, snapshot, ledger),
+                "implementation-plan" => ExecuteDiffImplementationPlan(options, snapshot, ledger),
+                _ => throw new InvalidOperationException($"Unsupported artifact selector '{options.Artifact}'.")
+            };
+
+            return SpecCommandRenderer.RenderDiffResult(diffResult, options.IsJson);
+        }
+        catch (SpecPersistenceException exception)
+        {
+            return SpecCommandRenderer.RenderPersistenceError(exception, options.IsJson);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError("Spec diff failed: " + exception.Message, options.IsJson);
+        }
+    }
+
+    private static SpecDiffResult ExecuteDiffRequirements(
+        SpecDiffOptions options_,
+        SpecWorkspaceSnapshot snapshot_,
+        SpecApprovalLedger? ledger_)
+    {
+        RequirementSet candidate = SpecCommandInputReader.ReadCandidate<RequirementSet>(
+            options_.FromPath,
+            SpecArtifactKind.RequirementSet);
+
+        return SpecDiffAnalyzer.Analyze(
+            options_.SpecId,
+            snapshot_,
+            ledger_,
+            SpecArtifactKind.RequirementSet,
+            candidate);
+    }
+
+    private static SpecDiffResult ExecuteDiffWorkSpec(
+        SpecDiffOptions options_,
+        SpecWorkspaceSnapshot snapshot_,
+        SpecApprovalLedger? ledger_)
+    {
+        WorkSpec candidate = SpecCommandInputReader.ReadCandidate<WorkSpec>(
+            options_.FromPath,
+            SpecArtifactKind.WorkSpec);
+
+        return SpecDiffAnalyzer.Analyze(
+            options_.SpecId,
+            snapshot_,
+            ledger_,
+            SpecArtifactKind.WorkSpec,
+            candidate);
+    }
+
+    private static SpecDiffResult ExecuteDiffImplementationPlan(
+        SpecDiffOptions options_,
+        SpecWorkspaceSnapshot snapshot_,
+        SpecApprovalLedger? ledger_)
+    {
+        ImplementationPlan candidate = SpecCommandInputReader.ReadCandidate<ImplementationPlan>(
+            options_.FromPath,
+            SpecArtifactKind.ImplementationPlan);
+
+        return SpecDiffAnalyzer.Analyze(
+            options_.SpecId,
+            snapshot_,
+            ledger_,
+            SpecArtifactKind.ImplementationPlan,
+            candidate);
     }
 
     private static string ResolveRepo(string? repoPathRaw_)
