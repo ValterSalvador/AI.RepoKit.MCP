@@ -525,6 +525,752 @@ public sealed class SpecLifecycleAcceptanceTests
         Assert.Equal(contextWriteBefore, File.GetLastWriteTimeUtc(fullContextPath));
     }
 
+    [Fact]
+    public void P05e_ImplementationPlanIntegratedLifecycle_EndToEndAcceptance()
+    {
+        using TestRepo repo =
+            new();
+
+        const string specId =
+            "spec-p05e-integrated";
+
+        string requirementCandidate =
+            repo.WriteCandidate(
+                "p05e-requirements.json",
+                CreateRequirementSet());
+
+        string workSpecCandidate =
+            repo.WriteCandidate(
+                "p05e-work-spec.json",
+                CreateWorkSpec());
+
+        string planCandidateV1 =
+            repo.WriteCandidate(
+                "p05e-plan-v1.json",
+                CreateImplementationPlan(
+                    statement_:
+                        "Initial integrated plan step"));
+
+        string planCandidateV2 =
+            repo.WriteCandidate(
+                "p05e-plan-v2.json",
+                CreateImplementationPlan(
+                    statement_:
+                        "Refined integrated plan step"));
+
+        CommandResult init =
+            new SpecCommand().Execute(
+            [
+                "init",
+                "--spec-id", specId,
+                "--from", requirementCandidate,
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            init.Success,
+            init.Markdown);
+
+        CommandResult createWorkSpec =
+            new SpecCommand().Execute(
+            [
+                "refine",
+                "--spec-id", specId,
+                "--artifact", "work-spec",
+                "--from", workSpecCandidate,
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            createWorkSpec.Success,
+            createWorkSpec.Markdown);
+
+        Snapshot beforePlanDryRun =
+            Snapshot.Capture(
+                repo.Root);
+
+        CommandResult planDryRun =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planCandidateV1,
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            planDryRun.Success,
+            planDryRun.Markdown);
+
+        Assert.Contains(
+            "Mode: `DryRun`",
+            planDryRun.Markdown);
+
+        Assert.Contains(
+            "Changed: `true`",
+            planDryRun.Markdown);
+
+        Assert.Contains(
+            "Applied: `false`",
+            planDryRun.Markdown);
+
+        Assert.Contains(
+            "Target Revision: `1`",
+            planDryRun.Markdown);
+
+        beforePlanDryRun.AssertUnchanged(
+            repo.Root);
+
+        CommandResult planApply =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planCandidateV1,
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            planApply.Success,
+            planApply.Markdown);
+
+        Assert.Contains(
+            "Target Revision: `1`",
+            planApply.Markdown);
+
+        CommandResult wrongRevision =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planCandidateV2,
+                "--expected-revision", "2",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.False(
+            wrongRevision.Success);
+
+        Assert.Equal(
+            1,
+            wrongRevision.ExitCode);
+
+        Assert.Contains(
+            "revision-conflict",
+            wrongRevision.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+
+        CommandResult semanticNoOp =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planCandidateV1,
+                "--expected-revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            semanticNoOp.Success,
+            semanticNoOp.Markdown);
+
+        Assert.Contains(
+            "Changed: `false`",
+            semanticNoOp.Markdown);
+
+        Assert.Contains(
+            "Applied: `false`",
+            semanticNoOp.Markdown);
+
+        Assert.Contains(
+            "Target Revision: `1`",
+            semanticNoOp.Markdown);
+
+        Snapshot beforeRefineDryRun =
+            Snapshot.Capture(
+                repo.Root);
+
+        CommandResult refineDryRun =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planCandidateV2,
+                "--expected-revision", "1",
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            refineDryRun.Success,
+            refineDryRun.Markdown);
+
+        Assert.Contains(
+            "Mode: `DryRun`",
+            refineDryRun.Markdown);
+
+        Assert.Contains(
+            "Changed: `true`",
+            refineDryRun.Markdown);
+
+        Assert.Contains(
+            "Applied: `false`",
+            refineDryRun.Markdown);
+
+        Assert.Contains(
+            "Target Revision: `2`",
+            refineDryRun.Markdown);
+
+        beforeRefineDryRun.AssertUnchanged(
+            repo.Root);
+
+        CommandResult refineApply =
+            new SpecCommand().Execute(
+            [
+                "plan",
+                "--spec-id", specId,
+                "--from", planCandidateV2,
+                "--expected-revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            refineApply.Success,
+            refineApply.Markdown);
+
+        Assert.Contains(
+            "Previous Revision: `1`",
+            refineApply.Markdown);
+
+        Assert.Contains(
+            "Target Revision: `2`",
+            refineApply.Markdown);
+
+        CommandResult approveRequirements =
+            new SpecCommand().Execute(
+            [
+                "approve",
+                "--spec-id", specId,
+                "--artifact", "requirements",
+                "--revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            approveRequirements.Success,
+            approveRequirements.Markdown);
+
+        CommandResult approveWorkSpec =
+            new SpecCommand().Execute(
+            [
+                "approve",
+                "--spec-id", specId,
+                "--artifact", "work-spec",
+                "--revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            approveWorkSpec.Success,
+            approveWorkSpec.Markdown);
+
+        Snapshot beforeApprovalDryRun =
+            Snapshot.Capture(
+                repo.Root);
+
+        CommandResult approvePlanDryRun =
+            new SpecCommand().Execute(
+            [
+                "approve",
+                "--spec-id", specId,
+                "--artifact", "implementation-plan",
+                "--revision", "2",
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            approvePlanDryRun.Success,
+            approvePlanDryRun.Markdown);
+
+        Assert.Contains(
+            "Changed: `true`",
+            approvePlanDryRun.Markdown);
+
+        Assert.Contains(
+            "Applied: `false`",
+            approvePlanDryRun.Markdown);
+
+        Assert.Contains(
+            "Current Approval Status: `NotApproved`",
+            approvePlanDryRun.Markdown);
+
+        Assert.Contains(
+            "Proposed Approval Status: `Current`",
+            approvePlanDryRun.Markdown);
+
+        beforeApprovalDryRun.AssertUnchanged(
+            repo.Root);
+
+        CommandResult approvePlanApply =
+            new SpecCommand().Execute(
+            [
+                "approve",
+                "--spec-id", specId,
+                "--artifact", "implementation-plan",
+                "--revision", "2",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            approvePlanApply.Success,
+            approvePlanApply.Markdown);
+
+        Assert.Contains(
+            "Changed: `true`",
+            approvePlanApply.Markdown);
+
+        Assert.Contains(
+            "Applied: `true`",
+            approvePlanApply.Markdown);
+
+        Assert.Contains(
+            "Current Approval Status: `Current`",
+            approvePlanApply.Markdown);
+
+        Snapshot beforeReapproval =
+            Snapshot.Capture(
+                repo.Root);
+
+        CommandResult reapproval =
+            new SpecCommand().Execute(
+            [
+                "approve",
+                "--spec-id", specId,
+                "--artifact", "plan",
+                "--revision", "2",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            reapproval.Success,
+            reapproval.Markdown);
+
+        Assert.Contains(
+            "Changed: `false`",
+            reapproval.Markdown);
+
+        Assert.Contains(
+            "Applied: `false`",
+            reapproval.Markdown);
+
+        beforeReapproval.AssertUnchanged(
+            repo.Root);
+
+        CommandResult showHumanOne =
+            new SpecCommand().Execute(
+            [
+                "show",
+                "--spec-id", specId,
+                "--artifact", "implementation-plan",
+                "--repo", repo.Root
+            ]);
+
+        CommandResult showHumanTwo =
+            new SpecCommand().Execute(
+            [
+                "show",
+                "--spec-id", specId,
+                "--artifact", "plan",
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            showHumanOne.Success,
+            showHumanOne.Markdown);
+
+        Assert.Equal(
+            showHumanOne.Markdown,
+            showHumanTwo.Markdown);
+
+        Assert.Contains(
+            "Revision: `2`",
+            showHumanOne.Markdown);
+
+        Assert.Contains(
+            "Stale: `false`",
+            showHumanOne.Markdown);
+
+        Assert.Contains(
+            "Approval Status: `Current`",
+            showHumanOne.Markdown);
+
+        Assert.Contains(
+            "Refined integrated plan step",
+            showHumanOne.Markdown);
+
+        CommandResult showJsonOne =
+            new SpecCommand().Execute(
+            [
+                "show",
+                "--spec-id", specId,
+                "--artifact", "implementation-plan",
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        CommandResult showJsonTwo =
+            new SpecCommand().Execute(
+            [
+                "show",
+                "--spec-id", specId,
+                "--artifact", "plan",
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        Assert.True(
+            showJsonOne.Success,
+            showJsonOne.Markdown);
+
+        Assert.Equal(
+            showJsonOne.Markdown,
+            showJsonTwo.Markdown);
+
+        using (
+            JsonDocument showDocument =
+                JsonDocument.Parse(
+                    showJsonOne.Markdown))
+        {
+            JsonElement root =
+                showDocument.RootElement;
+
+            Assert.True(
+                root.GetProperty(
+                    "present").GetBoolean());
+
+            Assert.False(
+                root.GetProperty(
+                    "stale").GetBoolean());
+
+            Assert.Equal(
+                2,
+                root.GetProperty(
+                    "revision").GetInt32());
+
+            Assert.Equal(
+                "current",
+                root.GetProperty(
+                    "approvalStatus").GetString());
+        }
+
+        Snapshot beforeChecklist =
+            Snapshot.Capture(
+                repo.Root);
+
+        CommandResult checklistHumanOne =
+            new SpecCommand().Execute(
+            [
+                "checklist",
+                "--spec-id", specId,
+                "--repo", repo.Root
+            ]);
+
+        CommandResult checklistHumanTwo =
+            new SpecCommand().Execute(
+            [
+                "checklist",
+                "--spec-id", specId,
+                "--repo", repo.Root
+            ]);
+
+        CommandResult checklistJsonOne =
+            new SpecCommand().Execute(
+            [
+                "checklist",
+                "--spec-id", specId,
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        CommandResult checklistJsonTwo =
+            new SpecCommand().Execute(
+            [
+                "checklist",
+                "--spec-id", specId,
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        Assert.True(
+            checklistHumanOne.Success,
+            checklistHumanOne.Markdown);
+
+        Assert.True(
+            checklistJsonOne.Success,
+            checklistJsonOne.Markdown);
+
+        Assert.Equal(
+            checklistHumanOne.Markdown,
+            checklistHumanTwo.Markdown);
+
+        Assert.Equal(
+            checklistJsonOne.Markdown,
+            checklistJsonTwo.Markdown);
+
+        Assert.Contains(
+            "Plan Revision: 2",
+            checklistHumanOne.Markdown);
+
+        Assert.Contains(
+            "Status: CURRENT",
+            checklistHumanOne.Markdown);
+
+        Assert.Contains(
+            "Approval Status: CURRENT",
+            checklistHumanOne.Markdown);
+
+        Assert.Contains(
+            "Refined integrated plan step",
+            checklistHumanOne.Markdown);
+
+        using (
+            JsonDocument checklistDocument =
+                JsonDocument.Parse(
+                    checklistJsonOne.Markdown))
+        {
+            JsonElement root =
+                checklistDocument.RootElement;
+
+            Assert.Equal(
+                2,
+                root.GetProperty(
+                    "planRevision").GetInt32());
+
+            Assert.False(
+                root.GetProperty(
+                    "stale").GetBoolean());
+
+            Assert.Equal(
+                "current",
+                root.GetProperty(
+                    "approvalStatus").GetString());
+        }
+
+        foreach (
+            string forbiddenField in
+            new[]
+            {
+                "\"completed\"",
+                "\"progress\"",
+                "\"executed\"",
+                "\"started\"",
+                "\"failed\"",
+                "\"assignee\"",
+                "\"timestamp\"",
+                "\"executionStatus\""
+            })
+        {
+            Assert.DoesNotContain(
+                forbiddenField,
+                checklistJsonOne.Markdown,
+                StringComparison.Ordinal);
+        }
+
+        beforeChecklist.AssertUnchanged(
+            repo.Root);
+
+        CommandResult refinePlanRejected =
+            new SpecCommand().Execute(
+            [
+                "refine",
+                "--spec-id", specId,
+                "--artifact", "implementation-plan",
+                "--from", planCandidateV2,
+                "--expected-revision", "2",
+                "--repo", repo.Root
+            ]);
+
+        Assert.False(
+            refinePlanRejected.Success);
+
+        Assert.Contains(
+            "Plan refinement is not supported.",
+            refinePlanRejected.Markdown);
+
+        string changedRequirementCandidate =
+            repo.WriteCandidate(
+                "p05e-requirements-v2.json",
+                CreateRequirementSet(
+                    statement_:
+                        "Requirement changed after Plan approval"));
+
+        CommandResult changeRequirements =
+            new SpecCommand().Execute(
+            [
+                "refine",
+                "--spec-id", specId,
+                "--artifact", "requirements",
+                "--from", changedRequirementCandidate,
+                "--expected-revision", "1",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.True(
+            changeRequirements.Success,
+            changeRequirements.Markdown);
+
+        Assert.Contains(
+            "Target Revision: `2`",
+            changeRequirements.Markdown);
+
+        Snapshot beforeStaleInspection =
+            Snapshot.Capture(
+                repo.Root);
+
+        CommandResult showAllStale =
+            new SpecCommand().Execute(
+            [
+                "show",
+                "--spec-id", specId,
+                "--artifact", "all",
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            showAllStale.Success,
+            showAllStale.Markdown);
+
+        Assert.Contains(
+            "- Requirements: Present (rev 2, status: Stale)",
+            showAllStale.Markdown);
+
+        Assert.Contains(
+            "- Work Spec: Present (rev 1, status: Stale, stale: true)",
+            showAllStale.Markdown);
+
+        Assert.Contains(
+            "- Implementation Plan: Present (rev 2, status: Stale, stale: true)",
+            showAllStale.Markdown);
+
+        CommandResult staleShow =
+            new SpecCommand().Execute(
+            [
+                "show",
+                "--spec-id", specId,
+                "--artifact", "implementation-plan",
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        Assert.True(
+            staleShow.Success,
+            staleShow.Markdown);
+
+        using (
+            JsonDocument staleShowDocument =
+                JsonDocument.Parse(
+                    staleShow.Markdown))
+        {
+            JsonElement root =
+                staleShowDocument.RootElement;
+
+            Assert.True(
+                root.GetProperty(
+                    "stale").GetBoolean());
+
+            Assert.Equal(
+                "stale",
+                root.GetProperty(
+                    "approvalStatus").GetString());
+        }
+
+        CommandResult staleChecklistHuman =
+            new SpecCommand().Execute(
+            [
+                "checklist",
+                "--spec-id", specId,
+                "--repo", repo.Root
+            ]);
+
+        Assert.True(
+            staleChecklistHuman.Success,
+            staleChecklistHuman.Markdown);
+
+        Assert.Equal(
+            0,
+            staleChecklistHuman.ExitCode);
+
+        Assert.Contains(
+            "Status: STALE",
+            staleChecklistHuman.Markdown);
+
+        Assert.Contains(
+            "Approval Status: STALE",
+            staleChecklistHuman.Markdown);
+
+        CommandResult staleChecklistJson =
+            new SpecCommand().Execute(
+            [
+                "checklist",
+                "--spec-id", specId,
+                "--repo", repo.Root,
+                "--json"
+            ]);
+
+        Assert.True(
+            staleChecklistJson.Success,
+            staleChecklistJson.Markdown);
+
+        using (
+            JsonDocument staleChecklistDocument =
+                JsonDocument.Parse(
+                    staleChecklistJson.Markdown))
+        {
+            JsonElement root =
+                staleChecklistDocument.RootElement;
+
+            Assert.True(
+                root.GetProperty(
+                    "stale").GetBoolean());
+
+            Assert.Equal(
+                "stale",
+                root.GetProperty(
+                    "approvalStatus").GetString());
+        }
+
+        CommandResult stalePlanApproval =
+            new SpecCommand().Execute(
+            [
+                "approve",
+                "--spec-id", specId,
+                "--artifact", "implementation-plan",
+                "--revision", "2",
+                "--repo", repo.Root,
+                "--apply"
+            ]);
+
+        Assert.False(
+            stalePlanApproval.Success);
+
+        Assert.Contains(
+            "approval-prerequisite-failed",
+            stalePlanApproval.Markdown,
+            StringComparison.OrdinalIgnoreCase);
+
+        beforeStaleInspection.AssertUnchanged(
+            repo.Root);
+    }
     private static RequirementSet CreateRequirementSet(
         int revision_ = 1,
         string statement_ = "Requirement statement")
@@ -593,7 +1339,8 @@ public sealed class SpecLifecycleAcceptanceTests
 
     private static ImplementationPlan CreateImplementationPlan(
         int revision_ = 1,
-        int workSpecRevision_ = 1)
+        int workSpecRevision_ = 1,
+        string statement_ = "Step statement")
     {
         return new ImplementationPlan
         {
@@ -604,7 +1351,7 @@ public sealed class SpecLifecycleAcceptanceTests
                 new PlanStep
                 {
                     Id = new StableEntityId("PLAN-STEP-001"),
-                    Statement = "Step statement",
+                    Statement = statement_,
                     RequirementIds =
                     [
                         new StableEntityId("REQ-001")
