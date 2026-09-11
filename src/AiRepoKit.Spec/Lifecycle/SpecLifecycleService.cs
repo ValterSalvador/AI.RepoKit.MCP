@@ -143,6 +143,89 @@ public sealed class SpecLifecycleService
             options_);
     }
 
+    public SpecStoreResult RefineImplementationPlan(
+        ImplementationPlan candidate_,
+        SpecStoreOptions options_)
+    {
+        ArgumentNullException.ThrowIfNull(
+            candidate_);
+        ArgumentNullException.ThrowIfNull(
+            options_);
+
+        SpecWorkspaceSnapshot snapshot =
+            this._workspace.Load();
+
+        RequirementSet requirementSet =
+            snapshot.RequirementSet ??
+            throw new SpecPersistenceException(
+                SpecPersistenceException.MissingDependency,
+                "An ImplementationPlan cannot be refined without a canonical RequirementSet.",
+                SpecArtifactKind.ImplementationPlan);
+
+        WorkSpec workSpec =
+            snapshot.WorkSpec ??
+            throw new SpecPersistenceException(
+                SpecPersistenceException.MissingDependency,
+                "An ImplementationPlan cannot be refined without a canonical WorkSpec.",
+                SpecArtifactKind.ImplementationPlan);
+
+        if (snapshot.IsWorkSpecStale)
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.StaleDependency,
+                "An ImplementationPlan cannot be refined against a stale canonical WorkSpec.",
+                SpecArtifactKind.ImplementationPlan);
+        }
+
+        SpecWorkspaceValidator.ValidateForStore(
+            candidate_,
+            workSpec,
+            requirementSet);
+
+        ImplementationPlan? currentPlan =
+            snapshot.ImplementationPlan;
+
+        if (currentPlan is null)
+        {
+            if (options_.ExpectedCurrentRevision is not null)
+            {
+                throw new SpecPersistenceException(
+                    SpecPersistenceException.RevisionConflict,
+                    "Cannot create an initial ImplementationPlan with an expected current revision because it must not already exist.",
+                    SpecArtifactKind.ImplementationPlan);
+            }
+
+            return this._workspace.Store(
+                candidate_,
+                options_ with
+                {
+                    ExpectedCurrentRevision =
+                        null
+                });
+        }
+
+        if (options_.ExpectedCurrentRevision is null)
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.RevisionConflict,
+                "Refining an existing ImplementationPlan requires the expected current revision.",
+                SpecArtifactKind.ImplementationPlan);
+        }
+
+        if (options_.ExpectedCurrentRevision !=
+            currentPlan.Revision)
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.RevisionConflict,
+                $"The expected current ImplementationPlan revision '{options_.ExpectedCurrentRevision.Value.Value}' does not match current revision '{currentPlan.Revision.Value}'.",
+                SpecArtifactKind.ImplementationPlan);
+        }
+
+        return this._workspace.Store(
+            candidate_,
+            options_);
+    }
+
     public SpecApprovalLedgerStoreResult ApproveRequirementSet(
         ArtifactRevision requestedRevision_,
         SpecStoreOptions ledgerOptions_)
@@ -256,6 +339,88 @@ public sealed class SpecLifecycleService
                 return SpecApprovalBinding.Create(
                     allocatedId_,
                     workSpec);
+            },
+            ledgerOptions_);
+    }
+
+    public SpecApprovalLedgerStoreResult ApproveImplementationPlan(
+        ArtifactRevision requestedRevision_,
+        SpecStoreOptions ledgerOptions_)
+    {
+        ArgumentNullException.ThrowIfNull(
+            ledgerOptions_);
+
+        return this._ledgerStore.Append(
+            allocatedId_ =>
+            {
+                SpecWorkspaceSnapshot snapshot =
+                    this._workspace.Load();
+
+                ImplementationPlan implementationPlan =
+                    snapshot.ImplementationPlan ??
+                    throw new SpecPersistenceException(
+                        SpecPersistenceException.MissingDependency,
+                        "A canonical ImplementationPlan does not exist to approve.",
+                        SpecArtifactKind.ImplementationPlan);
+
+                if (implementationPlan.Revision !=
+                    requestedRevision_)
+                {
+                    throw new SpecPersistenceException(
+                        SpecPersistenceException.RevisionConflict,
+                        $"The requested revision '{requestedRevision_.Value}' does not match current ImplementationPlan revision '{implementationPlan.Revision.Value}'.",
+                        SpecArtifactKind.ImplementationPlan);
+                }
+
+                if (snapshot.IsImplementationPlanStale)
+                {
+                    throw new SpecPersistenceException(
+                        SpecPersistenceException.ApprovalPrerequisiteFailed,
+                        "ImplementationPlan cannot be approved because it is stale relative to the canonical WorkSpec.",
+                        SpecArtifactKind.ImplementationPlan);
+                }
+
+                if (snapshot.WorkSpec is null)
+                {
+                    throw new SpecPersistenceException(
+                        SpecPersistenceException.MissingDependency,
+                        "ImplementationPlan cannot be approved without a canonical WorkSpec.",
+                        SpecArtifactKind.WorkSpec);
+                }
+
+                SpecApprovalLedger? currentLedger =
+                    this._ledgerStore.Load();
+
+                IReadOnlyList<SpecArtifactApprovalStatus> statuses =
+                    SpecApprovalStatusEvaluator.Evaluate(
+                        snapshot,
+                        currentLedger);
+
+                SpecArtifactApprovalStatus? workSpecStatus =
+                    statuses.FirstOrDefault(
+                        status_ =>
+                            status_.ArtifactKind ==
+                            SpecArtifactKind.WorkSpec);
+
+                if (workSpecStatus is null ||
+                    workSpecStatus.Status !=
+                    SpecApprovalStatus.Current)
+                {
+                    string reason =
+                        workSpecStatus?.Status ==
+                        SpecApprovalStatus.Stale
+                            ? "stale"
+                            : "not approved";
+
+                    throw new SpecPersistenceException(
+                        SpecPersistenceException.ApprovalPrerequisiteFailed,
+                        $"ImplementationPlan cannot be approved because the canonical WorkSpec is {reason}.",
+                        SpecArtifactKind.ImplementationPlan);
+                }
+
+                return SpecApprovalBinding.Create(
+                    allocatedId_,
+                    implementationPlan);
             },
             ledgerOptions_);
     }

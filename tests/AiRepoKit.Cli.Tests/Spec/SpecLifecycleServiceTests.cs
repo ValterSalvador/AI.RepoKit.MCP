@@ -1,4 +1,3 @@
-using System.Reflection;
 using AiRepoKit.Spec;
 using AiRepoKit.Spec.Lifecycle;
 using AiRepoKit.Spec.Persistence;
@@ -1085,41 +1084,780 @@ public sealed class SpecLifecycleServiceTests
     }
 
     [Fact]
-    public void PlanApprovalCreation_ThroughLifecycleService_HasNoSuchP04cApi()
+    public void RefineImplementationPlan_InitialCreation_CurrentNonStaleWorkSpec_Succeeds()
     {
-        // P04c MUST NOT expose any method that creates an ImplementationPlan approval
-        MethodInfo[] methods =
-            typeof(SpecLifecycleService).GetMethods(
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
 
-        foreach (MethodInfo method in
-                 methods)
-        {
-            Assert.DoesNotContain(
-                "ApprovePlan",
-                method.Name,
-                StringComparison.OrdinalIgnoreCase);
+        CreateCurrentWorkSpec(service);
 
-            Assert.DoesNotContain(
-                "ApproveImplementationPlan",
-                method.Name,
-                StringComparison.OrdinalIgnoreCase);
+        SpecStoreResult result =
+            service.RefineImplementationPlan(
+                CreateImplementationPlan(revision_: 99),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply
+                });
 
-            // No method may take an ImplementationPlan to approve
-            ParameterInfo[] parameters =
-                method.GetParameters();
+        Assert.True(result.Changed);
+        Assert.True(result.Applied);
+        Assert.Null(result.PreviousRevision);
+        Assert.Equal(new ArtifactRevision(1), result.TargetRevision);
 
-            if (method.Name.StartsWith(
-                    "Approve",
-                    StringComparison.Ordinal))
+        SpecWorkspaceSnapshot snapshot =
+            service.Workspace.Load();
+
+        Assert.NotNull(snapshot.ImplementationPlan);
+        Assert.Equal(
+            new ArtifactRevision(1),
+            snapshot.ImplementationPlan.Revision);
+        Assert.False(snapshot.IsImplementationPlanStale);
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_ExistingPlan_CorrectExpectedRevision_Succeeds()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
             {
-                Assert.DoesNotContain(
-                    parameters,
-                    p => p.ParameterType == typeof(ImplementationPlan));
-            }
+                Mode = SpecWriteMode.Apply
+            });
+
+        SpecStoreResult result =
+            service.RefineImplementationPlan(
+                CreateImplementationPlanWithStatement(
+                    "Refined step",
+                    revision_: 99),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply,
+                    ExpectedCurrentRevision = new ArtifactRevision(1)
+                });
+
+        Assert.True(result.Changed);
+        Assert.True(result.Applied);
+        Assert.Equal(
+            new ArtifactRevision(1),
+            result.PreviousRevision);
+        Assert.Equal(
+            new ArtifactRevision(2),
+            result.TargetRevision);
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_SemanticNoOp_KeepsRevisionAndDoesNotWrite()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        string path =
+            repository.GetArtifactPath(
+                SpecArtifactKind.ImplementationPlan);
+
+        byte[] before =
+            File.ReadAllBytes(path);
+
+        SpecStoreResult result =
+            service.RefineImplementationPlan(
+                CreateImplementationPlan(revision_: 99),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply,
+                    ExpectedCurrentRevision = new ArtifactRevision(1)
+                });
+
+        Assert.False(result.Changed);
+        Assert.False(result.Applied);
+        Assert.Equal(
+            new ArtifactRevision(1),
+            result.TargetRevision);
+        Assert.Equal(
+            before,
+            File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_SemanticChange_IncrementsCanonicalRevision()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(revision_: 77),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        SpecStoreResult result =
+            service.RefineImplementationPlan(
+                CreateImplementationPlanWithStatement(
+                    "Semantic change",
+                    revision_: 999),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply,
+                    ExpectedCurrentRevision = new ArtifactRevision(1)
+                });
+
+        Assert.True(result.Changed);
+        Assert.True(result.Applied);
+        Assert.Equal(
+            new ArtifactRevision(2),
+            result.TargetRevision);
+
+        ImplementationPlan plan =
+            service.Workspace.Load().ImplementationPlan!;
+
+        Assert.Equal(
+            new ArtifactRevision(2),
+            plan.Revision);
+        Assert.Equal(
+            "Semantic change",
+            plan.Steps[0].Statement);
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_MissingRequirementSetOrWorkSpec_RejectsMissingDependency()
+    {
+        using TestLifecycleRepository missingRequirementSet = new();
+
+        SpecLifecycleService service =
+            missingRequirementSet.CreateService();
+
+        SpecPersistenceException missingRequirement =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.RefineImplementationPlan(
+                        CreateImplementationPlan(),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.MissingDependency,
+            missingRequirement.ErrorCode);
+
+        using TestLifecycleRepository missingWorkSpec = new();
+
+        service =
+            missingWorkSpec.CreateService();
+
+        service.InitializeRequirementSet(
+            CreateRequirementSet(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        SpecPersistenceException missingWork =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.RefineImplementationPlan(
+                        CreateImplementationPlan(),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.MissingDependency,
+            missingWork.ErrorCode);
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_StaleWorkSpec_RejectsBeforeSemanticNoOp()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        string path =
+            repository.GetArtifactPath(
+                SpecArtifactKind.ImplementationPlan);
+
+        byte[] before =
+            File.ReadAllBytes(path);
+
+        service.RefineRequirementSet(
+            CreateRequirementSet(
+                statement_: "Changed requirement"),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply,
+                ExpectedCurrentRevision = new ArtifactRevision(1)
+            });
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.RefineImplementationPlan(
+                        CreateImplementationPlan(revision_: 99),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply,
+                            ExpectedCurrentRevision =
+                                new ArtifactRevision(1)
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.StaleDependency,
+            exception.ErrorCode);
+        Assert.Equal(
+            before,
+            File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_WrongCandidateWorkSpecRevision_RejectsValidation()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.RefineImplementationPlan(
+                        CreateImplementationPlan(
+                            workSpecRevision_: 2),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.ValidationFailed,
+            exception.ErrorCode);
+
+        Assert.Contains(
+            exception.ValidationErrors,
+            error_ =>
+                error_.Code ==
+                SpecValidationErrorCodes.RevisionMismatch);
+
+        Assert.False(
+            File.Exists(
+                repository.GetArtifactPath(
+                    SpecArtifactKind.ImplementationPlan)));
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_InitialCreation_WithExpectedRevision_RejectsRevisionConflict()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.RefineImplementationPlan(
+                        CreateImplementationPlan(),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply,
+                            ExpectedCurrentRevision =
+                                new ArtifactRevision(1)
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.RevisionConflict,
+            exception.ErrorCode);
+
+        Assert.False(
+            File.Exists(
+                repository.GetArtifactPath(
+                    SpecArtifactKind.ImplementationPlan)));
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_ExistingPlan_WithoutExpectedRevision_RejectsBeforeSemanticNoOp()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        string path =
+            repository.GetArtifactPath(
+                SpecArtifactKind.ImplementationPlan);
+
+        byte[] before =
+            File.ReadAllBytes(path);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.RefineImplementationPlan(
+                        CreateImplementationPlan(revision_: 99),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.RevisionConflict,
+            exception.ErrorCode);
+        Assert.Equal(
+            before,
+            File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void RefineImplementationPlan_ExistingPlan_WrongExpectedRevision_RejectsRevisionConflict()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(service);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        string path =
+            repository.GetArtifactPath(
+                SpecArtifactKind.ImplementationPlan);
+
+        byte[] before =
+            File.ReadAllBytes(path);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.RefineImplementationPlan(
+                        CreateImplementationPlanWithStatement(
+                            "Changed"),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply,
+                            ExpectedCurrentRevision =
+                                new ArtifactRevision(99)
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.RevisionConflict,
+            exception.ErrorCode);
+        Assert.Equal(
+            before,
+            File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void ApproveImplementationPlan_WorkSpecCurrent_PersistsExactApproval()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(
+            service,
+            approveWorkSpec_: true);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        SpecApprovalLedgerStoreResult result =
+            service.ApproveImplementationPlan(
+                new ArtifactRevision(1),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply,
+                    ExpectedCurrentRevision =
+                        new ArtifactRevision(2)
+                });
+
+        Assert.True(result.Changed);
+        Assert.True(result.Applied);
+        Assert.Equal(
+            "APR-003",
+            result.Approval.Id.Value);
+        Assert.Equal(
+            SpecArtifactKind.ImplementationPlan,
+            result.Approval.ArtifactKind);
+        Assert.Equal(
+            new ArtifactRevision(1),
+            result.Approval.ArtifactRevision);
+        Assert.Equal(
+            SpecApprovalStatus.Current,
+            service.GetApprovalStatus(
+                SpecArtifactKind.ImplementationPlan)!.Status);
+    }
+
+    [Fact]
+    public void ApproveImplementationPlan_WorkSpecNotApproved_RejectsApprovalPrerequisite()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        service.InitializeRequirementSet(
+            CreateRequirementSet(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        service.ApproveRequirementSet(
+            new ArtifactRevision(1),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        service.RefineWorkSpec(
+            CreateWorkSpec(
+                requirementSetRevision_: 1),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        byte[] ledgerBefore =
+            File.ReadAllBytes(repository.LedgerPath);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.ApproveImplementationPlan(
+                        new ArtifactRevision(1),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply,
+                            ExpectedCurrentRevision =
+                                new ArtifactRevision(1)
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.ApprovalPrerequisiteFailed,
+            exception.ErrorCode);
+        Assert.Equal(
+            ledgerBefore,
+            File.ReadAllBytes(repository.LedgerPath));
+    }
+
+    [Fact]
+    public void ApproveImplementationPlan_WorkSpecApprovalStale_RejectsApprovalPrerequisite()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(
+            service,
+            approveWorkSpec_: true);
+
+        service.RefineWorkSpec(
+            CreateWorkSpec(
+                revision_: 99,
+                requirementSetRevision_: 1,
+                criterionStatement_: "Changed criterion"),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply,
+                ExpectedCurrentRevision =
+                    new ArtifactRevision(1)
+            });
+
+        Assert.Equal(
+            SpecApprovalStatus.Stale,
+            service.GetApprovalStatus(
+                SpecArtifactKind.WorkSpec)!.Status);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(
+                workSpecRevision_: 2),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        Assert.False(
+            service.Workspace.Load().IsImplementationPlanStale);
+
+        byte[] ledgerBefore =
+            File.ReadAllBytes(repository.LedgerPath);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.ApproveImplementationPlan(
+                        new ArtifactRevision(1),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply,
+                            ExpectedCurrentRevision =
+                                new ArtifactRevision(2)
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.ApprovalPrerequisiteFailed,
+            exception.ErrorCode);
+        Assert.Equal(
+            ledgerBefore,
+            File.ReadAllBytes(repository.LedgerPath));
+    }
+
+    [Fact]
+    public void ApproveImplementationPlan_StaleImplementationPlan_RejectsApprovalPrerequisite()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(
+            service,
+            approveWorkSpec_: true);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        service.RefineWorkSpec(
+            CreateWorkSpec(
+                revision_: 99,
+                requirementSetRevision_: 1,
+                criterionStatement_: "Changed criterion"),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply,
+                ExpectedCurrentRevision =
+                    new ArtifactRevision(1)
+            });
+
+        Assert.True(
+            service.Workspace.Load().IsImplementationPlanStale);
+
+        byte[] ledgerBefore =
+            File.ReadAllBytes(repository.LedgerPath);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.ApproveImplementationPlan(
+                        new ArtifactRevision(1),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply,
+                            ExpectedCurrentRevision =
+                                new ArtifactRevision(2)
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.ApprovalPrerequisiteFailed,
+            exception.ErrorCode);
+        Assert.Equal(
+            ledgerBefore,
+            File.ReadAllBytes(repository.LedgerPath));
+    }
+
+    [Fact]
+    public void ApproveImplementationPlan_WrongRequestedImplementationPlanRevision_RejectsRevisionConflict()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(
+            service,
+            approveWorkSpec_: true);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        byte[] ledgerBefore =
+            File.ReadAllBytes(repository.LedgerPath);
+
+        SpecPersistenceException exception =
+            Assert.Throws<SpecPersistenceException>(
+                () =>
+                    service.ApproveImplementationPlan(
+                        new ArtifactRevision(99),
+                        new SpecStoreOptions
+                        {
+                            Mode = SpecWriteMode.Apply,
+                            ExpectedCurrentRevision =
+                                new ArtifactRevision(2)
+                        }));
+
+        Assert.Equal(
+            SpecPersistenceException.RevisionConflict,
+            exception.ErrorCode);
+        Assert.Equal(
+            ledgerBefore,
+            File.ReadAllBytes(repository.LedgerPath));
+    }
+
+    [Fact]
+    public void ApproveImplementationPlan_ExactCurrentImplementationPlanReapproval_IsIdempotent()
+    {
+        using TestLifecycleRepository repository = new();
+        SpecLifecycleService service = repository.CreateService();
+
+        CreateCurrentWorkSpec(
+            service,
+            approveWorkSpec_: true);
+
+        service.RefineImplementationPlan(
+            CreateImplementationPlan(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        SpecApprovalLedgerStoreResult first =
+            service.ApproveImplementationPlan(
+                new ArtifactRevision(1),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply,
+                    ExpectedCurrentRevision =
+                        new ArtifactRevision(2)
+                });
+
+        Assert.True(first.Changed);
+        Assert.True(first.Applied);
+
+        SpecApprovalLedgerStoreResult second =
+            service.ApproveImplementationPlan(
+                new ArtifactRevision(1),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply,
+                    ExpectedCurrentRevision =
+                        new ArtifactRevision(3)
+                });
+
+        Assert.False(second.Changed);
+        Assert.False(second.Applied);
+        Assert.Equal(
+            first.Approval.Id.Value,
+            second.Approval.Id.Value);
+
+        SpecApprovalLedger ledger =
+            service.LedgerStore.Load()!;
+
+        Assert.Equal(
+            3,
+            ledger.Approvals.Count);
+    }
+
+    private static void CreateCurrentWorkSpec(
+        SpecLifecycleService service_,
+        bool approveWorkSpec_ = false)
+    {
+        service_.InitializeRequirementSet(
+            CreateRequirementSet(),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        if (approveWorkSpec_)
+        {
+            service_.ApproveRequirementSet(
+                new ArtifactRevision(1),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply
+                });
+        }
+
+        service_.RefineWorkSpec(
+            CreateWorkSpec(
+                requirementSetRevision_: 1),
+            new SpecStoreOptions
+            {
+                Mode = SpecWriteMode.Apply
+            });
+
+        if (approveWorkSpec_)
+        {
+            service_.ApproveWorkSpec(
+                new ArtifactRevision(1),
+                new SpecStoreOptions
+                {
+                    Mode = SpecWriteMode.Apply,
+                    ExpectedCurrentRevision =
+                        new ArtifactRevision(1)
+                });
         }
     }
 
+    private static ImplementationPlan CreateImplementationPlanWithStatement(
+        string statement_,
+        int revision_ = 1,
+        int workSpecRevision_ = 1)
+    {
+        ImplementationPlan plan =
+            CreateImplementationPlan(
+                revision_,
+                workSpecRevision_);
+
+        return plan with
+        {
+            Steps =
+            [
+                plan.Steps[0] with
+                {
+                    Statement =
+                        statement_
+                }
+            ]
+        };
+    }
     [Fact]
     public void Concurrency_ApprovalCannotBindSupersededRevision_BecauseValidationOccursInsideSharedLock()
     {
