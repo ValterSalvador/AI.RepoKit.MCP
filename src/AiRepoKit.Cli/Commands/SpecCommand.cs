@@ -4,6 +4,7 @@ using AiRepoKit.Cli.Services;
 using AiRepoKit.Spec;
 using AiRepoKit.Spec.Lifecycle;
 using AiRepoKit.Spec.Persistence;
+using AiRepoKit.Spec.Projection;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -39,6 +40,7 @@ public sealed class SpecCommand
             "show" => this.ExecuteShow(arguments_.Skip(1).ToArray()),
             "refine" => this.ExecuteRefine(arguments_.Skip(1).ToArray()),
             "plan" => this.ExecutePlan(arguments_.Skip(1).ToArray()),
+            "checklist" => this.ExecuteChecklist(arguments_.Skip(1).ToArray()),
             "approve" => this.ExecuteApprove(arguments_.Skip(1).ToArray()),
             _ => this.HandleUnknownSubcommand(subcommand, arguments_)
         };
@@ -329,6 +331,89 @@ public sealed class SpecCommand
                 options.IsJson);
         }
     }
+    private CommandResult ExecuteChecklist(
+        IReadOnlyList<string> args_)
+    {
+        SpecChecklistOptions options;
+
+        try
+        {
+            options =
+                SpecCommandParser.ParseChecklist(
+                    args_);
+        }
+        catch (SpecCliParsingException exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                exception.Message,
+                exception.IsJson);
+        }
+
+        string repoRoot;
+
+        try
+        {
+            repoRoot =
+                ResolveRepo(
+                    options.RepoPath);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                "Repository path resolution failed: " +
+                exception.Message,
+                options.IsJson);
+        }
+
+        try
+        {
+            SpecLifecycleService service =
+                new(
+                    repoRoot,
+                    options.SpecId);
+
+            SpecWorkspaceSnapshot snapshot =
+                service.Workspace.Load();
+
+            SpecApprovalLedger? ledger =
+                service.LedgerStore.Load();
+
+            ImplementationChecklistProjection projection =
+                ImplementationChecklistProjector.Project(
+                    options.SpecId,
+                    snapshot,
+                    ledger);
+
+            string output =
+                options.IsJson
+                    ? ImplementationChecklistProjector.ProjectJson(
+                        projection)
+                    : ImplementationChecklistProjector.ProjectMarkdown(
+                        projection);
+
+            return CommandResult.Ok(
+                output);
+        }
+        catch (SpecPersistenceException exception)
+        {
+            return SpecCommandRenderer.RenderPersistenceError(
+                exception,
+                options.IsJson);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                exception.Message,
+                options.IsJson);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                "Spec checklist failed: " +
+                exception.Message,
+                options.IsJson);
+        }
+    }
     private CommandResult ExecuteApprove(IReadOnlyList<string> args_)
     {
         SpecApproveOptions options;
@@ -355,9 +440,19 @@ public sealed class SpecCommand
         {
             SpecLifecycleService service = new(repoRoot, options.SpecId);
 
-            SpecArtifactKind targetKind = options.Artifact == "requirements"
-                ? SpecArtifactKind.RequirementSet
-                : SpecArtifactKind.WorkSpec;
+            SpecArtifactKind targetKind =
+                options.Artifact switch
+                {
+                    "requirements" =>
+                        SpecArtifactKind.RequirementSet,
+                    "work-spec" =>
+                        SpecArtifactKind.WorkSpec,
+                    "implementation-plan" =>
+                        SpecArtifactKind.ImplementationPlan,
+                    _ =>
+                        throw new InvalidOperationException(
+                            $"Unsupported approval artifact '{options.Artifact}'.")
+                };
 
             SpecArtifactApprovalStatus? preStatus = service.GetApprovalStatus(targetKind);
             SpecApprovalStatus currentPersistedStatus = preStatus?.Status ?? SpecApprovalStatus.NotApproved;
@@ -369,13 +464,25 @@ public sealed class SpecCommand
                 ExpectedCurrentRevision = currentLedger?.Revision
             };
 
-            SpecApprovalLedgerStoreResult result = targetKind == SpecArtifactKind.RequirementSet
-                ? service.ApproveRequirementSet(
-                    options.Revision,
-                    ledgerOptions)
-                : service.ApproveWorkSpec(
-                    options.Revision,
-                    ledgerOptions);
+            SpecApprovalLedgerStoreResult result =
+                targetKind switch
+                {
+                    SpecArtifactKind.RequirementSet =>
+                        service.ApproveRequirementSet(
+                            options.Revision,
+                            ledgerOptions),
+                    SpecArtifactKind.WorkSpec =>
+                        service.ApproveWorkSpec(
+                            options.Revision,
+                            ledgerOptions),
+                    SpecArtifactKind.ImplementationPlan =>
+                        service.ApproveImplementationPlan(
+                            options.Revision,
+                            ledgerOptions),
+                    _ =>
+                        throw new InvalidOperationException(
+                            $"Unsupported approval artifact '{targetKind}'.")
+                };
 
             SpecApprovalStatus currentApprovalStatus = options.Mode == SpecWriteMode.Apply
                 ? SpecApprovalStatus.Current

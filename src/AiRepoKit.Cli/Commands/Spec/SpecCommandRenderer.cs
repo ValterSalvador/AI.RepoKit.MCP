@@ -20,10 +20,11 @@ public static class SpecCommandRenderer
         ```text
         airepo spec [help]
         airepo spec init --spec-id <spec-id> --from <requirements.json> [--repo <path>] [--dry-run | --apply] [--json]
-        airepo spec show --spec-id <spec-id> [--repo <path>] [--artifact requirements|work-spec|approvals|all] [--json]
+        airepo spec show --spec-id <spec-id> [--repo <path>] [--artifact requirements|work-spec|implementation-plan|approvals|all] [--json]
         airepo spec refine --spec-id <spec-id> --artifact requirements|work-spec --from <candidate.json> [--expected-revision <n>] [--repo <path>] [--dry-run | --apply] [--json]
         airepo spec plan --spec-id <spec-id> --from <candidate.json> [--expected-revision <n>] [--repo <path>] [--dry-run | --apply] [--json]
-        airepo spec approve --spec-id <spec-id> --artifact requirements|work-spec --revision <n> [--repo <path>] [--dry-run | --apply] [--json]
+        airepo spec approve --spec-id <spec-id> --artifact requirements|work-spec|implementation-plan --revision <n> [--repo <path>] [--dry-run | --apply] [--json]
+        airepo spec checklist --spec-id <spec-id> [--repo <path>] [--json]
         ```
 
         Lifecycle subcommands:
@@ -32,7 +33,8 @@ public static class SpecCommandRenderer
         - `show`: Displays canonical lifecycle state and derived approval statuses (read-only).
         - `refine`: Refines an existing RequirementSet or initial/existing WorkSpec.
         - `plan`: Creates or refines the canonical ImplementationPlan (dry-run by default).
-        - `approve`: Records an approval for a RequirementSet or WorkSpec in the approval ledger.
+        - `approve`: Records an approval for a RequirementSet, WorkSpec, or ImplementationPlan in the approval ledger.
+        - `checklist`: Displays the derived implementation checklist projected from the canonical ImplementationPlan (read-only).
         """;
     }
 
@@ -307,7 +309,16 @@ public static class SpecCommandRenderer
                     ApprovalStatus = wsStatus?.Status,
                     Content = snapshot_.WorkSpec
                 })),
-                "approvals" => CommandResult.Ok(SpecJsonSerializer.Serialize(new SpecShowApprovalsDto
+                "implementation-plan" => CommandResult.Ok(SpecJsonSerializer.Serialize(new SpecShowImplementationPlanDto
+                {
+                    SpecId = specId_.Value,
+                    Present = snapshot_.ImplementationPlan is not null,
+                    Stale = snapshot_.ImplementationPlan is null ? null : snapshot_.IsImplementationPlanStale,
+                    Revision = snapshot_.ImplementationPlan?.Revision,
+                    SemanticDigest = snapshot_.ImplementationPlan is null ? null : SpecSemanticDigest.Compute(snapshot_.ImplementationPlan),
+                    ApprovalStatus = planStatus?.Status,
+                    Content = snapshot_.ImplementationPlan
+                })),                "approvals" => CommandResult.Ok(SpecJsonSerializer.Serialize(new SpecShowApprovalsDto
                 {
                     SpecId = specId_.Value,
                     Present = ledger_ is not null,
@@ -340,6 +351,7 @@ public static class SpecCommandRenderer
                     },
                     ImplementationPlan = snapshot_.ImplementationPlan is null ? null : new SpecShowImplementationPlanDto
                     {
+                        SpecId = specId_.Value,
                         Present = true,
                         Stale = snapshot_.IsImplementationPlanStale,
                         Revision = snapshot_.ImplementationPlan.Revision,
@@ -395,6 +407,24 @@ public static class SpecCommandRenderer
                 }
                 break;
 
+            case "implementation-plan":
+                builder.AppendLine($"# Spec Implementation Plan: `{specId_.Value}`");
+                builder.AppendLine();
+                builder.AppendLine($"- Present: `{(snapshot_.ImplementationPlan is not null).ToString().ToLowerInvariant()}`");
+
+                if (snapshot_.ImplementationPlan is not null)
+                {
+                    builder.AppendLine($"- Revision: `{snapshot_.ImplementationPlan.Revision.Value.ToString(CultureInfo.InvariantCulture)}`");
+                    builder.AppendLine($"- Stale: `{snapshot_.IsImplementationPlanStale.ToString().ToLowerInvariant()}`");
+                    builder.AppendLine($"- Approval Status: `{planStatus?.Status.ToString() ?? "NotApproved"}`");
+                    builder.AppendLine($"- Semantic Digest: `{SpecSemanticDigest.Compute(snapshot_.ImplementationPlan)}`");
+                    builder.AppendLine();
+                    builder.AppendLine("---");
+                    builder.AppendLine();
+                    builder.Append(SpecMarkdownProjector.Project(snapshot_.ImplementationPlan));
+                }
+
+                break;
             case "approvals":
                 builder.AppendLine($"# Spec Approvals: `{specId_.Value}`");
                 builder.AppendLine();

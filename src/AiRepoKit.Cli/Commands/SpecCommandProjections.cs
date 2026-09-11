@@ -101,6 +101,8 @@ public sealed record SpecShowApprovalsDto
 
 public sealed record SpecShowImplementationPlanDto
 {
+    public required string SpecId { get; init; }
+
     public required bool Present { get; init; }
 
     public bool? Stale { get; init; }

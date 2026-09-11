@@ -143,6 +143,36 @@ public sealed record SpecPlanOptions
         get;
     }
 }
+public sealed record SpecChecklistOptions
+{
+    public SpecChecklistOptions(
+        SpecId specId_,
+        string? repoPath_,
+        bool isJson_)
+    {
+        this.SpecId =
+            specId_;
+        this.RepoPath =
+            repoPath_;
+        this.IsJson =
+            isJson_;
+    }
+
+    public SpecId SpecId
+    {
+        get;
+    }
+
+    public string? RepoPath
+    {
+        get;
+    }
+
+    public bool IsJson
+    {
+        get;
+    }
+}
 public sealed record SpecApproveOptions
 {
     public SpecApproveOptions(
@@ -218,10 +248,17 @@ public static class SpecCommandParser
         SpecId specId = ParseSpecId(options);
 
         string artifactSelector = options.Valued.GetValueOrDefault("--artifact", "all").ToLowerInvariant();
-        if (artifactSelector is not ("requirements" or "work-spec" or "approvals" or "all"))
+
+        if (artifactSelector == "plan")
+        {
+            artifactSelector =
+                "implementation-plan";
+        }
+
+        if (artifactSelector is not ("requirements" or "work-spec" or "implementation-plan" or "approvals" or "all"))
         {
             throw new SpecCliParsingException(
-                $"Invalid or unsupported artifact selector '{artifactSelector}'. Allowed values: requirements, work-spec, approvals, all.",
+                $"Invalid or unsupported artifact selector '{artifactSelector}'. Allowed values: requirements, work-spec, implementation-plan, approvals, all.",
                 options.IsJson);
         }
 
@@ -359,6 +396,36 @@ public static class SpecCommandParser
             mode,
             options.IsJson);
     }
+    public static SpecChecklistOptions ParseChecklist(
+        IReadOnlyList<string> args_)
+    {
+        RawOptions options =
+            ParseRawOptions(
+                "checklist",
+                args_,
+                allowedValuedOptions_:
+                [
+                    "--spec-id",
+                    "--repo"
+                ],
+                allowedFlagOptions_:
+                [
+                    "--json"
+                ]);
+
+        SpecId specId =
+            ParseSpecId(
+                options);
+
+        string? repoPath =
+            options.Valued.GetValueOrDefault(
+                "--repo");
+
+        return new SpecChecklistOptions(
+            specId,
+            repoPath,
+            options.IsJson);
+    }
     public static SpecApproveOptions ParseApprove(IReadOnlyList<string> args_)
     {
         RawOptions options = ParseRawOptions(
@@ -375,15 +442,17 @@ public static class SpecCommandParser
         }
 
         string artifactLower = artifactRaw.ToLowerInvariant();
-        if (artifactLower is "implementation-plan" or "plan")
+
+        if (artifactLower == "plan")
         {
-            throw new SpecCliParsingException("Plan approval is not supported.", options.IsJson);
+            artifactLower =
+                "implementation-plan";
         }
 
-        if (artifactLower is not ("requirements" or "work-spec"))
+        if (artifactLower is not ("requirements" or "work-spec" or "implementation-plan"))
         {
             throw new SpecCliParsingException(
-                $"Invalid or unsupported artifact '{artifactRaw}'. Allowed values: requirements, work-spec.",
+                $"Invalid or unsupported artifact '{artifactRaw}'. Allowed values: requirements, work-spec, implementation-plan.",
                 options.IsJson);
         }
 

@@ -20,6 +20,8 @@ public sealed class SpecCommandRoutingTests
         Assert.Contains("airepo spec refine", result.Markdown);
         Assert.Contains("airepo spec plan", result.Markdown);
         Assert.Contains("airepo spec approve", result.Markdown);
+        Assert.Contains("airepo spec checklist", result.Markdown);
+        Assert.Contains("implementation-plan", result.Markdown);
     }
 
     [Theory]
@@ -82,6 +84,45 @@ public sealed class SpecCommandRoutingTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void P05d_Execute_Checklist_IsRecognizedAndRequiresSpecId()
+    {
+        CommandResult result =
+            new SpecCommand().Execute(
+                ["checklist"]);
+
+        Assert.False(
+            result.Success);
+        Assert.Equal(
+            1,
+            result.ExitCode);
+        Assert.Contains(
+            "Missing required option: '--spec-id'.",
+            result.Markdown);
+        Assert.DoesNotContain(
+            "Unsupported Spec subcommand",
+            result.Markdown,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void P05d_Execute_RefineImplementationPlan_RemainsRejected()
+    {
+        CommandResult result =
+            new SpecCommand().Execute(
+            [
+                "refine",
+                "--spec-id", "spec-refine-plan",
+                "--artifact", "implementation-plan",
+                "--from", "candidate.json"
+            ]);
+
+        Assert.False(
+            result.Success);
+        Assert.Contains(
+            "Plan refinement is not supported.",
+            result.Markdown);
+    }
     [Fact]
     public void ProgramRouteSpec_ReachesSpecCommand()
     {
