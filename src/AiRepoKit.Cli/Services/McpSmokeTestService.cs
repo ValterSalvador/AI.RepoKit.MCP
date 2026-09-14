@@ -175,9 +175,12 @@ public sealed class McpSmokeTestService
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 5, "get_policy", new { topic = "all" });
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 6, "get_context", new { kind = "changed-files", detail = "brief", limit = 5 });
                 AddCoreToolCall(process, stdoutLines, smokeWarnings, 7, "search_context", new { query = "MCP", limit = 3 });
+                AddCoreToolCall(process, stdoutLines, smokeWarnings, 8, "get_context", new { kind = "spec", target = "mcp-smoke-spec", detail = "brief", limit = 5 });
+                AddCoreToolCall(process, stdoutLines, smokeWarnings, 9, "get_context", new { kind = "spec-context", target = "mcp-smoke-spec", detail = "brief", limit = 5 });
+                AddCoreToolCall(process, stdoutLines, smokeWarnings, 10, "get_context", new { kind = "verification", target = "mcp-smoke-spec", detail = "brief", limit = 5 });
 
-                resourceUris = AddResourceSmokeCalls(process, stdoutLines, smokeWarnings, 8);
-                promptNames = AddPromptSmokeCalls(process, stdoutLines, smokeWarnings, 13);
+                resourceUris = AddResourceSmokeCalls(process, stdoutLines, smokeWarnings, 11);
+                promptNames = AddPromptSmokeCalls(process, stdoutLines, smokeWarnings, 15);
             }
 
             process.StandardInput.Close();

@@ -64,12 +64,16 @@ public sealed class ContextRepository
         "impact",
         "org-scan",
         "org-report",
-        "efficiency"
+        "efficiency",
+        "spec",
+        "spec-context",
+        "verification"
     ];
 
     private readonly ContextRepositoryOptions _options;
     private readonly SecretRedactor _redactor;
     private ContextManifest? _manifest;
+    private SpecMcpContextReader? _specReader;
 
     public ContextRepository(ContextRepositoryOptions options_, SecretRedactor redactor_)
     {
@@ -78,6 +82,8 @@ public sealed class ContextRepository
     }
 
     public string RepoRoot => this._options.RepoRoot;
+
+    private SpecMcpContextReader SpecReader => this._specReader ??= new SpecMcpContextReader(this.RepoRoot, this.Budget());
 
     public ContextManifest GetManifest()
     {
@@ -395,6 +401,21 @@ public sealed class ContextRepository
         if (string.Equals(kind_, "efficiency", StringComparison.OrdinalIgnoreCase))
         {
             return this.ReadGeneratedReport(".ai/generated/reports/org-efficiency.json", "Run `airepo org efficiency --apply` to persist an org efficiency report.", "airepo org efficiency --apply", detail_, limit_);
+        }
+
+        if (string.Equals(kind_, "spec", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.SpecReader.ReadSpec(detail_, limit_, target_);
+        }
+
+        if (string.Equals(kind_, "spec-context", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.SpecReader.ReadSpecContext(detail_, limit_, target_);
+        }
+
+        if (string.Equals(kind_, "verification", StringComparison.OrdinalIgnoreCase))
+        {
+            return this.SpecReader.ReadVerification(detail_, limit_, target_);
         }
 
         IReadOnlyDictionary<string, string> context = this.ReadContext(kind_, detail_, limit_);
