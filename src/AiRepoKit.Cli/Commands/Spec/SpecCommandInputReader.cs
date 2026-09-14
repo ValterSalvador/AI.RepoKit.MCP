@@ -123,6 +123,116 @@ public static class SpecCommandInputReader
         }
     }
 
+    /// <summary>
+    /// Reads a bounded JSON payload from <paramref name="filePath_"/> without requiring a
+    /// <see cref="SpecArtifactKind"/> (for non-canonical payloads such as
+    /// <c>SpecVerificationRequest</c>).  The same 1 MiB size cap, strict UTF-8, optional BOM,
+    /// and unknown-member rejection rules as <see cref="ReadCandidate{T}"/> apply.
+    /// </summary>
+    public static T ReadBoundedJson<T>(string filePath_)
+    {
+        string fullPath = Path.GetFullPath(filePath_);
+        if (!File.Exists(fullPath))
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.ReadFailed,
+                $"Input file '{filePath_}' does not exist.");
+        }
+
+        FileInfo fileInfo = new(fullPath);
+        if (fileInfo.Length > SpecWorkspace.MaximumArtifactSizeBytes)
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.ArtifactTooLarge,
+                $"Input file '{filePath_}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.");
+        }
+
+        byte[] bytes;
+        try
+        {
+            using FileStream stream = new(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 4096,
+                FileOptions.SequentialScan);
+
+            if (stream.Length > SpecWorkspace.MaximumArtifactSizeBytes)
+            {
+                throw new SpecPersistenceException(
+                    SpecPersistenceException.ArtifactTooLarge,
+                    $"Input file '{filePath_}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.");
+            }
+
+            byte[] buffer = new byte[SpecWorkspace.MaximumArtifactSizeBytes + 1];
+            int totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                int read = stream.Read(buffer, totalRead, buffer.Length - totalRead);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                totalRead += read;
+            }
+
+            if (totalRead > SpecWorkspace.MaximumArtifactSizeBytes)
+            {
+                throw new SpecPersistenceException(
+                    SpecPersistenceException.ArtifactTooLarge,
+                    $"Input file '{filePath_}' exceeds the {SpecWorkspace.MaximumArtifactSizeBytes}-byte limit.");
+            }
+
+            bytes = buffer[..totalRead];
+        }
+        catch (SpecPersistenceException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            UnauthorizedAccessException or
+            InvalidOperationException or
+            NotSupportedException)
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.ReadFailed,
+                $"Input file '{filePath_}' could not be read.",
+                innerException_: exception);
+        }
+
+        string json;
+        try
+        {
+            int offset = HasUtf8Bom(bytes) ? 3 : 0;
+            json = _strictUtf8.GetString(bytes, offset, bytes.Length - offset);
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.InvalidUtf8,
+                $"Input file '{filePath_}' is not valid UTF-8.",
+                innerException_: exception);
+        }
+
+        try
+        {
+            return SpecJsonSerializer.Deserialize<T>(json);
+        }
+        catch (Exception exception) when (
+            exception is System.Text.Json.JsonException or
+            NotSupportedException or
+            ArgumentException)
+        {
+            throw new SpecPersistenceException(
+                SpecPersistenceException.InvalidJson,
+                $"Input file '{filePath_}' is not valid spec JSON.",
+                innerException_: exception);
+        }
+    }
+
     private static bool HasUtf8Bom(byte[] bytes_)
     {
         return bytes_.Length >= 3 &&

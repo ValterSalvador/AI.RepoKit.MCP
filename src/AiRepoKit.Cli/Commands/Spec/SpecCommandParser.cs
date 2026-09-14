@@ -231,6 +231,29 @@ public sealed record SpecDiffOptions
     public bool IsJson { get; }
 }
 
+public sealed record SpecVerifyOptions
+{
+    public SpecVerifyOptions(
+        SpecId specId_,
+        string fromPath_,
+        string? repoPath_,
+        bool isJson_)
+    {
+        this.SpecId = specId_;
+        this.FromPath = fromPath_;
+        this.RepoPath = repoPath_;
+        this.IsJson = isJson_;
+    }
+
+    public SpecId SpecId { get; }
+
+    public string FromPath { get; }
+
+    public string? RepoPath { get; }
+
+    public bool IsJson { get; }
+}
+
 public sealed class SpecCliParsingException : Exception
 {
     public bool IsJson { get; }
@@ -537,6 +560,25 @@ public static class SpecCommandParser
         string? repoPath = options.Valued.GetValueOrDefault("--repo");
 
         return new SpecDiffOptions(specId, artifactLower, fromPath, repoPath, options.IsJson);
+    }
+
+    public static SpecVerifyOptions ParseVerify(IReadOnlyList<string> args_)
+    {
+        RawOptions options = ParseRawOptions(
+            "verify",
+            args_,
+            allowedValuedOptions_: ["--spec-id", "--from", "--repo"],
+            allowedFlagOptions_: ["--json"]);
+
+        SpecId specId = ParseSpecId(options);
+
+        if (!options.Valued.TryGetValue("--from", out string? fromPath) || string.IsNullOrWhiteSpace(fromPath))
+        {
+            throw new SpecCliParsingException("Missing required option: '--from'.", options.IsJson);
+        }
+
+        string? repoPath = options.Valued.GetValueOrDefault("--repo");
+        return new SpecVerifyOptions(specId, fromPath, repoPath, options.IsJson);
     }
 
     private static SpecId ParseSpecId(RawOptions options_)

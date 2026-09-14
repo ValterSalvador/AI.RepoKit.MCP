@@ -6,6 +6,8 @@ using AiRepoKit.Spec.Diff;
 using AiRepoKit.Spec.Lifecycle;
 using AiRepoKit.Spec.Persistence;
 using AiRepoKit.Spec.Projection;
+using AiRepoKit.Spec.Verification;
+
 
 namespace AiRepoKit.Cli.Commands.Spec;
 
@@ -27,6 +29,7 @@ public static class SpecCommandRenderer
         airepo spec approve --spec-id <spec-id> --artifact requirements|work-spec|implementation-plan --revision <n> [--repo <path>] [--dry-run | --apply] [--json]
         airepo spec checklist --spec-id <spec-id> [--repo <path>] [--json]
         airepo spec diff --spec-id <spec-id> --artifact requirements|work-spec|implementation-plan --from <candidate.json> [--repo <path>] [--json]
+        airepo spec verify --spec-id <spec-id> --from <verification-request.json> [--repo <path>] [--json]
         ```
 
         Lifecycle subcommands:
@@ -38,7 +41,9 @@ public static class SpecCommandRenderer
         - `approve`: Records an approval for a RequirementSet, WorkSpec, or ImplementationPlan in the approval ledger.
         - `checklist`: Displays the derived implementation checklist projected from the canonical ImplementationPlan (read-only).
         - `diff`: Semantically compares a candidate artifact against canonical state and analyzes downstream invalidation (read-only).
+        - `verify`: Verifies the approved canonical graph against repository evidence (read-only).
         """;
+
     }
 
     public static CommandResult RenderError(
@@ -594,4 +599,95 @@ public static class SpecCommandRenderer
 
         return CommandResult.Ok(builder.ToString().TrimEnd());
     }
+
+    public static CommandResult RenderVerifyResult(
+        SpecId specId_,
+        SpecVerificationReport report_,
+        bool isJson_)
+    {
+        if (isJson_)
+        {
+            return CommandResult.Ok(SpecJsonSerializer.Serialize(report_));
+        }
+
+        StringBuilder builder = new();
+        builder.AppendLine($"# Spec Verification: `{specId_.Value}`");
+        builder.AppendLine();
+        builder.AppendLine($"- RequirementSet Revision: `{report_.RequirementSetRevision.Value.ToString(CultureInfo.InvariantCulture)}`");
+        builder.AppendLine($"- WorkSpec Revision: `{report_.WorkSpecRevision.Value.ToString(CultureInfo.InvariantCulture)}`");
+        builder.AppendLine($"- ImplementationPlan Revision: `{report_.ImplementationPlanRevision.Value.ToString(CultureInfo.InvariantCulture)}`");
+        builder.AppendLine($"- Overall Status: `{HumanVerificationStatus(report_.OverallStatus)}`");
+
+        builder.AppendLine();
+        builder.AppendLine("## Results");
+        builder.AppendLine();
+
+        if (report_.Results.Count == 0)
+        {
+            builder.AppendLine("_No acceptance criteria found._");
+        }
+        else
+        {
+            // Results are already sorted by evaluator (sorted AC order)
+            foreach (VerificationResult result in report_.Results)
+            {
+                string humanStatus = HumanVerificationStatus(result.Status);
+                string evidenceList = result.EvidenceIds.Count > 0
+                    ? string.Join(", ", result.EvidenceIds.Select(id_ => $"`{id_.Value}`"))
+                    : "_none_";
+                builder.AppendLine($"- `{result.AcceptanceCriterionId.Value}`: `{humanStatus}`");
+                builder.AppendLine($"  - Result ID: `{result.Id.Value}`");
+                builder.AppendLine($"  - Evidence: {evidenceList}");
+                builder.AppendLine($"  - Summary: {result.Summary}");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Evidence");
+
+        if (report_.Observations.Count == 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("_No evidence observations._");
+        }
+        else
+        {
+            // Observations already sorted by EvidenceId ordinal
+            foreach (SpecVerificationEvidenceObservation obs in report_.Observations)
+            {
+                builder.AppendLine();
+                builder.AppendLine($"### `{obs.EvidenceId.Value}`");
+                builder.AppendLine();
+                builder.AppendLine($"- Repository Evidence ID: `{obs.RepositoryEvidenceId}`");
+                builder.AppendLine($"- Source: `{obs.Source}`");
+                builder.AppendLine($"- Kind: `{obs.Kind}`");
+                builder.AppendLine($"- Reference: `{obs.Reference}`");
+                builder.AppendLine($"- Availability: `{obs.Availability}`");
+                builder.AppendLine($"- Freshness: `{obs.Freshness}`");
+                builder.AppendLine($"- Source Generated At: `{(string.IsNullOrEmpty(obs.SourceGeneratedAt) ? "unknown" : obs.SourceGeneratedAt)}`");
+                builder.AppendLine($"- Disposition: `{HumanDisposition(obs.Disposition)}`");
+                builder.AppendLine($"- Reason: {obs.Reason}");
+            }
+        }
+
+        return CommandResult.Ok(builder.ToString().TrimEnd());
+    }
+
+    private static string HumanVerificationStatus(VerificationStatus status_) =>
+        status_ switch
+        {
+            VerificationStatus.Pass => "PASS",
+            VerificationStatus.Fail => "FAIL",
+            VerificationStatus.NotVerified => "NOT_VERIFIED",
+            _ => status_.ToString().ToUpperInvariant()
+        };
+
+    private static string HumanDisposition(SpecVerificationEvidenceDisposition disposition_) =>
+        disposition_ switch
+        {
+            SpecVerificationEvidenceDisposition.Supporting => "SUPPORTING",
+            SpecVerificationEvidenceDisposition.Contradicting => "CONTRADICTING",
+            SpecVerificationEvidenceDisposition.Inconclusive => "INCONCLUSIVE",
+            _ => disposition_.ToString().ToUpperInvariant()
+        };
 }

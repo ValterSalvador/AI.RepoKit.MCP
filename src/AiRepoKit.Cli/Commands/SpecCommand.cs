@@ -1,11 +1,16 @@
 using AiRepoKit.Cli.Commands.Spec;
 using AiRepoKit.Cli.Models;
 using AiRepoKit.Cli.Services;
+using AiRepoKit.Cli.Services.SpecContexts;
+using AiRepoKit.Cli.Services.SpecVerification;
+using AiRepoKit.Cli.Models.SpecContexts;
 using AiRepoKit.Spec;
+using AiRepoKit.Spec.Context;
 using AiRepoKit.Spec.Diff;
 using AiRepoKit.Spec.Lifecycle;
 using AiRepoKit.Spec.Persistence;
 using AiRepoKit.Spec.Projection;
+using AiRepoKit.Spec.Verification;
 
 namespace AiRepoKit.Cli.Commands;
 
@@ -44,8 +49,10 @@ public sealed class SpecCommand
             "checklist" => this.ExecuteChecklist(arguments_.Skip(1).ToArray()),
             "approve" => this.ExecuteApprove(arguments_.Skip(1).ToArray()),
             "diff" => this.ExecuteDiff(arguments_.Skip(1).ToArray()),
+            "verify" => this.ExecuteVerify(arguments_.Skip(1).ToArray()),
             _ => this.HandleUnknownSubcommand(subcommand, arguments_)
         };
+
     }
 
     private CommandResult HandleUnknownSubcommand(string subcommand_, IReadOnlyList<string> arguments_)
@@ -607,8 +614,189 @@ public sealed class SpecCommand
             candidate);
     }
 
+
     private static string ResolveRepo(string? repoPathRaw_)
     {
         return new RepoPathResolver().Resolve(repoPathRaw_, "spec");
+    }
+
+    private CommandResult ExecuteVerify(IReadOnlyList<string> args_)
+    {
+        SpecVerifyOptions options;
+        try
+        {
+            options = SpecCommandParser.ParseVerify(args_);
+        }
+        catch (SpecCliParsingException exception)
+        {
+            return SpecCommandRenderer.RenderError(exception.Message, exception.IsJson);
+        }
+
+        string repoRoot;
+        try
+        {
+            repoRoot = ResolveRepo(options.RepoPath);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                "Repository path resolution failed: " + exception.Message,
+                options.IsJson);
+        }
+
+        SpecVerificationRequest request;
+        try
+        {
+            request = SpecCommandInputReader.ReadBoundedJson<SpecVerificationRequest>(options.FromPath);
+        }
+        catch (SpecPersistenceException exception)
+        {
+            return SpecCommandRenderer.RenderPersistenceError(exception, options.IsJson);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                "Failed to read verification request: " + exception.Message,
+                options.IsJson);
+        }
+
+        try
+        {
+            SpecLifecycleService service = new(repoRoot, options.SpecId);
+            SpecWorkspaceSnapshot snapshot = service.Workspace.Load();
+            SpecApprovalLedger? ledger = service.LedgerStore.Load();
+
+            // Prerequisite: canonical graph must exist
+            if (snapshot.RequirementSet is null)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical RequirementSet does not exist. Run 'spec init' first.",
+                    options.IsJson);
+            }
+
+            if (snapshot.WorkSpec is null)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical WorkSpec does not exist. Run 'spec refine' first.",
+                    options.IsJson);
+            }
+
+            if (snapshot.ImplementationPlan is null)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical ImplementationPlan does not exist. Run 'spec plan' first.",
+                    options.IsJson);
+            }
+
+            if (snapshot.IsWorkSpecStale)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical WorkSpec is stale relative to RequirementSet. Re-approve or update the WorkSpec.",
+                    options.IsJson);
+            }
+
+            if (snapshot.IsImplementationPlanStale)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical ImplementationPlan is stale relative to WorkSpec. Re-approve or update the ImplementationPlan.",
+                    options.IsJson);
+            }
+
+            IReadOnlyList<SpecArtifactApprovalStatus> approvalStatuses =
+                SpecApprovalStatusEvaluator.Evaluate(snapshot, ledger);
+
+            SpecArtifactApprovalStatus? reqStatus =
+                approvalStatuses.FirstOrDefault(s_ => s_.ArtifactKind == SpecArtifactKind.RequirementSet);
+            if (reqStatus is null || reqStatus.Status != SpecApprovalStatus.Current)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical RequirementSet approval status is not Current. Approve the RequirementSet first.",
+                    options.IsJson);
+            }
+
+            SpecArtifactApprovalStatus? wsStatus =
+                approvalStatuses.FirstOrDefault(s_ => s_.ArtifactKind == SpecArtifactKind.WorkSpec);
+            if (wsStatus is null || wsStatus.Status != SpecApprovalStatus.Current)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical WorkSpec approval status is not Current. Approve the WorkSpec first.",
+                    options.IsJson);
+            }
+
+            SpecArtifactApprovalStatus? planStatus =
+                approvalStatuses.FirstOrDefault(s_ => s_.ArtifactKind == SpecArtifactKind.ImplementationPlan);
+            if (planStatus is null || planStatus.Status != SpecApprovalStatus.Current)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Canonical ImplementationPlan approval status is not Current. Approve the ImplementationPlan first.",
+                    options.IsJson);
+            }
+
+            // Validate traceability using existing VerificationValidator
+            IReadOnlyList<VerificationEvidence> evidenceList =
+                request.Evidence.Select(b_ => b_.Evidence).ToArray();
+            IReadOnlyList<SpecValidationError> traceErrors =
+                VerificationValidator.Validate(
+                    evidenceList,
+                    [],
+                    snapshot.WorkSpec,
+                    snapshot.ImplementationPlan);
+
+            if (traceErrors.Count > 0)
+            {
+                IReadOnlyList<string> errorMessages =
+                    traceErrors.Select(e_ => $"[{e_.Code}] {e_.Message}").ToArray();
+                return SpecCommandRenderer.RenderError(
+                    "Verification request has invalid traceability.",
+                    options.IsJson,
+                    errorCode_: SpecPersistenceException.ValidationFailed,
+                    validationErrors_: errorMessages);
+            }
+
+            // Collect repository evidence
+            RepositoryEvidenceCollector collector = new();
+            RepositoryEvidenceCollection collection = collector.Collect(
+                new RepositoryEvidenceCollectionRequest(repoRoot, "spec-verify", 10, 500));
+
+            // Build lookup keyed by EvidenceId
+            Dictionary<string, RepositoryEvidence> evidenceLookup =
+                collection.Evidence.ToDictionary(e_ => e_.EvidenceId, StringComparer.Ordinal);
+
+            // Bind observations
+            SpecVerificationEvidenceBinder binder = new();
+            IReadOnlyList<SpecVerificationEvidenceObservation> observations =
+                binder.Bind(request.Evidence, evidenceLookup, repoRoot, out IReadOnlyList<string> bindErrors);
+
+            if (bindErrors.Count > 0)
+            {
+                return SpecCommandRenderer.RenderError(
+                    "Verification request has invalid evidence bindings.",
+                    options.IsJson,
+                    errorCode_: SpecPersistenceException.ValidationFailed,
+                    validationErrors_: bindErrors);
+            }
+
+            // Evaluate
+            SpecVerificationReport report = SpecVerificationEvaluator.Evaluate(
+                options.SpecId.Value,
+                snapshot.RequirementSet.Revision,
+                snapshot.WorkSpec.Revision,
+                snapshot.ImplementationPlan.Revision,
+                evidenceList,
+                observations,
+                snapshot.WorkSpec);
+
+            return SpecCommandRenderer.RenderVerifyResult(options.SpecId, report, options.IsJson);
+        }
+        catch (SpecPersistenceException exception)
+        {
+            return SpecCommandRenderer.RenderPersistenceError(exception, options.IsJson);
+        }
+        catch (Exception exception)
+        {
+            return SpecCommandRenderer.RenderError(
+                "Spec verify failed: " + exception.Message,
+                options.IsJson);
+        }
     }
 }
