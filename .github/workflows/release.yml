@@ -89,7 +89,7 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File tests/v1.8.1-smoke.ps1
 
       - name: Run v2.0.0 smoke tests
-        run: powershell -ExecutionPolicy Bypass -File tests/v2.0.0-smoke.ps1
+        run: powershell -ExecutionPolicy Bypass -File tests/v2.0.0-smoke.ps1 -ExpectedCliVersion $env:RELEASE_VERSION
 
       - name: Build release assets
         run: powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version $env:RELEASE_VERSION

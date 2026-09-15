@@ -1,5 +1,6 @@
 param(
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
+    [string]$ExpectedCliVersion = '2.0.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,8 +47,8 @@ function Remove-TestRepo {
 }
 
 $version = (Invoke-AiRepo -Arguments @('--version')).Trim()
-if ($version -ne '2.0.0') {
-    throw "CLI version is not 2.0.0. Found: $version"
+if ($version -ne $ExpectedCliVersion) {
+    throw "CLI version is not $ExpectedCliVersion. Found: $version"
 }
 
 $rootMcpConfigPath = Join-Path $RepoRoot '.mcp.json'
