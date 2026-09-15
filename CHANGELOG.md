@@ -6,6 +6,64 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-14
+
+### Spec-Driven Development
+
+AI.RepoKit v3.0.0 introduces formal Spec-Driven Development (SDD), providing typed,
+versioned Intermediate Representation (IR) artifacts, cryptographic approval ledgers,
+deterministic semantic diffing, evidence-backed verification, and read-only MCP Spec
+context integration.
+
+#### Added
+
+- Formal Spec IR schema v1 (`https://ai.repokit.dev/schemas/spec/v1/spec-ir.schema.json`)
+  defining typed contracts for `RequirementInput`, `Requirement`, `RequirementSet`,
+  `Constraint`, `AcceptanceCriterion`, `WorkSpec`, `PlanStep`, `ImplementationPlan`,
+  `Approval`, `VerificationEvidence`, and `VerificationResult`.
+- Canonical Spec workspace persistence under `.ai/specs/<spec-id>/` for requirements,
+  work specifications, implementation plans, and approval ledgers.
+- Directory-level concurrency coordination (`SpecWorkspaceWriteCoordinator`) and atomic
+  payload writes (`SpecAtomicFileWriter`) protecting canonical Spec files from partial
+  writes and symlink traversal.
+- Bounded `SpecContext` builder and persistence service producing derived, budget-aware
+  projections under `.ai/generated/spec-context/<spec-id>.json`.
+- Cryptographically bound approval ledger (`approvals.json`) recording approvals with
+  SHA-256 semantic digests (`SpecSemanticDigest`), revision numbers, and approver identity.
+- Approval status evaluation engine reporting `Current`, `Stale`, and `NotApproved` states
+  with automatic invalidation when upstream dependencies are modified.
+- Implementation checklist projector (`ImplementationChecklistProjector`) generating
+  dynamic in-memory Markdown and JSON checklists from canonical plans without persisting
+  derived checklist state.
+- Semantic diff analyzer (`SpecDiffAnalyzer`) comparing candidate IR against canonical
+  state and projecting exact property differences and downstream invalidation impacts.
+- Evidence-backed verification adapter, prerequisite validator, and evaluator supporting
+  strict outcomes (`PASS`, `FAIL`, `NOT_VERIFIED`) where missing evidence is never `PASS`
+  and unsupported LLM assertions are rejected.
+- Read-only Spec context integration in the Portable MCP runtime (`airepo mcp serve`)
+  exposing `spec`, `spec-context`, and `verification` kinds through `get_context`.
+- New `airepo spec` CLI command group providing `init`, `show`, `refine`, `plan`,
+  `approve`, `checklist`, `diff`, and `verify` subcommands with dry-run default behavior.
+- Comprehensive Spec-Driven Development documentation guide (`docs/v3-spec-driven-development.md`).
+
+#### Changed
+
+- CLI package and tool version bumped to 3.0.0 across metadata, build, and runtime version reporting.
+- Portable MCP capabilities in `get_health` advertise `spec`, `spec-context`, and `verification`
+  while preserving the fixed compact surface: 5 tools, 9 resources, and 17 prompts.
+- Top-level `airepo plan` remains distinct and backwards-compatible with v1/v2 repository
+  setup, while `airepo spec plan` governs canonical v3 implementation plans.
+
+#### Compatibility & Migration
+
+- Additive and opt-in: Upgrading to v3.0.0 does not create `.ai/specs/` or alter existing
+  repository configurations.
+- Existing v2 repositories continue running all existing workflows (`audit`, `plan`, `setup`,
+  `update`, `self-check`, `mcp-diagnose`, hooks, context-packs) without modification.
+- Spec IR schema v1 is immutable; workspaces produced during v3 development remain fully valid.
+- Mutating Spec commands default to dry-run previews; canonical changes require explicit `--apply`.
+- Portable MCP server remains session-repository-bound, read-only, and bounded by context budgets.
+
 ## [2.0.0] - 2026-08-24
 
 ### Cross-platform runtime

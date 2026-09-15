@@ -1,8 +1,8 @@
-﻿# AI.RepoKit.MCP
+# AI.RepoKit.MCP
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v2.0.0 release candidate with Git hooks enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
+Status: v3.0.0 release readiness with formal Spec-Driven Development (SDD), immutable Spec IR schema v1, evidence-backed verification, and read-only MCP Spec context. Git hooks remain enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
 
 ## Goals
 
@@ -52,20 +52,20 @@ Run commands from the repository root whenever you are targeting the current rep
 Before the GitHub Release exists, build the local package and update the already-installed global tool from the repository:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 2.0.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 3.0.0
 $packageSource = (Resolve-Path "artifacts/nuget").Path
-dotnet tool update --global AiRepoKit.Cli --version 2.0.0 --add-source $packageSource
+dotnet tool update --global AiRepoKit.Cli --version 3.0.0 --add-source $packageSource
 airepo --version
 ```
 
-After the `v2.0.0` release candidate is published, download its `.nupkg` release asset and use it as a temporary package source:
+After the `v3.0.0` release candidate is published, download its `.nupkg` release asset and use it as a temporary package source:
 
 ```powershell
-$packageSource = Join-Path $env:TEMP "airepo-2.0.0"
+$packageSource = Join-Path $env:TEMP "airepo-3.0.0"
 New-Item -ItemType Directory -Force -Path $packageSource | Out-Null
 $releaseRepo = "owner/AI.RepoKit.MCP"
-gh release download v2.0.0 --repo $releaseRepo --pattern "AiRepoKit.Cli.2.0.0.nupkg" --dir $packageSource --clobber
-dotnet tool update --global AiRepoKit.Cli --version 2.0.0 --add-source $packageSource
+gh release download v3.0.0 --repo $releaseRepo --pattern "AiRepoKit.Cli.3.0.0.nupkg" --dir $packageSource --clobber
+dotnet tool update --global AiRepoKit.Cli --version 3.0.0 --add-source $packageSource
 airepo --version
 ```
 
@@ -180,7 +180,7 @@ The repository-local MCP server is read-only and stdio-only. During normal MCP o
 
 ## MCP Resources And Prompts
 
-The v2.0.0 release candidate keeps the compact MCP tool surface (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`) and enables the repository-local Git hooks introduced in v1.8.0 by default during applied `setup` and `bootstrap` runs. v1.7.0 added incremental code-index cache reuse, context-pack freshness checks, faster MCP diagnostics, and stale-host cleanup.
+In v3.0.0, the compact Portable MCP surface is fixed at 5 tools (`get_repo_brief`, `get_health`, `get_policy`, `get_context`, `search_context`), 9 resources, and 17 prompts. In addition to v2 context packs, `get_context` provides read-only Spec context queries (`kind=spec`, `kind=spec-context`, `kind=verification`). Git hooks introduced in v1.8.0 remain enabled by default during applied `setup` and `bootstrap` runs. v1.7.0 added incremental code-index cache reuse, context-pack freshness checks, faster MCP diagnostics, and stale-host cleanup.
 
 Resource URIs:
 
@@ -230,6 +230,70 @@ Recoverable MCP tool failures return structured payloads instead of JSON-RPC pro
 ```
 
 Use `get_health area=capabilities` to inspect supported context kinds, generated artifact availability, read-only mode, budgets, and cheap client config detection. Use `get_policy` to confirm the safety envelope: no file writes, command execution, database access, or network access; restricted paths stay denied and secret values stay redacted.
+
+## Spec-Driven Development (v3.0.0)
+
+AI.RepoKit v3.0.0 introduces formal **Spec-Driven Development (SDD)**, providing typed, immutable Spec IR schema v1 artifacts under `.ai/specs/<spec-id>/`, cryptographic approval ledgers, and deterministic, evidence-backed verification.
+
+For complete documentation on canonical state, lifecycle, revision invalidation, evidence semantics, and migration, see:
+
+[AI.RepoKit v3 Spec-Driven Development Guide](docs/v3-spec-driven-development.md)
+
+### Spec CLI Workflow
+
+All Spec operations use the `airepo spec` command group. Mutating operations default to dry-run previews; pass `--apply` to persist changes:
+
+```powershell
+# 1. Initialize RequirementSet (dry-run by default; requires --apply)
+airepo spec init --spec-id feature-auth --from requirements.json --apply
+
+# 2. Inspect canonical lifecycle state and derived approval statuses (read-only)
+airepo spec show --spec-id feature-auth
+
+# 3. Record explicit human approval for RequirementSet revision 1
+airepo spec approve --spec-id feature-auth --artifact requirements --revision 1 --apply
+
+# 4. Refine technical WorkSpec against approved requirements
+airepo spec refine --spec-id feature-auth --artifact work-spec --from work-spec.json --apply
+airepo spec approve --spec-id feature-auth --artifact work-spec --revision 1 --apply
+
+# 5. Define ImplementationPlan and project in-memory checklist (no checklist state is persisted)
+airepo spec plan --spec-id feature-auth --from plan.json --apply
+airepo spec approve --spec-id feature-auth --artifact implementation-plan --revision 1 --apply
+airepo spec checklist --spec-id feature-auth
+
+# 6. Analyze semantic diff and downstream invalidation (read-only)
+airepo spec diff --spec-id feature-auth --artifact requirements --from req-candidate.json
+
+# 7. Evidence-backed verification against repository evidence (read-only)
+airepo spec verify --spec-id feature-auth --from verification-request.json
+```
+
+> [!NOTE]
+> The top-level command `airepo plan` (repository client configuration, profiles, and MCP setup) remains distinct and unchanged from `airepo spec plan` (managing a canonical Spec `ImplementationPlan`).
+
+### MCP Spec Context Queries
+
+Connected MCP clients can query read-only Spec context bounded by `ContextBudget` through the standard `get_context` tool:
+
+```text
+# Query canonical Spec overview (presence, revisions, approval statuses, digests)
+get_context kind=spec target=feature-auth detail=brief
+
+# Query bounded SpecContext package (repository evidence, constraints, references)
+get_context kind=spec-context target=feature-auth detail=brief
+
+# Query verification criteria, prerequisites, and approval status
+get_context kind=verification target=feature-auth detail=brief
+```
+
+Spec queries through MCP are strictly session-repository-bound and read-only. MCP cannot create, mutate, approve, or execute verification commands.
+
+### Migration & Compatibility
+
+- **Additive & Opt-in**: Installing or upgrading to the 3.0.0 CLI alone does NOT create `.ai/specs` or modify repository configuration.
+- **Existing Repositories**: Existing v2 repositories continue running all v2 workflows without alteration. There is no implicit v2 → Spec migration.
+- **Immutable Schema v1**: Existing schema v1 workspaces remain valid. No implicit schema upgrades exist.
 
 ## Real Repository Flow
 
@@ -315,7 +379,7 @@ For a local release validation build:
 
 ```powershell
 dotnet build -c Debug
-powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 2.0.0
+powershell -ExecutionPolicy Bypass -File scripts/Build-Release.ps1 -Version 3.0.0
 artifacts/publish/win-x64/airepo.exe --help
 artifacts/publish/win-x64/airepo.exe self-check --strict --timings
 artifacts/publish/win-x64/airepo.exe mcp-diagnose --clients codex,vscode,vs --strict --timings
