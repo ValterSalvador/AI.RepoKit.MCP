@@ -7,6 +7,11 @@ public interface IAgentExecutor
         get;
     }
 
+    AgentCapabilitySet Capabilities
+    {
+        get;
+    }
+
     Task<AgentExecutionResult> ExecuteAsync(
         AgentExecutionRequest request_,
         CancellationToken cancellationToken_ = default);

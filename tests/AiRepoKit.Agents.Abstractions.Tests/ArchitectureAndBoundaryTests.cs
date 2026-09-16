@@ -9,6 +9,8 @@ public sealed class ArchitectureAndBoundaryTests
 {
     private static readonly string[] _expectedPublicTypeNames =
     [
+        "AgentCapability",
+        "AgentCapabilitySet",
         "AgentExecutionRequest",
         "AgentExecutionResult",
         "AgentExecutionStatus",
@@ -108,13 +110,17 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicP01DomainSurface_IsLimitedToSixFrozenTypes()
+    public void PublicDomainSurface_IsLimitedToEightFrozenTypes()
     {
         Assembly assembly =
             typeof(IAgentExecutor).Assembly;
 
         Type[] exportedTypes =
             assembly.GetExportedTypes();
+
+        Assert.Equal(
+            8,
+            exportedTypes.Length);
 
         string[] exportedNames =
             exportedTypes
@@ -210,6 +216,93 @@ public sealed class ArchitectureAndBoundaryTests
                     forbidden,
                     StringComparison.Ordinal),
                 $"Public API exposed forbidden type '{type_.FullName}' from namespace '{ns}'.");
+        }
+    }
+
+    [Fact]
+    public void AgentExecutionRequest_ContainsNoCapabilityRequirement()
+    {
+        Type requestType =
+            typeof(AgentExecutionRequest);
+
+        PropertyInfo? capabilityProperty =
+            requestType.GetProperty("Capability");
+        PropertyInfo? capabilitiesProperty =
+            requestType.GetProperty("Capabilities");
+        PropertyInfo? requiredCapabilitiesProperty =
+            requestType.GetProperty("RequiredCapabilities");
+
+        Assert.Null(capabilityProperty);
+        Assert.Null(capabilitiesProperty);
+        Assert.Null(requiredCapabilitiesProperty);
+
+        foreach (ConstructorInfo ctor in requestType.GetConstructors())
+        {
+            foreach (ParameterInfo parameter in ctor.GetParameters())
+            {
+                Assert.DoesNotContain(
+                    "capability",
+                    parameter.Name ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
+    public void AgentExecutionResult_ContainsNoCapabilityData()
+    {
+        Type resultType =
+            typeof(AgentExecutionResult);
+
+        PropertyInfo? capabilityProperty =
+            resultType.GetProperty("Capability");
+        PropertyInfo? capabilitiesProperty =
+            resultType.GetProperty("Capabilities");
+        PropertyInfo? discoveredCapabilitiesProperty =
+            resultType.GetProperty("DiscoveredCapabilities");
+
+        Assert.Null(capabilityProperty);
+        Assert.Null(capabilitiesProperty);
+        Assert.Null(discoveredCapabilitiesProperty);
+
+        foreach (MethodInfo method in resultType.GetMethods())
+        {
+            Assert.DoesNotContain(
+                "Capability",
+                method.Name,
+                StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void Assembly_DoesNotContainFuturePhaseConcepts()
+    {
+        Assembly assembly =
+            typeof(IAgentExecutor).Assembly;
+
+        string[] forbiddenTypeNames =
+        [
+            "ExecutionPermission",
+            "ExecutionEnvironment",
+            "StructuredOutputContract",
+            "ExecutableWork",
+            "PromptCompiler",
+            "TaskDag",
+            "WorkflowScheduler"
+        ];
+
+        Type[] exportedTypes =
+            assembly.GetExportedTypes();
+
+        foreach (string forbidden in forbiddenTypeNames)
+        {
+            Assert.DoesNotContain(
+                exportedTypes,
+                type_ =>
+                    string.Equals(
+                        type_.Name,
+                        forbidden,
+                        StringComparison.OrdinalIgnoreCase));
         }
     }
 }

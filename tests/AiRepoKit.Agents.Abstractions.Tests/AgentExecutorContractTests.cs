@@ -1,3 +1,4 @@
+using System.Reflection;
 using AiRepoKit.Agents;
 using Xunit;
 
@@ -13,14 +14,23 @@ public sealed class AgentExecutorContractTests
             get;
         }
 
+        public AgentCapabilitySet Capabilities
+        {
+            get;
+        }
+
         private readonly Func<AgentExecutionRequest, CancellationToken, Task<AgentExecutionResult>> _handler;
 
         public FakeAgentExecutor(
             AgentProviderId providerId_,
-            Func<AgentExecutionRequest, CancellationToken, Task<AgentExecutionResult>> handler_)
+            Func<AgentExecutionRequest, CancellationToken, Task<AgentExecutionResult>> handler_,
+            AgentCapabilitySet? capabilities_ = null)
         {
             this.ProviderId =
                 providerId_;
+            this.Capabilities =
+                capabilities_ ??
+                AgentCapabilitySet.Empty;
             this._handler =
                 handler_;
         }
@@ -176,5 +186,87 @@ public sealed class AgentExecutorContractTests
             typeof(AgentExecutionResult).GetProperty("IsStepCompleted"));
         Assert.Null(
             typeof(AgentExecutionResult).GetProperty("Evidence"));
+    }
+
+    [Fact]
+    public void FakeExecutor_ExposesCapabilities()
+    {
+        AgentCapabilitySet expectedCapabilities =
+            new([new AgentCapability("text"), new AgentCapability("tools")]);
+
+        IAgentExecutor executor =
+            new FakeAgentExecutor(
+                new AgentProviderId("antigravity"),
+                (request_, cancellationToken_) =>
+                    Task.FromResult(
+                        AgentExecutionResult.Completed("ok")),
+                expectedCapabilities);
+
+        Assert.Equal(
+            expectedCapabilities,
+            executor.Capabilities);
+
+        Assert.True(
+            executor.Capabilities.Supports(new AgentCapability("text")));
+        Assert.True(
+            executor.Capabilities.Supports(new AgentCapability("tools")));
+        Assert.False(
+            executor.Capabilities.Supports(new AgentCapability("session.resume")));
+    }
+
+    [Fact]
+    public void FakeExecutor_DefaultsToEmptyCapabilitiesWhenNoneProvided()
+    {
+        IAgentExecutor executor =
+            new FakeAgentExecutor(
+                new AgentProviderId("antigravity"),
+                (request_, cancellationToken_) =>
+                    Task.FromResult(
+                        AgentExecutionResult.Completed("ok")));
+
+        Assert.NotNull(
+            executor.Capabilities);
+        Assert.Empty(
+            executor.Capabilities);
+        Assert.Equal(
+            AgentCapabilitySet.Empty,
+            executor.Capabilities);
+    }
+
+    [Fact]
+    public void IAgentExecutor_CapabilitiesProperty_IsSynchronousMetadata()
+    {
+        PropertyInfo? capabilitiesProperty =
+            typeof(IAgentExecutor).GetProperty("Capabilities");
+
+        Assert.NotNull(
+            capabilitiesProperty);
+
+        Assert.Equal(
+            typeof(AgentCapabilitySet),
+            capabilitiesProperty.PropertyType);
+
+        Assert.True(
+            capabilitiesProperty.CanRead);
+        Assert.False(
+            capabilitiesProperty.CanWrite);
+
+        MethodInfo[] methods =
+            typeof(IAgentExecutor).GetMethods();
+
+        foreach (MethodInfo method in methods)
+        {
+            Assert.DoesNotContain(
+                "Discover",
+                method.Name,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (method.Name.Contains("Capability", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.False(
+                    typeof(Task).IsAssignableFrom(method.ReturnType),
+                    $"Capability member '{method.Name}' must be synchronous.");
+            }
+        }
     }
 }
