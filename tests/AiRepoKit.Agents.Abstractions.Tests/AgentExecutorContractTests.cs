@@ -86,7 +86,10 @@ public sealed class AgentExecutorContractTests
                 });
 
         AgentExecutionRequest request =
-            new("Perform action");
+            new(
+                "Perform action",
+                ExecutionPermission.ReadOnly,
+                new ExecutionEnvironment(AppContext.BaseDirectory));
 
         OperationCanceledException exception =
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -124,7 +127,10 @@ public sealed class AgentExecutorContractTests
                 });
 
         AgentExecutionRequest request =
-            new("Perform action");
+            new(
+                "Perform action",
+                ExecutionPermission.ReadOnly,
+                new ExecutionEnvironment(AppContext.BaseDirectory));
 
         try
         {
@@ -168,7 +174,10 @@ public sealed class AgentExecutorContractTests
                             sessionReference_: new AgentSessionReference("session-turn-1"))));
 
         AgentExecutionRequest request =
-            new("Fix compiler error in project.");
+            new(
+                "Fix compiler error in project.",
+                ExecutionPermission.WorkspaceWrite,
+                new ExecutionEnvironment(AppContext.BaseDirectory));
 
         AgentExecutionResult result =
             await executor.ExecuteAsync(

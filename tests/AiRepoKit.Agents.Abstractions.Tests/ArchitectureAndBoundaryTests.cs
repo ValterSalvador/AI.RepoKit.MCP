@@ -16,7 +16,10 @@ public sealed class ArchitectureAndBoundaryTests
         "AgentExecutionStatus",
         "AgentProviderId",
         "AgentSessionReference",
-        "IAgentExecutor"
+        "ExecutionEnvironment",
+        "ExecutionPermission",
+        "IAgentExecutor",
+        "StructuredOutputContract"
     ];
 
     [Fact]
@@ -110,7 +113,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicDomainSurface_IsLimitedToEightFrozenTypes()
+    public void PublicDomainSurface_IsLimitedToElevenFrozenTypes()
     {
         Assembly assembly =
             typeof(IAgentExecutor).Assembly;
@@ -119,7 +122,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            8,
+            11,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -282,13 +285,12 @@ public sealed class ArchitectureAndBoundaryTests
 
         string[] forbiddenTypeNames =
         [
-            "ExecutionPermission",
-            "ExecutionEnvironment",
-            "StructuredOutputContract",
             "ExecutableWork",
             "PromptCompiler",
             "TaskDag",
-            "WorkflowScheduler"
+            "WorkflowScheduler",
+            "StepCompletion",
+            "WorkflowState"
         ];
 
         Type[] exportedTypes =
@@ -304,5 +306,219 @@ public sealed class ArchitectureAndBoundaryTests
                         forbidden,
                         StringComparison.OrdinalIgnoreCase));
         }
+    }
+
+    [Fact]
+    public void IAgentExecutor_RemainsUnchangedFromP02()
+    {
+        Type executorType =
+            typeof(IAgentExecutor);
+
+        PropertyInfo[] properties =
+            executorType.GetProperties();
+
+        string[] propertyNames =
+            properties
+                .Select(
+                    p_ =>
+                        p_.Name)
+                .OrderBy(
+                    n_ =>
+                        n_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        string[] expectedPropertyNames =
+        [
+            "Capabilities",
+            "ProviderId"
+        ];
+
+        Assert.Equal(
+            expectedPropertyNames,
+            propertyNames);
+
+        MethodInfo[] methods =
+            executorType.GetMethods();
+
+        string[] nonGetterMethodNames =
+            methods
+                .Where(
+                    m_ =>
+                        !m_.IsSpecialName)
+                .Select(
+                    m_ =>
+                        m_.Name)
+                .ToArray();
+
+        Assert.Single(
+            nonGetterMethodNames);
+        Assert.Equal(
+            "ExecuteAsync",
+            nonGetterMethodNames[0]);
+    }
+
+    [Fact]
+    public void AgentExecutionResult_RemainsUnchangedFromP01()
+    {
+        Type resultType =
+            typeof(AgentExecutionResult);
+
+        PropertyInfo[] properties =
+            resultType.GetProperties(
+                BindingFlags.Public |
+                BindingFlags.Instance);
+
+        string[] propertyNames =
+            properties
+                .Select(
+                    p_ =>
+                        p_.Name)
+                .OrderBy(
+                    n_ =>
+                        n_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        string[] expectedPropertyNames =
+        [
+            "DiagnosticText",
+            "OutputText",
+            "SessionReference",
+            "Status"
+        ];
+
+        Assert.Equal(
+            expectedPropertyNames,
+            propertyNames);
+    }
+
+    [Fact]
+    public void AgentCapability_HasNoBuiltInConstants()
+    {
+        FieldInfo[] publicFields =
+            typeof(AgentCapability).GetFields(
+                BindingFlags.Public |
+                BindingFlags.Static);
+
+        Assert.Empty(
+            publicFields);
+
+        PropertyInfo[] publicStaticProps =
+            typeof(AgentCapability).GetProperties(
+                BindingFlags.Public |
+                BindingFlags.Static);
+
+        Assert.Empty(
+            publicStaticProps);
+    }
+
+    [Fact]
+    public void Assembly_ContainsNoProcessOrRuntimeContracts()
+    {
+        Assembly assembly =
+            typeof(IAgentExecutor).Assembly;
+
+        Type[] exportedTypes =
+            assembly.GetExportedTypes();
+
+        string[] forbiddenWords =
+        [
+            "Process",
+            "Cli",
+            "Command",
+            "Runner",
+            "Shell"
+        ];
+
+        foreach (Type type in exportedTypes)
+        {
+            foreach (string word in forbiddenWords)
+            {
+                Assert.DoesNotContain(
+                    word,
+                    type.Name,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
+    public void Assembly_ContainsNoTimeoutOrStreamingContracts()
+    {
+        Assembly assembly =
+            typeof(IAgentExecutor).Assembly;
+
+        Type[] exportedTypes =
+            assembly.GetExportedTypes();
+
+        string[] forbiddenWords =
+        [
+            "Timeout",
+            "Stream",
+            "Observable",
+            "Channel"
+        ];
+
+        foreach (Type type in exportedTypes)
+        {
+            foreach (string word in forbiddenWords)
+            {
+                Assert.DoesNotContain(
+                    word,
+                    type.Name,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
+    public void Assembly_ContainsNoDiscoveryOrRoutingConcepts()
+    {
+        Assembly assembly =
+            typeof(IAgentExecutor).Assembly;
+
+        Type[] exportedTypes =
+            assembly.GetExportedTypes();
+
+        string[] forbiddenWords =
+        [
+            "Route",
+            "Router",
+            "Discovery",
+            "ModelSelector",
+            "ModelRequirement"
+        ];
+
+        foreach (Type type in exportedTypes)
+        {
+            foreach (string word in forbiddenWords)
+            {
+                Assert.DoesNotContain(
+                    word,
+                    type.Name,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
+    public void SolutionFile_RemainsPresent()
+    {
+        string solutionPath =
+            Path.GetFullPath(
+                Path.Combine(
+                    AppContext.BaseDirectory,
+                    "..",
+                    "..",
+                    "..",
+                    "..",
+                    "..",
+                    "AI.RepoKit.MCP.sln"));
+
+        Assert.True(
+            File.Exists(
+                solutionPath),
+            $"Solution file does not exist at: {solutionPath}");
     }
 }
