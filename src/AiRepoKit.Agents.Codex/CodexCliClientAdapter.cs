@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using AiRepoKit.Agents.Runtime;
 
 [assembly: InternalsVisibleTo("AiRepoKit.Agents.Codex.Tests")]
 
@@ -13,7 +14,7 @@ public sealed class CodexCliClientAdapter : IAgentExecutor
     private static readonly AgentCapabilitySet _capabilities =
         new([new AgentCapability("structured-output")]);
 
-    private readonly ICodexProcessRunner _processRunner;
+    private readonly IProcessExecutionRuntime _processRunner;
 
     public AgentProviderId ProviderId
     {
@@ -32,12 +33,12 @@ public sealed class CodexCliClientAdapter : IAgentExecutor
     }
 
     public CodexCliClientAdapter()
-        : this(new CodexProcessRunner())
+        : this(new SystemProcessExecutionRuntime())
     {
     }
 
     internal CodexCliClientAdapter(
-        ICodexProcessRunner processRunner_)
+        IProcessExecutionRuntime processRunner_)
     {
         ArgumentNullException.ThrowIfNull(
             processRunner_,
@@ -66,15 +67,15 @@ public sealed class CodexCliClientAdapter : IAgentExecutor
                     request_.StructuredOutput.JsonSchema);
             }
 
-            CodexProcessInvocation invocation =
+            ProcessExecutionRequest invocation =
                 BuildInvocation(
                     request_,
                     schemaFilePath);
 
-            CodexProcessResult processResult;
+            ProcessExecutionResult processResult;
             try
             {
-                processResult = await this._processRunner.RunAsync(
+                processResult = await this._processRunner.ExecuteAsync(
                     invocation,
                     cancellationToken_).ConfigureAwait(false);
             }
@@ -99,7 +100,7 @@ public sealed class CodexCliClientAdapter : IAgentExecutor
         }
     }
 
-    internal static CodexProcessInvocation BuildInvocation(
+    internal static ProcessExecutionRequest BuildInvocation(
         AgentExecutionRequest request_,
         string? schemaFilePath_ = null)
     {
@@ -155,7 +156,7 @@ public sealed class CodexCliClientAdapter : IAgentExecutor
 
         arguments.Add(request_.Instruction);
 
-        return new CodexProcessInvocation(
+        return new ProcessExecutionRequest(
             "codex",
             arguments.AsReadOnly(),
             request_.Environment.WorkingDirectory);

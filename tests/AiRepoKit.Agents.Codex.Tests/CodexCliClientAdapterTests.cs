@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using AiRepoKit.Agents;
 using AiRepoKit.Agents.Codex;
+using AiRepoKit.Agents.Runtime;
 using Xunit;
 
 namespace AiRepoKit.Agents.Codex.Tests;
@@ -106,7 +107,7 @@ public sealed class CodexCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest();
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -125,7 +126,7 @@ public sealed class CodexCliClientAdapterTests
                 ExecutionPermission.WorkspaceWrite,
                 env);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -144,7 +145,7 @@ public sealed class CodexCliClientAdapterTests
                 ExecutionPermission.WorkspaceWrite,
                 env);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.True(
@@ -181,7 +182,7 @@ public sealed class CodexCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest(instruction);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -198,7 +199,7 @@ public sealed class CodexCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest(instruction);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -215,7 +216,7 @@ public sealed class CodexCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest(instruction);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -229,11 +230,11 @@ public sealed class CodexCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest("Verify build info");
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         ProcessStartInfo startInfo =
-            CodexProcessRunner.CreateProcessStartInfo(invocation);
+            SystemProcessExecutionRuntime.CreateProcessStartInfo(invocation);
 
         Assert.Equal(
             "codex",
@@ -273,7 +274,7 @@ public sealed class CodexCliClientAdapterTests
             CreateRequest(
                 permission_: ExecutionPermission.ReadOnly);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         int sandboxIndex =
@@ -295,7 +296,7 @@ public sealed class CodexCliClientAdapterTests
             CreateRequest(
                 permission_: ExecutionPermission.WorkspaceWrite);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         int sandboxIndex =
@@ -317,7 +318,7 @@ public sealed class CodexCliClientAdapterTests
             CreateRequest(
                 permission_: ExecutionPermission.Unrestricted);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.Contains(
@@ -342,7 +343,7 @@ public sealed class CodexCliClientAdapterTests
                 instruction_: instruction,
                 sessionReference_: null);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         Assert.DoesNotContain(
@@ -368,7 +369,7 @@ public sealed class CodexCliClientAdapterTests
                 instruction_: instruction,
                 sessionReference_: session);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         int resumeIndex =
@@ -398,7 +399,7 @@ public sealed class CodexCliClientAdapterTests
             CreateRequest(
                 sessionReference_: session);
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         int resumeIndex =
@@ -421,7 +422,7 @@ public sealed class CodexCliClientAdapterTests
                 structuredOutput_: new StructuredOutputContract("{\"type\":\"object\"}"));
 
         string schemaPath = "C:\\temp\\schema.json";
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request, schemaPath);
 
         int resumeIndex =
@@ -484,7 +485,7 @@ public sealed class CodexCliClientAdapterTests
                         }
                     }
 
-                    return Task.FromResult(new CodexProcessResult(
+                    return Task.FromResult(new ProcessExecutionResult(
                         0,
                         "{\"type\":\"turn.completed\"}",
                         string.Empty));
@@ -527,7 +528,7 @@ public sealed class CodexCliClientAdapterTests
                         capturedFilePath = inv_.Arguments[flagIndex + 1];
                     }
 
-                    return Task.FromResult(new CodexProcessResult(
+                    return Task.FromResult(new ProcessExecutionResult(
                         1,
                         "{\"type\":\"turn.failed\",\"error\":{\"message\":\"Execution failed\"}}",
                         string.Empty));
@@ -572,7 +573,7 @@ public sealed class CodexCliClientAdapterTests
 
                     cts.Cancel();
                     token_.ThrowIfCancellationRequested();
-                    return Task.FromResult(new CodexProcessResult(0, "{}", string.Empty));
+                    return Task.FromResult(new ProcessExecutionResult(0, "{}", string.Empty));
                 }
             };
 
@@ -1092,7 +1093,7 @@ public sealed class CodexCliClientAdapterTests
                     cts.Cancel();
                     token_.ThrowIfCancellationRequested();
                     await Task.Yield();
-                    return new CodexProcessResult(0, "{}", string.Empty);
+                    return new ProcessExecutionResult(0, "{}", string.Empty);
                 }
             };
 
@@ -1120,7 +1121,7 @@ public sealed class CodexCliClientAdapterTests
                     cts.Cancel();
                     token_.ThrowIfCancellationRequested();
                     await Task.Yield();
-                    return new CodexProcessResult(0, "{}", string.Empty);
+                    return new ProcessExecutionResult(0, "{}", string.Empty);
                 }
             };
 
@@ -1157,7 +1158,7 @@ public sealed class CodexCliClientAdapterTests
                     cts.Cancel();
                     token_.ThrowIfCancellationRequested();
                     await Task.Yield();
-                    return new CodexProcessResult(0, "{}", string.Empty);
+                    return new ProcessExecutionResult(0, "{}", string.Empty);
                 }
             };
 
@@ -1202,48 +1203,5 @@ public sealed class CodexCliClientAdapterTests
         Assert.Contains(
             "The system cannot find the file specified",
             result.DiagnosticText);
-    }
-
-    [Fact]
-    public async Task ProcessRunner_TerminateProcessTreeAsync_ThrowsWhenProcessIsNull()
-    {
-        await Assert.ThrowsAsync<ArgumentNullException>(
-            () => CodexProcessRunner.TerminateProcessTreeAsync(null!));
-    }
-
-    [Fact]
-    public async Task ProcessRunner_TerminateProcessTreeAsync_AlreadyExitedProcess_ReturnsPromptly()
-    {
-        ProcessStartInfo startInfo = new()
-        {
-            FileName = Environment.ProcessPath ?? "dotnet",
-            Arguments = "--version",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-
-        using Process process = Process.Start(startInfo)!;
-        await process.WaitForExitAsync();
-        Assert.True(process.HasExited);
-
-        await CodexProcessRunner.TerminateProcessTreeAsync(process);
-    }
-
-    [Fact]
-    public async Task ProcessRunner_RunAsync_PreCanceledToken_ThrowsOperationCanceledException()
-    {
-        CodexProcessRunner runner = new();
-        CodexProcessInvocation invocation = new(
-            "codex",
-            [],
-            AppContext.BaseDirectory);
-
-        using CancellationTokenSource cts = new();
-        cts.Cancel();
-
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => runner.RunAsync(invocation, cts.Token));
     }
 }

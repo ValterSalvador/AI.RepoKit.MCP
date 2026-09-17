@@ -1,10 +1,10 @@
-using AiRepoKit.Agents.Antigravity;
+using AiRepoKit.Agents.Runtime;
 
 namespace AiRepoKit.Agents.Antigravity.Tests;
 
-internal sealed class FakeAntigravityProcessRunner : IAntigravityProcessRunner
+internal sealed class FakeAntigravityProcessRunner : IProcessExecutionRuntime
 {
-    public AntigravityProcessInvocation? LastInvocation
+    public ProcessExecutionRequest? LastInvocation
     {
         get;
         private set;
@@ -22,7 +22,7 @@ internal sealed class FakeAntigravityProcessRunner : IAntigravityProcessRunner
         private set;
     }
 
-    public AntigravityProcessResult? ResultToReturn
+    public ProcessExecutionResult? ResultToReturn
     {
         get;
         set;
@@ -34,19 +34,19 @@ internal sealed class FakeAntigravityProcessRunner : IAntigravityProcessRunner
         set;
     }
 
-    public Func<AntigravityProcessInvocation, CancellationToken, Task<AntigravityProcessResult>>? CustomHandler
+    public Func<ProcessExecutionRequest, CancellationToken, Task<ProcessExecutionResult>>? CustomHandler
     {
         get;
         set;
     }
 
-    public async Task<AntigravityProcessResult> RunAsync(
-        AntigravityProcessInvocation invocation_,
+    public async Task<ProcessExecutionResult> ExecuteAsync(
+        ProcessExecutionRequest request_,
         CancellationToken cancellationToken_ = default)
     {
         this.InvocationCount++;
         this.LastInvocation =
-            invocation_;
+            request_;
 
         cancellationToken_.ThrowIfCancellationRequested();
 
@@ -65,12 +65,12 @@ internal sealed class FakeAntigravityProcessRunner : IAntigravityProcessRunner
         if (this.CustomHandler is not null)
         {
             return await this.CustomHandler(
-                invocation_,
+                request_,
                 cancellationToken_).ConfigureAwait(false);
         }
 
         return this.ResultToReturn ??
-               new AntigravityProcessResult(
+               new ProcessExecutionResult(
                    0,
                    "{\"status\":\"SUCCESS\",\"response\":\"ok\"}",
                    string.Empty);

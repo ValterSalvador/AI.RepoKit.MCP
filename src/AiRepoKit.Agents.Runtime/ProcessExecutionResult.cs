@@ -1,6 +1,6 @@
-namespace AiRepoKit.Agents.Antigravity;
+namespace AiRepoKit.Agents.Runtime;
 
-internal sealed record AntigravityProcessResult
+public sealed record ProcessExecutionResult
 {
     public int ExitCode
     {
@@ -17,7 +17,7 @@ internal sealed record AntigravityProcessResult
         get;
     }
 
-    public AntigravityProcessResult(
+    public ProcessExecutionResult(
         int exitCode_,
         string standardOutput_,
         string standardError_)

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Xml.Linq;
 using AiRepoKit.Agents;
 using AiRepoKit.Agents.Antigravity;
+using AiRepoKit.Agents.Runtime;
 using Xunit;
 
 namespace AiRepoKit.Agents.Antigravity.Tests;
@@ -126,7 +127,7 @@ public sealed class AntigravityArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void AdapterProject_HasExactlyOneProjectReference_ToAbstractions()
+    public void AdapterProject_HasAuthorizedProjectReferences()
     {
         string projectPath =
             GetAdapterProjectPath();
@@ -137,20 +138,16 @@ public sealed class AntigravityArchitectureAndBoundaryTests
         List<XElement> projectReferences =
             document.Descendants("ProjectReference").ToList();
 
-        Assert.Single(projectReferences);
+        Assert.Equal(2, projectReferences.Count);
 
-        string include =
-            projectReferences[0].Attribute("Include")?.Value ?? string.Empty;
+        List<string> includes = projectReferences
+            .Select(r => r.Attribute("Include")?.Value ?? string.Empty)
+            .ToList();
 
-        Assert.Contains(
-            "AiRepoKit.Agents.Abstractions.csproj",
-            include);
-        Assert.DoesNotContain(
-            "AiRepoKit.Spec",
-            include);
-        Assert.DoesNotContain(
-            "AiRepoKit.Cli",
-            include);
+        Assert.Contains(includes, inc => inc.Contains("AiRepoKit.Agents.Abstractions.csproj"));
+        Assert.Contains(includes, inc => inc.Contains("AiRepoKit.Agents.Runtime.csproj"));
+        Assert.DoesNotContain(includes, inc => inc.Contains("AiRepoKit.Spec"));
+        Assert.DoesNotContain(includes, inc => inc.Contains("AiRepoKit.Cli"));
     }
 
     [Fact]
@@ -317,7 +314,7 @@ public sealed class AntigravityArchitectureAndBoundaryTests
                 ExecutionPermission.WorkspaceWrite,
                 new ExecutionEnvironment(AppContext.BaseDirectory));
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         string[] forbiddenFlags =

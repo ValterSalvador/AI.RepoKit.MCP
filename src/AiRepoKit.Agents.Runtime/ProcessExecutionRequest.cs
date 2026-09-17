@@ -1,6 +1,6 @@
-namespace AiRepoKit.Agents.Antigravity;
+namespace AiRepoKit.Agents.Runtime;
 
-internal sealed record AntigravityProcessInvocation
+public sealed record ProcessExecutionRequest
 {
     public string Executable
     {
@@ -17,7 +17,7 @@ internal sealed record AntigravityProcessInvocation
         get;
     }
 
-    public AntigravityProcessInvocation(
+    public ProcessExecutionRequest(
         string executable_,
         IReadOnlyList<string> arguments_,
         string workingDirectory_)
@@ -34,10 +34,17 @@ internal sealed record AntigravityProcessInvocation
             workingDirectory_,
             nameof(workingDirectory_));
 
+        if (!Path.IsPathFullyQualified(workingDirectory_))
+        {
+            throw new ArgumentException(
+                "Working directory must be a fully-qualified path.",
+                nameof(workingDirectory_));
+        }
+
         this.Executable =
             executable_;
         this.Arguments =
-            arguments_;
+            Array.AsReadOnly(arguments_.ToArray());
         this.WorkingDirectory =
             workingDirectory_;
     }

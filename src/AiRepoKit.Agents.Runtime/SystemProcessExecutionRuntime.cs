@@ -1,49 +1,27 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
-namespace AiRepoKit.Agents.Codex;
+[assembly: InternalsVisibleTo("AiRepoKit.Agents.Runtime.Tests")]
+[assembly: InternalsVisibleTo("AiRepoKit.Agents.Antigravity.Tests")]
+[assembly: InternalsVisibleTo("AiRepoKit.Agents.Codex.Tests")]
 
-internal sealed class CodexProcessRunner : ICodexProcessRunner
+namespace AiRepoKit.Agents.Runtime;
+
+public sealed class SystemProcessExecutionRuntime : IProcessExecutionRuntime
 {
-    internal static ProcessStartInfo CreateProcessStartInfo(
-        CodexProcessInvocation invocation_)
-    {
-        ArgumentNullException.ThrowIfNull(
-            invocation_,
-            nameof(invocation_));
-
-        ProcessStartInfo startInfo = new()
-        {
-            FileName = invocation_.Executable,
-            WorkingDirectory = invocation_.WorkingDirectory,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-
-        foreach (string argument in invocation_.Arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        return startInfo;
-    }
-
-    public async Task<CodexProcessResult> RunAsync(
-        CodexProcessInvocation invocation_,
+    public async Task<ProcessExecutionResult> ExecuteAsync(
+        ProcessExecutionRequest request_,
         CancellationToken cancellationToken_ = default)
     {
         ArgumentNullException.ThrowIfNull(
-            invocation_,
-            nameof(invocation_));
+            request_,
+            nameof(request_));
 
         cancellationToken_.ThrowIfCancellationRequested();
 
         ProcessStartInfo startInfo =
-            CreateProcessStartInfo(invocation_);
+            CreateProcessStartInfo(request_);
 
         using Process process = new()
         {
@@ -67,7 +45,7 @@ internal sealed class CodexProcessRunner : ICodexProcessRunner
             string stderr =
                 await stderrTask.ConfigureAwait(false);
 
-            return new CodexProcessResult(
+            return new ProcessExecutionResult(
                 process.ExitCode,
                 stdout,
                 stderr);
@@ -77,6 +55,33 @@ internal sealed class CodexProcessRunner : ICodexProcessRunner
             await TerminateProcessTreeAsync(process).ConfigureAwait(false);
             throw;
         }
+    }
+
+    internal static ProcessStartInfo CreateProcessStartInfo(
+        ProcessExecutionRequest request_)
+    {
+        ArgumentNullException.ThrowIfNull(
+            request_,
+            nameof(request_));
+
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = request_.Executable,
+            WorkingDirectory = request_.WorkingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        foreach (string argument in request_.Arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return startInfo;
     }
 
     internal static async Task TerminateProcessTreeAsync(

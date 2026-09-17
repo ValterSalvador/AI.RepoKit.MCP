@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using AiRepoKit.Agents.Runtime;
 
 [assembly: InternalsVisibleTo("AiRepoKit.Agents.Antigravity.Tests")]
 
@@ -16,7 +17,7 @@ public sealed class AntigravityCliClientAdapter : IAgentExecutor
     private const string ReadOnlyPolicyDiagnostic =
         "Current Antigravity headless execution cannot represent the requested read-only policy.";
 
-    private readonly IAntigravityProcessRunner _processRunner;
+    private readonly IProcessExecutionRuntime _processRunner;
 
     public AgentProviderId ProviderId
     {
@@ -35,12 +36,12 @@ public sealed class AntigravityCliClientAdapter : IAgentExecutor
     }
 
     public AntigravityCliClientAdapter()
-        : this(new AntigravityProcessRunner())
+        : this(new SystemProcessExecutionRuntime())
     {
     }
 
     internal AntigravityCliClientAdapter(
-        IAntigravityProcessRunner processRunner_)
+        IProcessExecutionRuntime processRunner_)
     {
         ArgumentNullException.ThrowIfNull(
             processRunner_,
@@ -68,14 +69,14 @@ public sealed class AntigravityCliClientAdapter : IAgentExecutor
                 outputText_: null);
         }
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             BuildInvocation(
                 request_);
 
-        AntigravityProcessResult processResult;
+        ProcessExecutionResult processResult;
         try
         {
-            processResult = await this._processRunner.RunAsync(
+            processResult = await this._processRunner.ExecuteAsync(
                 invocation,
                 cancellationToken_).ConfigureAwait(false);
         }
@@ -95,7 +96,7 @@ public sealed class AntigravityCliClientAdapter : IAgentExecutor
             processResult.StandardError);
     }
 
-    internal static AntigravityProcessInvocation BuildInvocation(
+    internal static ProcessExecutionRequest BuildInvocation(
         AgentExecutionRequest request_)
     {
         ArgumentNullException.ThrowIfNull(
@@ -145,7 +146,7 @@ public sealed class AntigravityCliClientAdapter : IAgentExecutor
             arguments.Add(request_.StructuredOutput.JsonSchema);
         }
 
-        return new AntigravityProcessInvocation(
+        return new ProcessExecutionRequest(
             "agy",
             arguments.AsReadOnly(),
             request_.Environment.WorkingDirectory);

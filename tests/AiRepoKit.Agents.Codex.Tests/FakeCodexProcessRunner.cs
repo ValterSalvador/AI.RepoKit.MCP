@@ -1,10 +1,10 @@
-using AiRepoKit.Agents.Codex;
+using AiRepoKit.Agents.Runtime;
 
 namespace AiRepoKit.Agents.Codex.Tests;
 
-internal sealed class FakeCodexProcessRunner : ICodexProcessRunner
+internal sealed class FakeCodexProcessRunner : IProcessExecutionRuntime
 {
-    public CodexProcessInvocation? LastInvocation
+    public ProcessExecutionRequest? LastInvocation
     {
         get;
         private set;
@@ -22,7 +22,7 @@ internal sealed class FakeCodexProcessRunner : ICodexProcessRunner
         private set;
     }
 
-    public CodexProcessResult? ResultToReturn
+    public ProcessExecutionResult? ResultToReturn
     {
         get;
         set;
@@ -34,19 +34,19 @@ internal sealed class FakeCodexProcessRunner : ICodexProcessRunner
         set;
     }
 
-    public Func<CodexProcessInvocation, CancellationToken, Task<CodexProcessResult>>? CustomHandler
+    public Func<ProcessExecutionRequest, CancellationToken, Task<ProcessExecutionResult>>? CustomHandler
     {
         get;
         set;
     }
 
-    public async Task<CodexProcessResult> RunAsync(
-        CodexProcessInvocation invocation_,
+    public async Task<ProcessExecutionResult> ExecuteAsync(
+        ProcessExecutionRequest request_,
         CancellationToken cancellationToken_ = default)
     {
         this.InvocationCount++;
         this.LastInvocation =
-            invocation_;
+            request_;
 
         cancellationToken_.ThrowIfCancellationRequested();
 
@@ -65,12 +65,12 @@ internal sealed class FakeCodexProcessRunner : ICodexProcessRunner
         if (this.CustomHandler is not null)
         {
             return await this.CustomHandler(
-                invocation_,
+                request_,
                 cancellationToken_).ConfigureAwait(false);
         }
 
         return this.ResultToReturn ??
-               new CodexProcessResult(
+               new ProcessExecutionResult(
                    0,
                    "{\"type\":\"turn.completed\"}",
                    string.Empty);

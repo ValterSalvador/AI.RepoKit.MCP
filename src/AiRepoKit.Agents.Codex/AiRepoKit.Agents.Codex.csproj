@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AiRepoKit.Agents.Abstractions\AiRepoKit.Agents.Abstractions.csproj" />
+    <ProjectReference Include="..\AiRepoKit.Agents.Runtime\AiRepoKit.Agents.Runtime.csproj" />
   </ItemGroup>
 
 </Project>

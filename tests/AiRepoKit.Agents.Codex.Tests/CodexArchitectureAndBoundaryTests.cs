@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Xml.Linq;
 using AiRepoKit.Agents;
 using AiRepoKit.Agents.Codex;
+using AiRepoKit.Agents.Runtime;
 using Xunit;
 
 namespace AiRepoKit.Agents.Codex.Tests;
@@ -126,7 +127,7 @@ public sealed class CodexArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void AdapterProject_HasExactlyOneProjectReference_ToAbstractions()
+    public void AdapterProject_HasAuthorizedProjectReferences()
     {
         string projectPath =
             GetAdapterProjectPath();
@@ -137,23 +138,17 @@ public sealed class CodexArchitectureAndBoundaryTests
         List<XElement> projectReferences =
             document.Descendants("ProjectReference").ToList();
 
-        Assert.Single(projectReferences);
+        Assert.Equal(2, projectReferences.Count);
 
-        string include =
-            projectReferences[0].Attribute("Include")?.Value ?? string.Empty;
+        List<string> includes = projectReferences
+            .Select(r => r.Attribute("Include")?.Value ?? string.Empty)
+            .ToList();
 
-        Assert.Contains(
-            "AiRepoKit.Agents.Abstractions.csproj",
-            include);
-        Assert.DoesNotContain(
-            "AiRepoKit.Spec",
-            include);
-        Assert.DoesNotContain(
-            "AiRepoKit.Cli",
-            include);
-        Assert.DoesNotContain(
-            "AiRepoKit.Agents.Antigravity",
-            include);
+        Assert.Contains(includes, inc => inc.Contains("AiRepoKit.Agents.Abstractions.csproj"));
+        Assert.Contains(includes, inc => inc.Contains("AiRepoKit.Agents.Runtime.csproj"));
+        Assert.DoesNotContain(includes, inc => inc.Contains("AiRepoKit.Spec"));
+        Assert.DoesNotContain(includes, inc => inc.Contains("AiRepoKit.Cli"));
+        Assert.DoesNotContain(includes, inc => inc.Contains("AiRepoKit.Agents.Antigravity"));
     }
 
     [Fact]
@@ -323,7 +318,7 @@ public sealed class CodexArchitectureAndBoundaryTests
                 ExecutionPermission.WorkspaceWrite,
                 new ExecutionEnvironment(AppContext.BaseDirectory));
 
-        CodexProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             CodexCliClientAdapter.BuildInvocation(request);
 
         string[] forbiddenFlags =

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AiRepoKit.Agents;
 using AiRepoKit.Agents.Antigravity;
+using AiRepoKit.Agents.Runtime;
 using Xunit;
 
 namespace AiRepoKit.Agents.Antigravity.Tests;
@@ -105,7 +106,7 @@ public sealed class AntigravityCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest();
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -124,7 +125,7 @@ public sealed class AntigravityCliClientAdapterTests
                 ExecutionPermission.WorkspaceWrite,
                 env);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -138,7 +139,7 @@ public sealed class AntigravityCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest("Run tests now");
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.True(
@@ -166,7 +167,7 @@ public sealed class AntigravityCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest(instruction);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -183,7 +184,7 @@ public sealed class AntigravityCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest(instruction);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -200,7 +201,7 @@ public sealed class AntigravityCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest(instruction);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.Equal(
@@ -214,11 +215,11 @@ public sealed class AntigravityCliClientAdapterTests
         AgentExecutionRequest request =
             CreateRequest("Verify build info");
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         ProcessStartInfo startInfo =
-            AntigravityProcessRunner.CreateProcessStartInfo(invocation);
+            SystemProcessExecutionRuntime.CreateProcessStartInfo(invocation);
 
         Assert.Equal(
             "agy",
@@ -330,7 +331,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 permission_: ExecutionPermission.WorkspaceWrite);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.Contains(
@@ -348,7 +349,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 permission_: ExecutionPermission.Unrestricted);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.Contains(
@@ -370,7 +371,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 sessionReference_: null);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.DoesNotContain(
@@ -388,7 +389,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 sessionReference_: session);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         int flagIndex =
@@ -411,7 +412,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 sessionReference_: session);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         int flagIndex =
@@ -499,7 +500,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 structuredOutput_: null);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         Assert.DoesNotContain(
@@ -520,7 +521,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 structuredOutput_: contract);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         int flagIndex =
@@ -546,7 +547,7 @@ public sealed class AntigravityCliClientAdapterTests
             CreateRequest(
                 structuredOutput_: contract);
 
-        AntigravityProcessInvocation invocation =
+        ProcessExecutionRequest invocation =
             AntigravityCliClientAdapter.BuildInvocation(request);
 
         int flagIndex =
@@ -974,7 +975,7 @@ public sealed class AntigravityCliClientAdapterTests
                     cts.Cancel();
                     token_.ThrowIfCancellationRequested();
                     await Task.Yield();
-                    return new AntigravityProcessResult(0, "{}", string.Empty);
+                    return new ProcessExecutionResult(0, "{}", string.Empty);
                 }
             };
 
@@ -1002,7 +1003,7 @@ public sealed class AntigravityCliClientAdapterTests
                     cts.Cancel();
                     token_.ThrowIfCancellationRequested();
                     await Task.Yield();
-                    return new AntigravityProcessResult(0, "{}", string.Empty);
+                    return new ProcessExecutionResult(0, "{}", string.Empty);
                 }
             };
 
@@ -1039,7 +1040,7 @@ public sealed class AntigravityCliClientAdapterTests
                     cts.Cancel();
                     token_.ThrowIfCancellationRequested();
                     await Task.Yield();
-                    return new AntigravityProcessResult(0, "{}", string.Empty);
+                    return new ProcessExecutionResult(0, "{}", string.Empty);
                 }
             };
 
@@ -1088,52 +1089,5 @@ public sealed class AntigravityCliClientAdapterTests
         Assert.Contains(
             "The system cannot find the file specified",
             result.DiagnosticText);
-    }
-
-    // ---------------------------------------------------------
-    // Process runner cancellation and termination structure
-    // ---------------------------------------------------------
-
-    [Fact]
-    public async Task ProcessRunner_TerminateProcessTreeAsync_ThrowsWhenProcessIsNull()
-    {
-        await Assert.ThrowsAsync<ArgumentNullException>(
-            () => AntigravityProcessRunner.TerminateProcessTreeAsync(null!));
-    }
-
-    [Fact]
-    public async Task ProcessRunner_TerminateProcessTreeAsync_AlreadyExitedProcess_ReturnsPromptly()
-    {
-        ProcessStartInfo startInfo = new()
-        {
-            FileName = Environment.ProcessPath ?? "dotnet",
-            Arguments = "--version",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-
-        using Process process = Process.Start(startInfo)!;
-        await process.WaitForExitAsync();
-        Assert.True(process.HasExited);
-
-        await AntigravityProcessRunner.TerminateProcessTreeAsync(process);
-    }
-
-    [Fact]
-    public async Task ProcessRunner_RunAsync_PreCanceledToken_ThrowsOperationCanceledException()
-    {
-        AntigravityProcessRunner runner = new();
-        AntigravityProcessInvocation invocation = new(
-            "agy",
-            [],
-            AppContext.BaseDirectory);
-
-        using CancellationTokenSource cts = new();
-        cts.Cancel();
-
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => runner.RunAsync(invocation, cts.Token));
     }
 }
