@@ -6,6 +6,43 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Agent Execution (V4)
+
+#### Added
+
+- Provider-neutral agent execution contracts in `AiRepoKit.Agents.Abstractions`:
+  - `IAgentExecutor`: provider-neutral interface exposing synchronous `ProviderId` and static `Capabilities` metadata with single-request `ExecuteAsync` execution and caller cancellation support.
+  - Public contract types: `AgentExecutionRequest`, `AgentExecutionResult`, `AgentExecutionStatus`, `AgentProviderId`, `AgentCapability`, `AgentCapabilitySet`, `AgentSessionReference`, `ExecutionPermission`, `ExecutionEnvironment`, and `StructuredOutputContract`.
+  - Deterministic capability metadata via `AgentCapabilitySet` with synchronous querying and validation (advertising `structured-output` for both adapters without runtime discovery or probing).
+  - Explicit execution permission contracts (`ReadOnly`, `WorkspaceWrite`, `Unrestricted`) as distinct identifiers without numeric ranking assumptions.
+  - Fully qualified, non-probing working directory abstraction via `ExecutionEnvironment`.
+  - Syntactically validated JSON schema specification via `StructuredOutputContract`.
+  - Opaque provider session-reference pass-through via `AgentSessionReference` without string trimming, normalization, parsing, or UUID validation.
+  - Four terminal execution statuses in `AgentExecutionStatus`: `Completed`, `Blocked`, `NeedsInput`, and `Failed`.
+- Concrete Antigravity CLI adapter in `AiRepoKit.Agents.Antigravity` (`AntigravityCliClientAdapter`):
+  - Maps `WorkspaceWrite` to `--sandbox` and `Unrestricted` to `--dangerously-skip-permissions`.
+  - Enforces deterministic `Blocked` status without process execution for `ReadOnly` permissions.
+  - Supports structured output schema via `--json-schema` and session continuation via `--conversation`.
+  - Maps Antigravity JSON envelope outputs (`SUCCESS`, `WAITING`, `ERROR`, `INVALID`, `CANCELED`, `INTERRUPTED`, `RUNNING`) to domain `AgentExecutionStatus`.
+- Concrete Codex CLI adapter in `AiRepoKit.Agents.Codex` (`CodexCliClientAdapter`):
+  - Maps `ReadOnly` to `--sandbox read-only`, `WorkspaceWrite` to `--sandbox workspace-write`, and `Unrestricted` to `--dangerously-bypass-approvals-and-sandbox`.
+  - Supports structured output via a private temporary UTF-8-without-BOM schema file passed to `--output-schema` and cleaned up in a `finally` block.
+  - Supports session resumption via `resume <session-id>` command syntax.
+  - Parses streaming Codex JSON Lines (JSONL) events (`thread.started`, `item.completed`, `turn.completed`, `turn.failed`, top-level `error`) into domain results and captures the latest agent message text.
+- Process-tree cancellation behavior across both adapters:
+  - Pre-canceled tokens propagate `OperationCanceledException` before process launch.
+  - In-flight caller cancellation triggers entire process-tree termination followed by an un-canceled wait for root exit, propagating `OperationCanceledException` without converting to `Failed`.
+- Full-solution Windows and Linux CI validation in `.github/workflows/ci.yml` and `.github/workflows/release.yml`:
+  - Upgraded test step to execute `dotnet test AI.RepoKit.MCP.sln -c Release --no-build` across `windows-2025` and `ubuntu-24.04`.
+- Comprehensive V4 agent execution documentation guide in `docs/v4-agent-execution.md`.
+
+#### Architectural Boundaries & V5 Deferrals
+
+- Zero external `PackageReference` dependencies in `AiRepoKit.Agents.Abstractions` and zero references to `AiRepoKit.Spec`.
+- No `Microsoft.Extensions.AI` or Agent Framework abstractions entered V4 domain contracts.
+- Provider CLI flags and temporary schema file handling remain private adapter implementation details, never domain contracts.
+- Reusable process and model runtime, timeout policies, streaming, provider/model discovery, health probes, model selection, dynamic routing, retry policies, fallback orchestration, and session lifecycle management are explicitly deferred to V5.
+
 ## [3.0.0] - 2026-09-14
 
 ### Spec-Driven Development

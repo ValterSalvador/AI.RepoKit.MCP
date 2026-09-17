@@ -65,7 +65,7 @@ jobs:
         run: dotnet build AI.RepoKit.MCP.sln -c Release
 
       - name: Run full automated tests
-        run: dotnet test tests/AiRepoKit.Cli.Tests/AiRepoKit.Cli.Tests.csproj -c Release --no-build
+        run: dotnet test AI.RepoKit.MCP.sln -c Release --no-build
 
       - name: Run v1.4.2 smoke tests
         run: powershell -ExecutionPolicy Bypass -File tests/v1.4.2-smoke.ps1

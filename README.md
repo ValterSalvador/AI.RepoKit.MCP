@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v3.0.0 release readiness with formal Spec-Driven Development (SDD), immutable Spec IR schema v1, evidence-backed verification, and read-only MCP Spec context. Git hooks remain enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
+Status: v3.0.0 release readiness with formal Spec-Driven Development (SDD), immutable Spec IR schema v1, evidence-backed verification, and read-only MCP Spec context. V4 agent execution is implemented and undergoing release-readiness validation (v4.0.0 is unreleased; v3.0.0 remains the released baseline). Git hooks remain enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
 
 ## Goals
 
@@ -15,6 +15,29 @@ Status: v3.0.0 release readiness with formal Spec-Driven Development (SDD), immu
 - Keep all behavior parameterized by the target repository.
 - Start with Codex, GitHub Copilot for VS Code, and GitHub Copilot for Visual Studio.
 - Plan optional snippets for Claude Desktop, Cursor, and Gemini without overwriting global configuration.
+
+## V4 Agent Execution
+
+V4 agent execution is implemented and currently undergoing release-readiness validation. **v4.0.0 is not yet released**; v3.0.0 remains the released, current baseline until a separate release decision is made.
+
+V4 introduces provider-neutral agent execution contracts in `AiRepoKit.Agents.Abstractions` alongside concrete CLI adapters in `AiRepoKit.Agents.Antigravity` and `AiRepoKit.Agents.Codex`. Deterministic offline acceptance runs on Windows (`windows-2025`) and Linux (`ubuntu-24.04`).
+
+The frozen public contract surface consists of 11 provider-neutral types:
+- [`IAgentExecutor`](docs/v4-agent-execution.md#iagentexecutor)
+- [`AgentExecutionRequest`](docs/v4-agent-execution.md#provider-neutral-types)
+- [`AgentExecutionResult`](docs/v4-agent-execution.md#provider-neutral-types)
+- [`AgentExecutionStatus`](docs/v4-agent-execution.md#result-statuses)
+- [`AgentProviderId`](docs/v4-agent-execution.md#provider-identity-and-capabilities)
+- [`AgentCapability`](docs/v4-agent-execution.md#provider-identity-and-capabilities)
+- [`AgentCapabilitySet`](docs/v4-agent-execution.md#provider-identity-and-capabilities)
+- [`AgentSessionReference`](docs/v4-agent-execution.md#agentsessionreference)
+- [`ExecutionPermission`](docs/v4-agent-execution.md#executionpermission)
+- [`ExecutionEnvironment`](docs/v4-agent-execution.md#executionenvironment)
+- [`StructuredOutputContract`](docs/v4-agent-execution.md#structuredoutputcontract)
+
+Provider CLI flags (such as `--sandbox`, `--dangerously-skip-permissions`, or `--output-schema`) are internal adapter implementation mappings and are never exposed as domain contracts.
+
+For full architectural boundaries, provider mappings, cancellation semantics, and platform acceptance details, see the detailed guide: [docs/v4-agent-execution.md](docs/v4-agent-execution.md).
 
 ## Quick Install And Use
 
