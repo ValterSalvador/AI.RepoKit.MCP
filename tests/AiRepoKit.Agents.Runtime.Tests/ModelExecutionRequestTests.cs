@@ -48,4 +48,65 @@ public sealed class ModelExecutionRequestTests
 
         Assert.Same(contract, request.StructuredOutput);
     }
+
+    [Fact]
+    public void Constructor_WithoutTimeout_DefaultsToNull()
+    {
+        ModelExecutionRequest request = new("My prompt");
+        Assert.Null(request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_ExplicitNullTimeout_Accepted()
+    {
+        ModelExecutionRequest request = new("My prompt", structuredOutput_: null, timeout_: null);
+        Assert.Null(request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_PositiveTimeout_RetainsExactValue()
+    {
+        TimeSpan timeout = TimeSpan.FromSeconds(30);
+        ModelExecutionRequest request = new("My prompt", structuredOutput_: null, timeout_: timeout);
+        Assert.Equal(timeout, request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_ZeroTimeout_ThrowsArgumentOutOfRangeException()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ModelExecutionRequest("My prompt", timeout_: TimeSpan.Zero));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-500)]
+    public void Constructor_NegativeTimeout_ThrowsArgumentOutOfRangeException(int negativeMs)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ModelExecutionRequest("My prompt", timeout_: TimeSpan.FromMilliseconds(negativeMs)));
+    }
+
+    [Fact]
+    public void Constructor_UpperBoundaryTimeout_Accepted()
+    {
+        TimeSpan boundaryTimeout = TimeSpan.FromMilliseconds(4294967294L);
+        ModelExecutionRequest request = new("My prompt", timeout_: boundaryTimeout);
+        Assert.Equal(boundaryTimeout, request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_AboveUpperBoundaryTimeout_ThrowsArgumentOutOfRangeException()
+    {
+        TimeSpan aboveBoundary = TimeSpan.FromMilliseconds(4294967295L);
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ModelExecutionRequest("My prompt", timeout_: aboveBoundary));
+    }
+
+    [Fact]
+    public void Constructor_TimeSpanMaxValue_ThrowsArgumentOutOfRangeException()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ModelExecutionRequest("My prompt", timeout_: TimeSpan.MaxValue));
+    }
 }

@@ -1,24 +1,39 @@
 namespace AiRepoKit.Agents.Runtime;
 
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using AiRepoKit.Agents;
 using Microsoft.Extensions.AI;
 
-public sealed class ChatClientModelExecutionRuntime : IModelSessionRuntime
+public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRuntime
 {
     private readonly IChatClient _chatClient;
+    private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, SessionState> _sessions = new(StringComparer.Ordinal);
 
     public ChatClientModelExecutionRuntime(
         IChatClient chatClient_)
+        : this(chatClient_, TimeProvider.System)
+    {
+    }
+
+    internal ChatClientModelExecutionRuntime(
+        IChatClient chatClient_,
+        TimeProvider timeProvider_)
     {
         ArgumentNullException.ThrowIfNull(
             chatClient_,
             nameof(chatClient_));
 
+        ArgumentNullException.ThrowIfNull(
+            timeProvider_,
+            nameof(timeProvider_));
+
         this._chatClient =
             chatClient_;
+        this._timeProvider =
+            timeProvider_;
     }
 
     public async Task<ModelExecutionResult> ExecuteAsync(
@@ -34,29 +49,67 @@ public sealed class ChatClientModelExecutionRuntime : IModelSessionRuntime
         ChatMessage userMessage =
             new(ChatRole.User, request_.Prompt);
 
-        ChatOptions? options = null;
-        if (request_.StructuredOutput is not null)
+        ChatOptions? options =
+            CreateChatOptions(null, request_.StructuredOutput);
+
+        if (request_.Timeout is null)
         {
-            using JsonDocument document =
-                JsonDocument.Parse(request_.StructuredOutput.JsonSchema);
-
-            JsonElement schemaElement =
-                document.RootElement.Clone();
-
-            options = new ChatOptions
-            {
-                ResponseFormat = ChatResponseFormat.ForJsonSchema(schemaElement)
-            };
-        }
-
-        ChatResponse response =
-            await this._chatClient.GetResponseAsync(
+            Task<ChatResponse> responseTask = this._chatClient.GetResponseAsync(
                 [userMessage],
                 options,
-                cancellationToken_).ConfigureAwait(false);
+                cancellationToken_);
+
+            ChatResponse response =
+                await responseTask.WaitAsync(cancellationToken_).ConfigureAwait(false);
+
+            return new ModelExecutionResult(
+                response.Text ?? string.Empty);
+        }
+
+        TimeSpan timeout = request_.Timeout.Value;
+        using CancellationTokenSource timeoutCts = new();
+        using CancellationTokenSource effectiveCts =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken_, timeoutCts.Token);
+        CancellationToken effectiveToken = effectiveCts.Token;
+
+        using ITimer timer = this._timeProvider.CreateTimer(
+            _ => timeoutCts.Cancel(),
+            null,
+            timeout,
+            Timeout.InfiniteTimeSpan);
+
+        Task<ChatResponse> responseTaskWithTimeout = this._chatClient.GetResponseAsync(
+            [userMessage],
+            options,
+            effectiveToken);
+
+        ChatResponse timedResponse;
+        try
+        {
+            timedResponse = await responseTaskWithTimeout.WaitAsync(effectiveToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex)
+        {
+            if (cancellationToken_.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(
+                    "The operation was canceled by the caller.",
+                    ex,
+                    cancellationToken_);
+            }
+
+            if (timeoutCts.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"The operation timed out after {timeout.TotalMilliseconds} ms.",
+                    ex);
+            }
+
+            throw;
+        }
 
         return new ModelExecutionResult(
-            response.Text ?? string.Empty);
+            timedResponse.Text ?? string.Empty);
     }
 
     public AgentSessionReference CreateSession()
@@ -127,11 +180,60 @@ public sealed class ChatClientModelExecutionRuntime : IModelSessionRuntime
             ChatOptions? options =
                 CreateChatOptions(session.ConversationId, request_.StructuredOutput);
 
-            ChatResponse response =
-                await this._chatClient.GetResponseAsync(
+            ChatResponse response;
+            if (request_.Timeout is null)
+            {
+                Task<ChatResponse> responseTask = this._chatClient.GetResponseAsync(
                     outgoingMessages,
                     options,
-                    cancellationToken_).ConfigureAwait(false);
+                    cancellationToken_);
+
+                response =
+                    await responseTask.WaitAsync(cancellationToken_).ConfigureAwait(false);
+            }
+            else
+            {
+                TimeSpan timeout = request_.Timeout.Value;
+                using CancellationTokenSource timeoutCts = new();
+                using CancellationTokenSource effectiveCts =
+                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken_, timeoutCts.Token);
+                CancellationToken effectiveToken = effectiveCts.Token;
+
+                using ITimer timer = this._timeProvider.CreateTimer(
+                    _ => timeoutCts.Cancel(),
+                    null,
+                    timeout,
+                    Timeout.InfiniteTimeSpan);
+
+                Task<ChatResponse> responseTask = this._chatClient.GetResponseAsync(
+                    outgoingMessages,
+                    options,
+                    effectiveToken);
+
+                try
+                {
+                    response = await responseTask.WaitAsync(effectiveToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException ex)
+                {
+                    if (cancellationToken_.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException(
+                            "The operation was canceled by the caller.",
+                            ex,
+                            cancellationToken_);
+                    }
+
+                    if (timeoutCts.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"The operation timed out after {timeout.TotalMilliseconds} ms.",
+                            ex);
+                    }
+
+                    throw;
+                }
+            }
 
             if (!string.IsNullOrWhiteSpace(response.ConversationId))
             {
@@ -156,6 +258,457 @@ public sealed class ChatClientModelExecutionRuntime : IModelSessionRuntime
         finally
         {
             session.EndTurn();
+        }
+    }
+
+    public IAsyncEnumerable<ModelExecutionUpdate> ExecuteStreamingAsync(
+        ModelExecutionRequest request_,
+        CancellationToken cancellationToken_ = default)
+    {
+        ArgumentNullException.ThrowIfNull(
+            request_,
+            nameof(request_));
+
+        return ExecuteStreamingCoreAsync(request_, cancellationToken_);
+    }
+
+    private async IAsyncEnumerable<ModelExecutionUpdate> ExecuteStreamingCoreAsync(
+        ModelExecutionRequest request_,
+        CancellationToken methodToken_,
+        [EnumeratorCancellation] CancellationToken enumeratorToken_ = default)
+    {
+        using CancellationTokenSource combinedCallerCts =
+            CancellationTokenSource.CreateLinkedTokenSource(methodToken_, enumeratorToken_);
+        CancellationToken callerToken = combinedCallerCts.Token;
+
+        callerToken.ThrowIfCancellationRequested();
+
+        ChatMessage userMessage =
+            new(ChatRole.User, request_.Prompt);
+
+        ChatOptions? options =
+            CreateChatOptions(null, request_.StructuredOutput);
+
+        CancellationTokenSource? timeoutCts = null;
+        CancellationTokenSource? effectiveCts = null;
+        ITimer? timer = null;
+        CancellationToken effectiveToken = callerToken;
+        long startTimestamp = 0;
+
+        if (request_.Timeout.HasValue)
+        {
+            TimeSpan timeout = request_.Timeout.Value;
+            startTimestamp = this._timeProvider.GetTimestamp();
+            timeoutCts = new CancellationTokenSource();
+            effectiveCts = CancellationTokenSource.CreateLinkedTokenSource(callerToken, timeoutCts.Token);
+            effectiveToken = effectiveCts.Token;
+            timer = this._timeProvider.CreateTimer(
+                _ => timeoutCts.Cancel(),
+                null,
+                timeout,
+                Timeout.InfiniteTimeSpan);
+        }
+
+        try
+        {
+            IAsyncEnumerable<ChatResponseUpdate> streamingResponse =
+                this._chatClient.GetStreamingResponseAsync(
+                    [userMessage],
+                    options,
+                    effectiveToken);
+
+            IAsyncEnumerator<ChatResponseUpdate> enumerator =
+                streamingResponse.GetAsyncEnumerator(effectiveToken);
+
+            Exception? primaryFailure = null;
+
+            try
+            {
+                while (true)
+                {
+                    ChatResponseUpdate update;
+                    try
+                    {
+                        if (callerToken.IsCancellationRequested)
+                        {
+                            CancellationToken reportedToken = methodToken_.IsCancellationRequested
+                                ? methodToken_
+                                : (enumeratorToken_.IsCancellationRequested ? enumeratorToken_ : callerToken);
+
+                            throw new OperationCanceledException(
+                                "The streaming execution was canceled by the caller.",
+                                reportedToken);
+                        }
+
+                        if (request_.Timeout.HasValue)
+                        {
+                            TimeSpan elapsed = this._timeProvider.GetElapsedTime(startTimestamp);
+                            bool isTimeout = timeoutCts!.IsCancellationRequested || elapsed >= request_.Timeout.Value;
+                            if (isTimeout)
+                            {
+                                if (callerToken.IsCancellationRequested)
+                                {
+                                    CancellationToken reportedToken = methodToken_.IsCancellationRequested
+                                        ? methodToken_
+                                        : (enumeratorToken_.IsCancellationRequested ? enumeratorToken_ : callerToken);
+
+                                    throw new OperationCanceledException(
+                                        "The streaming execution was canceled by the caller.",
+                                        reportedToken);
+                                }
+
+                                throw new TimeoutException(
+                                    $"The streaming execution timed out after {request_.Timeout.Value.TotalMilliseconds} ms.");
+                            }
+                        }
+
+                        ValueTask<bool> moveNextValueTask = enumerator.MoveNextAsync();
+                        bool hasNext;
+                        if (moveNextValueTask.IsCompletedSuccessfully)
+                        {
+                            hasNext = moveNextValueTask.Result;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                hasNext = await moveNextValueTask.AsTask().WaitAsync(effectiveToken).ConfigureAwait(false);
+                            }
+                            catch (OperationCanceledException ex)
+                            {
+                                if (callerToken.IsCancellationRequested)
+                                {
+                                    CancellationToken reportedToken = methodToken_.IsCancellationRequested
+                                        ? methodToken_
+                                        : (enumeratorToken_.IsCancellationRequested ? enumeratorToken_ : callerToken);
+
+                                    throw new OperationCanceledException(
+                                        "The streaming execution was canceled by the caller.",
+                                        ex,
+                                        reportedToken);
+                                }
+
+                                bool isTimeout = timeoutCts is not null &&
+                                    (timeoutCts.IsCancellationRequested ||
+                                     (request_.Timeout.HasValue && this._timeProvider.GetElapsedTime(startTimestamp) >= request_.Timeout.Value));
+
+                                if (isTimeout)
+                                {
+                                    throw new TimeoutException(
+                                        $"The streaming execution timed out after {request_.Timeout!.Value.TotalMilliseconds} ms.",
+                                        ex);
+                                }
+
+                                throw;
+                            }
+                        }
+
+                        if (!hasNext)
+                        {
+                            break;
+                        }
+
+                        update = enumerator.Current;
+                    }
+                    catch (Exception ex)
+                    {
+                        primaryFailure = ex;
+                        throw;
+                    }
+
+                    yield return new ModelExecutionUpdate(update.Text ?? string.Empty);
+                }
+            }
+            finally
+            {
+                if (primaryFailure is not null)
+                {
+                    try
+                    {
+                        await enumerator.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Primary failure is active; suppress secondary disposal failure.
+                    }
+                }
+                else
+                {
+                    await enumerator.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+        }
+        finally
+        {
+            timer?.Dispose();
+            effectiveCts?.Dispose();
+            timeoutCts?.Dispose();
+        }
+    }
+
+    public IAsyncEnumerable<ModelExecutionUpdate> ExecuteStreamingInSessionAsync(
+        AgentSessionReference sessionReference_,
+        ModelExecutionRequest request_,
+        CancellationToken cancellationToken_ = default)
+    {
+        ArgumentNullException.ThrowIfNull(
+            sessionReference_,
+            nameof(sessionReference_));
+
+        ArgumentNullException.ThrowIfNull(
+            request_,
+            nameof(request_));
+
+        if (!this._sessions.TryGetValue(sessionReference_.Value, out SessionState? session) || session.IsEnded)
+        {
+            throw new InvalidOperationException(
+                $"Session '{sessionReference_.Value}' is unknown or has ended.");
+        }
+
+        return ExecuteStreamingInSessionCoreAsync(session, sessionReference_, request_, cancellationToken_);
+    }
+
+    private async IAsyncEnumerable<ModelExecutionUpdate> ExecuteStreamingInSessionCoreAsync(
+        SessionState session_,
+        AgentSessionReference sessionReference_,
+        ModelExecutionRequest request_,
+        CancellationToken methodToken_,
+        [EnumeratorCancellation] CancellationToken enumeratorToken_ = default)
+    {
+        using CancellationTokenSource combinedCallerCts =
+            CancellationTokenSource.CreateLinkedTokenSource(methodToken_, enumeratorToken_);
+        CancellationToken callerToken = combinedCallerCts.Token;
+
+        callerToken.ThrowIfCancellationRequested();
+
+        if (!session_.TryStartTurn())
+        {
+            if (session_.IsEnded)
+            {
+                throw new InvalidOperationException(
+                    $"Session '{sessionReference_.Value}' is unknown or has ended.");
+            }
+
+            throw new InvalidOperationException(
+                $"A turn is already active for session '{sessionReference_.Value}'.");
+        }
+
+        bool completedSuccessfully = false;
+        List<ChatResponseUpdate> retainedUpdates = [];
+        ChatMessage userMessage = new(ChatRole.User, request_.Prompt);
+
+        try
+        {
+            callerToken.ThrowIfCancellationRequested();
+
+            List<ChatMessage> outgoingMessages;
+            if (session_.ConversationId is not null)
+            {
+                outgoingMessages = [userMessage];
+            }
+            else
+            {
+                outgoingMessages = new List<ChatMessage>(session_.History.Count + 1);
+                outgoingMessages.AddRange(session_.History);
+                outgoingMessages.Add(userMessage);
+            }
+
+            ChatOptions? options =
+                CreateChatOptions(session_.ConversationId, request_.StructuredOutput);
+
+            CancellationTokenSource? timeoutCts = null;
+            CancellationTokenSource? effectiveCts = null;
+            ITimer? timer = null;
+            CancellationToken effectiveToken = callerToken;
+            long startTimestamp = 0;
+
+            if (request_.Timeout.HasValue)
+            {
+                TimeSpan timeout = request_.Timeout.Value;
+                startTimestamp = this._timeProvider.GetTimestamp();
+                timeoutCts = new CancellationTokenSource();
+                effectiveCts = CancellationTokenSource.CreateLinkedTokenSource(callerToken, timeoutCts.Token);
+                effectiveToken = effectiveCts.Token;
+                timer = this._timeProvider.CreateTimer(
+                    _ => timeoutCts.Cancel(),
+                    null,
+                    timeout,
+                    Timeout.InfiniteTimeSpan);
+            }
+
+            try
+            {
+                IAsyncEnumerable<ChatResponseUpdate> streamingResponse =
+                    this._chatClient.GetStreamingResponseAsync(
+                        outgoingMessages,
+                        options,
+                        effectiveToken);
+
+                IAsyncEnumerator<ChatResponseUpdate> enumerator =
+                    streamingResponse.GetAsyncEnumerator(effectiveToken);
+
+                Exception? primaryFailure = null;
+                bool reachedEndOfStream = false;
+
+                try
+                {
+                    while (true)
+                    {
+                        ChatResponseUpdate update;
+                        try
+                        {
+                            if (callerToken.IsCancellationRequested)
+                            {
+                                CancellationToken reportedToken = methodToken_.IsCancellationRequested
+                                    ? methodToken_
+                                    : (enumeratorToken_.IsCancellationRequested ? enumeratorToken_ : callerToken);
+
+                                throw new OperationCanceledException(
+                                    "The streaming execution was canceled by the caller.",
+                                    reportedToken);
+                            }
+
+                            if (request_.Timeout.HasValue)
+                            {
+                                TimeSpan elapsed = this._timeProvider.GetElapsedTime(startTimestamp);
+                                bool isTimeout = timeoutCts!.IsCancellationRequested || elapsed >= request_.Timeout.Value;
+                                if (isTimeout)
+                                {
+                                    if (callerToken.IsCancellationRequested)
+                                    {
+                                        CancellationToken reportedToken = methodToken_.IsCancellationRequested
+                                            ? methodToken_
+                                            : (enumeratorToken_.IsCancellationRequested ? enumeratorToken_ : callerToken);
+
+                                        throw new OperationCanceledException(
+                                            "The streaming execution was canceled by the caller.",
+                                            reportedToken);
+                                    }
+
+                                    throw new TimeoutException(
+                                        $"The streaming execution timed out after {request_.Timeout.Value.TotalMilliseconds} ms.");
+                                }
+                            }
+
+                            ValueTask<bool> moveNextValueTask = enumerator.MoveNextAsync();
+                            bool hasNext;
+                            if (moveNextValueTask.IsCompletedSuccessfully)
+                            {
+                                hasNext = moveNextValueTask.Result;
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    hasNext = await moveNextValueTask.AsTask().WaitAsync(effectiveToken).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException ex)
+                                {
+                                    if (callerToken.IsCancellationRequested)
+                                    {
+                                        CancellationToken reportedToken = methodToken_.IsCancellationRequested
+                                            ? methodToken_
+                                            : (enumeratorToken_.IsCancellationRequested ? enumeratorToken_ : callerToken);
+
+                                        throw new OperationCanceledException(
+                                            "The streaming execution was canceled by the caller.",
+                                            ex,
+                                            reportedToken);
+                                    }
+
+                                    bool isTimeout = timeoutCts is not null &&
+                                        (timeoutCts.IsCancellationRequested ||
+                                         (request_.Timeout.HasValue && this._timeProvider.GetElapsedTime(startTimestamp) >= request_.Timeout.Value));
+
+                                    if (isTimeout)
+                                    {
+                                        throw new TimeoutException(
+                                            $"The streaming execution timed out after {request_.Timeout!.Value.TotalMilliseconds} ms.",
+                                            ex);
+                                    }
+
+                                    throw;
+                                }
+                            }
+
+                            if (!hasNext)
+                            {
+                                reachedEndOfStream = true;
+                                break;
+                            }
+
+                            update = enumerator.Current;
+                            retainedUpdates.Add(update);
+                        }
+                        catch (Exception ex)
+                        {
+                            primaryFailure = ex;
+                            throw;
+                        }
+
+                        yield return new ModelExecutionUpdate(update.Text ?? string.Empty);
+                    }
+                }
+                finally
+                {
+                    if (primaryFailure is not null)
+                    {
+                        try
+                        {
+                            await enumerator.DisposeAsync().ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            // Primary failure is active; suppress secondary disposal failure.
+                        }
+                    }
+                    else
+                    {
+                        await enumerator.DisposeAsync().ConfigureAwait(false);
+                        if (reachedEndOfStream)
+                        {
+                            completedSuccessfully = true;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                timer?.Dispose();
+                effectiveCts?.Dispose();
+                timeoutCts?.Dispose();
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (completedSuccessfully)
+                {
+                    ChatResponse aggregatedResponse = retainedUpdates.ToChatResponse();
+
+                    if (!string.IsNullOrWhiteSpace(aggregatedResponse.ConversationId))
+                    {
+                        session_.ConversationId = aggregatedResponse.ConversationId;
+                        session_.History.Clear();
+                    }
+                    else if (session_.ConversationId is null)
+                    {
+                        session_.History.Add(userMessage);
+                        if (aggregatedResponse.Messages is not null)
+                        {
+                            foreach (ChatMessage message in aggregatedResponse.Messages)
+                            {
+                                session_.History.Add(message);
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                session_.EndTurn();
+            }
         }
     }
 

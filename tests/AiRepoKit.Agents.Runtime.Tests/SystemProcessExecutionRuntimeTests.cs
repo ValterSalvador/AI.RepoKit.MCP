@@ -109,4 +109,90 @@ public sealed class SystemProcessExecutionRuntimeTests
         Assert.False(string.IsNullOrWhiteSpace(result.StandardOutput));
         Assert.Empty(result.StandardError);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WithTimeout_CompletesNormally_WhenProcessFinishesBeforeTimeout()
+    {
+        SystemProcessExecutionRuntime runtime = new();
+        ProcessExecutionRequest request = new(
+            "dotnet",
+            ["--version"],
+            ValidWorkingDirectory,
+            TimeSpan.FromSeconds(30));
+
+        ProcessExecutionResult result = await runtime.ExecuteAsync(request);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.False(string.IsNullOrWhiteSpace(result.StandardOutput));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TimeoutExpires_ThrowsTimeoutException_AndTerminatesProcess()
+    {
+        SystemProcessExecutionRuntime runtime = new();
+        var (executable, args) = GetLongRunningProcessSpec();
+        ProcessExecutionRequest request = new(
+            executable,
+            args,
+            ValidWorkingDirectory,
+            TimeSpan.FromMilliseconds(150));
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        TimeoutException ex = await Assert.ThrowsAsync<TimeoutException>(
+            () => runtime.ExecuteAsync(request));
+
+        stopwatch.Stop();
+        Assert.Contains("timed out", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(stopwatch.ElapsedMilliseconds < 5000, "Timeout should have terminated promptly.");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CallerCancellation_ThrowsOperationCanceledException_AndTerminatesProcess()
+    {
+        SystemProcessExecutionRuntime runtime = new();
+        var (executable, args) = GetLongRunningProcessSpec();
+        ProcessExecutionRequest request = new(
+            executable,
+            args,
+            ValidWorkingDirectory,
+            TimeSpan.FromSeconds(30));
+
+        using CancellationTokenSource cts = new();
+        Task<ProcessExecutionResult> executeTask = runtime.ExecuteAsync(request, cts.Token);
+
+        await Task.Delay(50);
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => executeTask);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CallerCancellationAndTimeoutRace_CallerCancellationWinsPrecedence()
+    {
+        SystemProcessExecutionRuntime runtime = new();
+        var (executable, args) = GetLongRunningProcessSpec();
+        ProcessExecutionRequest request = new(
+            executable,
+            args,
+            ValidWorkingDirectory,
+            TimeSpan.FromMilliseconds(100));
+
+        using CancellationTokenSource cts = new();
+        cts.Cancel(); // Pre-canceled caller token
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => runtime.ExecuteAsync(request, cts.Token));
+    }
+
+    private static (string Executable, IReadOnlyList<string> Arguments) GetLongRunningProcessSpec()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return ("ping.exe", ["127.0.0.1", "-n", "10"]);
+        }
+        else
+        {
+            return ("sleep", ["10"]);
+        }
+    }
 }

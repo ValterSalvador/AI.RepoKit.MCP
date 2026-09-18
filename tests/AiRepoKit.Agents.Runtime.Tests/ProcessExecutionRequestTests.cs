@@ -129,4 +129,65 @@ public sealed class ProcessExecutionRequestTests
         Assert.Equal(2, request.Arguments.Count);
         Assert.Equal(ValidWorkingDirectory, request.WorkingDirectory);
     }
+
+    [Fact]
+    public void Constructor_WithoutTimeout_DefaultsToNull()
+    {
+        ProcessExecutionRequest request = new("dotnet", ["--version"], ValidWorkingDirectory);
+        Assert.Null(request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_ExplicitNullTimeout_Accepted()
+    {
+        ProcessExecutionRequest request = new("dotnet", ["--version"], ValidWorkingDirectory, timeout_: null);
+        Assert.Null(request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_PositiveTimeout_RetainsExactValue()
+    {
+        TimeSpan timeout = TimeSpan.FromSeconds(42.5);
+        ProcessExecutionRequest request = new("dotnet", ["--version"], ValidWorkingDirectory, timeout);
+        Assert.Equal(timeout, request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_ZeroTimeout_ThrowsArgumentOutOfRangeException()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ProcessExecutionRequest("dotnet", ["--version"], ValidWorkingDirectory, TimeSpan.Zero));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-1000)]
+    public void Constructor_NegativeTimeout_ThrowsArgumentOutOfRangeException(int negativeMs)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ProcessExecutionRequest("dotnet", ["--version"], ValidWorkingDirectory, TimeSpan.FromMilliseconds(negativeMs)));
+    }
+
+    [Fact]
+    public void Constructor_UpperBoundaryTimeout_Accepted()
+    {
+        TimeSpan boundaryTimeout = TimeSpan.FromMilliseconds(4294967294L);
+        ProcessExecutionRequest request = new("dotnet", ["--version"], ValidWorkingDirectory, boundaryTimeout);
+        Assert.Equal(boundaryTimeout, request.Timeout);
+    }
+
+    [Fact]
+    public void Constructor_AboveUpperBoundaryTimeout_ThrowsArgumentOutOfRangeException()
+    {
+        TimeSpan aboveBoundary = TimeSpan.FromMilliseconds(4294967295L);
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ProcessExecutionRequest("dotnet", ["--version"], ValidWorkingDirectory, aboveBoundary));
+    }
+
+    [Fact]
+    public void Constructor_TimeSpanMaxValue_ThrowsArgumentOutOfRangeException()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ProcessExecutionRequest("dotnet", ["--version"], ValidWorkingDirectory, TimeSpan.MaxValue));
+    }
 }

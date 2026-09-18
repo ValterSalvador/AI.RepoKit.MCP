@@ -13,9 +13,11 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         "ChatClientModelExecutionRuntime",
         "IModelExecutionRuntime",
         "IModelSessionRuntime",
+        "IModelStreamingExecutionRuntime",
         "IProcessExecutionRuntime",
         "ModelExecutionRequest",
         "ModelExecutionResult",
+        "ModelExecutionUpdate",
         "ProcessExecutionRequest",
         "ProcessExecutionResult",
         "SystemProcessExecutionRuntime"
@@ -106,7 +108,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void RuntimeAssembly_ExportsExactlyNineAuthorizedPublicTypes()
+    public void RuntimeAssembly_ExportsExactlyElevenAuthorizedPublicTypes()
     {
         Assembly assembly = typeof(IProcessExecutionRuntime).Assembly;
         Type[] exportedTypes = assembly.GetExportedTypes();
@@ -116,7 +118,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(9, exportedTypes.Length);
+        Assert.Equal(11, exportedTypes.Length);
         Assert.Equal(_expectedPublicRuntimeTypes, exportedNames);
 
         foreach (Type type in exportedTypes)
