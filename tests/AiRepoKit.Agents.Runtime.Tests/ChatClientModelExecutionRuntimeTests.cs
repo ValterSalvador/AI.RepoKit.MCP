@@ -218,4 +218,50 @@ public sealed class ChatClientModelExecutionRuntimeTests
         Assert.False(typeof(IDisposable).IsAssignableFrom(typeof(ChatClientModelExecutionRuntime)));
         Assert.False(fakeClient.Disposed);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_ConsecutiveCalls_ShareNoHistory_AndSendOnlyCurrentUserMessage()
+    {
+        FakeChatClient fakeClient = new();
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        ModelExecutionResult result1 = await runtime.ExecuteAsync(new ModelExecutionRequest("First prompt"));
+        ModelExecutionResult result2 = await runtime.ExecuteAsync(new ModelExecutionRequest("Second prompt"));
+
+        Assert.Equal(2, fakeClient.GetResponseCallCount);
+        Assert.Equal(2, fakeClient.InvocationsMessages.Count);
+
+        IReadOnlyList<ChatMessage> firstCallMessages = fakeClient.InvocationsMessages[0];
+        Assert.Single(firstCallMessages);
+        Assert.Equal("First prompt", firstCallMessages[0].Text);
+
+        IReadOnlyList<ChatMessage> secondCallMessages = fakeClient.InvocationsMessages[1];
+        Assert.Single(secondCallMessages);
+        Assert.Equal("Second prompt", secondCallMessages[0].Text);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotSetConversationId_EvenIfClientResponseProvidedOne()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Response"))
+            {
+                ConversationId = "provider-conv-123"
+            }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        await runtime.ExecuteAsync(new ModelExecutionRequest("First prompt"));
+        await runtime.ExecuteAsync(new ModelExecutionRequest("Second prompt"));
+
+        Assert.Equal(2, fakeClient.GetResponseCallCount);
+        foreach (ChatOptions? options in fakeClient.InvocationsOptions)
+        {
+            if (options is not null)
+            {
+                Assert.Null(options.ConversationId);
+            }
+        }
+    }
 }
