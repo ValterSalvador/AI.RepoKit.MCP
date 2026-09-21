@@ -12,8 +12,10 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     [
         "ChatClientModelExecutionRuntime",
         "ConfiguredModelDiscoveryRuntime",
+        "DeterministicModelRoutingRuntime",
         "IModelDiscoveryRuntime",
         "IModelExecutionRuntime",
+        "IModelRoutingRuntime",
         "IModelSessionRuntime",
         "IModelStreamingExecutionRuntime",
         "IProcessExecutionRuntime",
@@ -22,6 +24,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         "ModelExecutionUpdate",
         "ModelHealthSnapshot",
         "ModelHealthStatus",
+        "ModelRouteCandidate",
         "ModelRuntimeRegistration",
         "ProcessExecutionRequest",
         "ProcessExecutionResult",
@@ -113,7 +116,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void RuntimeAssembly_ExportsExactlySixteenAuthorizedPublicTypes()
+    public void RuntimeAssembly_ExportsExactlyNineteenAuthorizedPublicTypes()
     {
         Assembly assembly = typeof(IProcessExecutionRuntime).Assembly;
         Type[] exportedTypes = assembly.GetExportedTypes();
@@ -123,7 +126,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(16, exportedTypes.Length);
+        Assert.Equal(19, exportedTypes.Length);
         Assert.Equal(_expectedPublicRuntimeTypes, exportedNames);
 
         foreach (Type type in exportedTypes)
@@ -200,16 +203,19 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     [Fact]
     public void RuntimePublicSurface_DoesNotExposeMicrosoftExtensionsAITypes()
     {
-        Type[] p04Types =
+        Type[] p04AndP05Types =
         [
             typeof(ConfiguredModelDiscoveryRuntime),
+            typeof(DeterministicModelRoutingRuntime),
             typeof(IModelDiscoveryRuntime),
+            typeof(IModelRoutingRuntime),
             typeof(ModelHealthSnapshot),
             typeof(ModelHealthStatus),
+            typeof(ModelRouteCandidate),
             typeof(ModelRuntimeRegistration)
         ];
 
-        foreach (Type type in p04Types)
+        foreach (Type type in p04AndP05Types)
         {
             foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
@@ -233,6 +239,30 @@ public sealed class RuntimeArchitectureAndBoundaryTests
                 }
             }
         }
+    }
+
+    [Fact]
+    public void RuntimeAssembly_DoesNotExportModelRequirement()
+    {
+        Assembly assembly = typeof(IProcessExecutionRuntime).Assembly;
+        Type[] exportedTypes = assembly.GetExportedTypes();
+
+        Assert.DoesNotContain(
+            exportedTypes,
+            t => t.Name.Contains("ModelRequirement", StringComparison.OrdinalIgnoreCase)
+              || t.Name.Contains("AgentRequirement", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AbstractionsAssembly_DoesNotExportModelRequirement()
+    {
+        Assembly assembly = typeof(IAgentExecutor).Assembly;
+        Type[] exportedTypes = assembly.GetExportedTypes();
+
+        Assert.DoesNotContain(
+            exportedTypes,
+            t => t.Name.Contains("ModelRequirement", StringComparison.OrdinalIgnoreCase)
+              || t.Name.Contains("AgentRequirement", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
