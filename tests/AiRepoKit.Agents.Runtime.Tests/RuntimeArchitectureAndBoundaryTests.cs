@@ -11,6 +11,8 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     private static readonly string[] _expectedPublicRuntimeTypes =
     [
         "ChatClientModelExecutionRuntime",
+        "ConfiguredModelDiscoveryRuntime",
+        "IModelDiscoveryRuntime",
         "IModelExecutionRuntime",
         "IModelSessionRuntime",
         "IModelStreamingExecutionRuntime",
@@ -18,6 +20,9 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         "ModelExecutionRequest",
         "ModelExecutionResult",
         "ModelExecutionUpdate",
+        "ModelHealthSnapshot",
+        "ModelHealthStatus",
+        "ModelRuntimeRegistration",
         "ProcessExecutionRequest",
         "ProcessExecutionResult",
         "SystemProcessExecutionRuntime"
@@ -108,7 +113,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void RuntimeAssembly_ExportsExactlyElevenAuthorizedPublicTypes()
+    public void RuntimeAssembly_ExportsExactlySixteenAuthorizedPublicTypes()
     {
         Assembly assembly = typeof(IProcessExecutionRuntime).Assembly;
         Type[] exportedTypes = assembly.GetExportedTypes();
@@ -118,7 +123,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(11, exportedTypes.Length);
+        Assert.Equal(16, exportedTypes.Length);
         Assert.Equal(_expectedPublicRuntimeTypes, exportedNames);
 
         foreach (Type type in exportedTypes)
@@ -190,5 +195,72 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         XDocument document = XDocument.Load(projectPath);
         IEnumerable<XElement> packageReferences = document.Descendants("PackageReference");
         Assert.Empty(packageReferences);
+    }
+
+    [Fact]
+    public void RuntimePublicSurface_DoesNotExposeMicrosoftExtensionsAITypes()
+    {
+        Type[] p04Types =
+        [
+            typeof(ConfiguredModelDiscoveryRuntime),
+            typeof(IModelDiscoveryRuntime),
+            typeof(ModelHealthSnapshot),
+            typeof(ModelHealthStatus),
+            typeof(ModelRuntimeRegistration)
+        ];
+
+        foreach (Type type in p04Types)
+        {
+            foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            {
+                AssertNotMicrosoftExtensionsAi(method.ReturnType);
+                foreach (ParameterInfo param in method.GetParameters())
+                {
+                    AssertNotMicrosoftExtensionsAi(param.ParameterType);
+                }
+            }
+
+            foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            {
+                AssertNotMicrosoftExtensionsAi(property.PropertyType);
+            }
+
+            foreach (ConstructorInfo ctor in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance))
+            {
+                foreach (ParameterInfo param in ctor.GetParameters())
+                {
+                    AssertNotMicrosoftExtensionsAi(param.ParameterType);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void AbstractionsPublicSurface_RemainsUntouched()
+    {
+        Assembly assembly = typeof(IAgentExecutor).Assembly;
+        Type[] exportedTypes = assembly.GetExportedTypes();
+
+        Assert.Equal(11, exportedTypes.Length);
+    }
+
+    private static void AssertNotMicrosoftExtensionsAi(Type type_)
+    {
+        Type toCheck = type_;
+        if (toCheck.IsGenericType)
+        {
+            foreach (Type genericArg in toCheck.GetGenericArguments())
+            {
+                AssertNotMicrosoftExtensionsAi(genericArg);
+            }
+        }
+
+        string? ns = toCheck.Namespace;
+        if (ns is not null)
+        {
+            Assert.False(
+                ns.StartsWith("Microsoft.Extensions.AI", StringComparison.Ordinal),
+                $"Public contract exposed Microsoft.Extensions.AI type: {toCheck.FullName}");
+        }
     }
 }
