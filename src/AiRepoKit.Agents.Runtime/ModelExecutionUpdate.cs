@@ -7,6 +7,11 @@ public sealed record ModelExecutionUpdate
         get;
     }
 
+    public ModelExecutionTelemetry? Telemetry
+    {
+        get;
+    }
+
     public ModelExecutionUpdate(string responseTextDelta_)
     {
         ArgumentNullException.ThrowIfNull(
@@ -15,5 +20,23 @@ public sealed record ModelExecutionUpdate
 
         this.ResponseTextDelta =
             responseTextDelta_;
+        this.Telemetry = null;
+    }
+
+    public ModelExecutionUpdate(
+        string responseTextDelta_,
+        ModelExecutionTelemetry telemetry_)
+    {
+        ArgumentNullException.ThrowIfNull(
+            responseTextDelta_,
+            nameof(responseTextDelta_));
+        ArgumentNullException.ThrowIfNull(
+            telemetry_,
+            nameof(telemetry_));
+
+        this.ResponseTextDelta =
+            responseTextDelta_;
+        this.Telemetry =
+            telemetry_;
     }
 }

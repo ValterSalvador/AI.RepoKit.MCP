@@ -827,4 +827,218 @@ public sealed class ChatClientModelSessionRuntimeTests
         bool ended = await runtime.EndSessionAsync(sessionRef);
         Assert.True(ended);
     }
+
+    // =========================================================================
+    // V5.P06: Session Non-Streaming Telemetry Tests (Section 48)
+    // =========================================================================
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_SuccessfulCall_ReturnsNonNullTelemetry()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")));
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        ModelExecutionResult result = await runtime.ExecuteInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("Turn 1"));
+
+        Assert.NotNull(result.Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_UsageNormalization_MapsAllFieldsIdenticallyToExecuteAsync()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 120,
+            OutputTokenCount = 60,
+            TotalTokenCount = 180,
+            CachedInputTokenCount = 30,
+            ReasoningTokenCount = 15
+        };
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage });
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        ModelExecutionResult result = await runtime.ExecuteInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("Turn 1"));
+
+        Assert.NotNull(result.Telemetry?.TokenUsage);
+        Assert.Equal(120, result.Telemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(60, result.Telemetry.TokenUsage.OutputTokenCount);
+        Assert.Equal(180, result.Telemetry.TokenUsage.TotalTokenCount);
+        Assert.Equal(30, result.Telemetry.TokenUsage.CachedInputTokenCount);
+        Assert.Equal(15, result.Telemetry.TokenUsage.ReasoningTokenCount);
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_WithPricing_EstimatesCost()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 1_000_000,
+            OutputTokenCount = 500_000
+        };
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage });
+        ModelTokenPricing pricing = new("USD", 2.00m, 4.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        ModelExecutionResult result = await runtime.ExecuteInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("Turn 1"));
+
+        Assert.NotNull(result.Telemetry?.EstimatedCost);
+        Assert.Equal(4.00m, result.Telemetry.EstimatedCost);
+        Assert.Equal("USD", result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_DeterministicLatency_Measured()
+    {
+        ManualTimeProvider timeProvider = new();
+        FakeChatClient fakeClient = new();
+        TaskCompletionSource callStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource callProceed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        fakeClient.CallStartedTcs = callStarted;
+        fakeClient.CallProceedTcs = callProceed;
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, timeProvider);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        Task<ModelExecutionResult> task = runtime.ExecuteInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("Turn 1"));
+        await callStarted.Task;
+
+        TimeSpan advanceBy = TimeSpan.FromMilliseconds(300);
+        timeProvider.Advance(advanceBy);
+        callProceed.SetResult();
+
+        ModelExecutionResult result = await task;
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(advanceBy, result.Telemetry.Latency);
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_ConversationIdBehavior_RemainsUnchangedWithTelemetry()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "R1"))
+        {
+            ConversationId = "conv-p06"
+        });
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "R2")));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        ModelExecutionResult turn1 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U1"));
+        Assert.NotNull(turn1.Telemetry);
+
+        ModelExecutionResult turn2 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U2"));
+        Assert.NotNull(turn2.Telemetry);
+
+        Assert.Equal("conv-p06", fakeClient.InvocationsOptions[1]?.ConversationId);
+        Assert.Single(fakeClient.InvocationsMessages[1]);
+        Assert.Equal("U2", fakeClient.InvocationsMessages[1][0].Text);
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_StatelessHistoryBehavior_RemainsUnchangedWithTelemetry()
+    {
+        FakeChatClient fakeClient = new();
+        ChatMessage r1 = new(ChatRole.Assistant, "R1");
+        fakeClient.EnqueueResponse(new ChatResponse([r1]));
+        fakeClient.EnqueueResponse(new ChatResponse([new ChatMessage(ChatRole.Assistant, "R2")]));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        ModelExecutionResult turn1 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U1"));
+        Assert.NotNull(turn1.Telemetry);
+
+        ModelExecutionResult turn2 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U2"));
+        Assert.NotNull(turn2.Telemetry);
+
+        IReadOnlyList<ChatMessage> turn2Sent = fakeClient.InvocationsMessages[1];
+        Assert.Equal(3, turn2Sent.Count);
+        Assert.Equal("U1", turn2Sent[0].Text);
+        Assert.Same(r1, turn2Sent[1]);
+        Assert.Equal("U2", turn2Sent[2].Text);
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_StatefulProviderBehavior_RemainsUnchangedWithTelemetry()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "R1"))
+        {
+            ConversationId = "conv-stateful"
+        });
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        ModelExecutionResult turn1 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U1"));
+
+        Assert.NotNull(turn1.Telemetry);
+        Assert.Equal("conv-stateful", fakeClient.InvocationsOptions[0]?.ConversationId ?? "conv-stateful");
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_TurnGateReleasesAfterTimeout_AndSessionRemainsUsable()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            NonCooperativeGetResponse = true
+        };
+        ManualTimeProvider timeProvider = new();
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, timeProvider);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        Task<ModelExecutionResult> turn1 = runtime.ExecuteInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("U1", timeout_: TimeSpan.FromSeconds(2)));
+
+        timeProvider.Advance(TimeSpan.FromSeconds(3));
+        await Assert.ThrowsAsync<TimeoutException>(() => turn1);
+
+        fakeClient.NonCooperativeGetResponse = false;
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "R2")));
+
+        ModelExecutionResult turn2 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U2"));
+        Assert.NotNull(turn2.Telemetry);
+        Assert.Equal("R2", turn2.ResponseText);
+    }
+
+    [Fact]
+    public async Task ExecuteInSessionAsync_TelemetryDoesNotAlterSubsequentTurns()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "R1"))
+        {
+            Usage = new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 }
+        });
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "R2"))
+        {
+            Usage = new UsageDetails { InputTokenCount = 20, OutputTokenCount = 10 }
+        });
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        ModelExecutionResult turn1 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U1"));
+        Assert.Equal(10, turn1.Telemetry?.TokenUsage?.InputTokenCount);
+
+        ModelExecutionResult turn2 = await runtime.ExecuteInSessionAsync(sessionRef, new ModelExecutionRequest("U2"));
+        Assert.Equal(20, turn2.Telemetry?.TokenUsage?.InputTokenCount);
+    }
 }

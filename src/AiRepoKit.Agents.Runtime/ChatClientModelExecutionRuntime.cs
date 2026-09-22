@@ -10,17 +10,36 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
 {
     private readonly IChatClient _chatClient;
     private readonly TimeProvider _timeProvider;
+    private readonly ModelTokenPricing? _pricing;
     private readonly ConcurrentDictionary<string, SessionState> _sessions = new(StringComparer.Ordinal);
 
     public ChatClientModelExecutionRuntime(
         IChatClient chatClient_)
-        : this(chatClient_, TimeProvider.System)
+        : this(chatClient_, TimeProvider.System, null)
+    {
+    }
+
+    public ChatClientModelExecutionRuntime(
+        IChatClient chatClient_,
+        ModelTokenPricing pricing_)
+        : this(
+            chatClient_ ?? throw new ArgumentNullException(nameof(chatClient_)),
+            TimeProvider.System,
+            pricing_ ?? throw new ArgumentNullException(nameof(pricing_)))
     {
     }
 
     internal ChatClientModelExecutionRuntime(
         IChatClient chatClient_,
         TimeProvider timeProvider_)
+        : this(chatClient_, timeProvider_, null)
+    {
+    }
+
+    internal ChatClientModelExecutionRuntime(
+        IChatClient chatClient_,
+        TimeProvider timeProvider_,
+        ModelTokenPricing? pricing_)
     {
         ArgumentNullException.ThrowIfNull(
             chatClient_,
@@ -34,6 +53,8 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
             chatClient_;
         this._timeProvider =
             timeProvider_;
+        this._pricing =
+            pricing_;
     }
 
     public async Task<ModelExecutionResult> ExecuteAsync(
@@ -54,6 +75,7 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
 
         if (request_.Timeout is null)
         {
+            long startTimestamp = this._timeProvider.GetTimestamp();
             Task<ChatResponse> responseTask = this._chatClient.GetResponseAsync(
                 [userMessage],
                 options,
@@ -61,9 +83,12 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
 
             ChatResponse response =
                 await responseTask.WaitAsync(cancellationToken_).ConfigureAwait(false);
+            TimeSpan latency = this._timeProvider.GetElapsedTime(startTimestamp);
 
+            ModelExecutionTelemetry telemetry = CreateTelemetry(response.Usage, latency);
             return new ModelExecutionResult(
-                response.Text ?? string.Empty);
+                response.Text ?? string.Empty,
+                telemetry);
         }
 
         TimeSpan timeout = request_.Timeout.Value;
@@ -78,6 +103,7 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
             timeout,
             Timeout.InfiniteTimeSpan);
 
+        long startTimestampWithTimeout = this._timeProvider.GetTimestamp();
         Task<ChatResponse> responseTaskWithTimeout = this._chatClient.GetResponseAsync(
             [userMessage],
             options,
@@ -108,8 +134,11 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
             throw;
         }
 
+        TimeSpan timedLatency = this._timeProvider.GetElapsedTime(startTimestampWithTimeout);
+        ModelExecutionTelemetry timedTelemetry = CreateTelemetry(timedResponse.Usage, timedLatency);
         return new ModelExecutionResult(
-            timedResponse.Text ?? string.Empty);
+            timedResponse.Text ?? string.Empty,
+            timedTelemetry);
     }
 
     public AgentSessionReference CreateSession()
@@ -181,8 +210,10 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                 CreateChatOptions(session.ConversationId, request_.StructuredOutput);
 
             ChatResponse response;
+            TimeSpan latency;
             if (request_.Timeout is null)
             {
+                long startTimestamp = this._timeProvider.GetTimestamp();
                 Task<ChatResponse> responseTask = this._chatClient.GetResponseAsync(
                     outgoingMessages,
                     options,
@@ -190,6 +221,7 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
 
                 response =
                     await responseTask.WaitAsync(cancellationToken_).ConfigureAwait(false);
+                latency = this._timeProvider.GetElapsedTime(startTimestamp);
             }
             else
             {
@@ -205,6 +237,7 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                     timeout,
                     Timeout.InfiniteTimeSpan);
 
+                long startTimestamp = this._timeProvider.GetTimestamp();
                 Task<ChatResponse> responseTask = this._chatClient.GetResponseAsync(
                     outgoingMessages,
                     options,
@@ -233,6 +266,8 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
 
                     throw;
                 }
+
+                latency = this._timeProvider.GetElapsedTime(startTimestamp);
             }
 
             if (!string.IsNullOrWhiteSpace(response.ConversationId))
@@ -252,8 +287,10 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                 }
             }
 
+            ModelExecutionTelemetry telemetry = CreateTelemetry(response.Usage, latency);
             return new ModelExecutionResult(
-                response.Text ?? string.Empty);
+                response.Text ?? string.Empty,
+                telemetry);
         }
         finally
         {
@@ -293,12 +330,13 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
         CancellationTokenSource? effectiveCts = null;
         ITimer? timer = null;
         CancellationToken effectiveToken = callerToken;
+        long streamStartTimestamp = this._timeProvider.GetTimestamp();
         long startTimestamp = 0;
 
         if (request_.Timeout.HasValue)
         {
             TimeSpan timeout = request_.Timeout.Value;
-            startTimestamp = this._timeProvider.GetTimestamp();
+            startTimestamp = streamStartTimestamp;
             timeoutCts = new CancellationTokenSource();
             effectiveCts = CancellationTokenSource.CreateLinkedTokenSource(callerToken, timeoutCts.Token);
             effectiveToken = effectiveCts.Token;
@@ -308,6 +346,10 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                 timeout,
                 Timeout.InfiniteTimeSpan);
         }
+
+        bool reachedEndOfStream = false;
+        bool disposedSuccessfully = false;
+        UsageDetails? accumulatedUsage = null;
 
         try
         {
@@ -405,10 +447,22 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
 
                         if (!hasNext)
                         {
+                            reachedEndOfStream = true;
                             break;
                         }
 
                         update = enumerator.Current;
+                        if (update.Contents is not null)
+                        {
+                            foreach (AIContent content in update.Contents)
+                            {
+                                if (content is UsageContent usageContent && usageContent.Details is not null)
+                                {
+                                    accumulatedUsage ??= new UsageDetails();
+                                    accumulatedUsage.Add(usageContent.Details);
+                                }
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -435,6 +489,10 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                 else
                 {
                     await enumerator.DisposeAsync().ConfigureAwait(false);
+                    if (reachedEndOfStream)
+                    {
+                        disposedSuccessfully = true;
+                    }
                 }
             }
         }
@@ -443,6 +501,13 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
             timer?.Dispose();
             effectiveCts?.Dispose();
             timeoutCts?.Dispose();
+        }
+
+        if (reachedEndOfStream && disposedSuccessfully)
+        {
+            TimeSpan latency = this._timeProvider.GetElapsedTime(streamStartTimestamp);
+            ModelExecutionTelemetry telemetry = CreateTelemetry(accumulatedUsage, latency);
+            yield return new ModelExecutionUpdate(string.Empty, telemetry);
         }
     }
 
@@ -493,7 +558,6 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                 $"A turn is already active for session '{sessionReference_.Value}'.");
         }
 
-        bool completedSuccessfully = false;
         List<ChatResponseUpdate> retainedUpdates = [];
         ChatMessage userMessage = new(ChatRole.User, request_.Prompt);
 
@@ -520,12 +584,13 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
             CancellationTokenSource? effectiveCts = null;
             ITimer? timer = null;
             CancellationToken effectiveToken = callerToken;
+            long streamStartTimestamp = this._timeProvider.GetTimestamp();
             long startTimestamp = 0;
 
             if (request_.Timeout.HasValue)
             {
                 TimeSpan timeout = request_.Timeout.Value;
-                startTimestamp = this._timeProvider.GetTimestamp();
+                startTimestamp = streamStartTimestamp;
                 timeoutCts = new CancellationTokenSource();
                 effectiveCts = CancellationTokenSource.CreateLinkedTokenSource(callerToken, timeoutCts.Token);
                 effectiveToken = effectiveCts.Token;
@@ -535,6 +600,10 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                     timeout,
                     Timeout.InfiniteTimeSpan);
             }
+
+            bool reachedEndOfStream = false;
+            bool disposedSuccessfully = false;
+            UsageDetails? accumulatedUsage = null;
 
             try
             {
@@ -548,7 +617,6 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                     streamingResponse.GetAsyncEnumerator(effectiveToken);
 
                 Exception? primaryFailure = null;
-                bool reachedEndOfStream = false;
 
                 try
                 {
@@ -639,6 +707,17 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
 
                             update = enumerator.Current;
                             retainedUpdates.Add(update);
+                            if (update.Contents is not null)
+                            {
+                                foreach (AIContent content in update.Contents)
+                                {
+                                    if (content is UsageContent usageContent && usageContent.Details is not null)
+                                    {
+                                        accumulatedUsage ??= new UsageDetails();
+                                        accumulatedUsage.Add(usageContent.Details);
+                                    }
+                                }
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -667,7 +746,7 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                         await enumerator.DisposeAsync().ConfigureAwait(false);
                         if (reachedEndOfStream)
                         {
-                            completedSuccessfully = true;
+                            disposedSuccessfully = true;
                         }
                     }
                 }
@@ -678,37 +757,37 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
                 effectiveCts?.Dispose();
                 timeoutCts?.Dispose();
             }
-        }
-        finally
-        {
-            try
-            {
-                if (completedSuccessfully)
-                {
-                    ChatResponse aggregatedResponse = retainedUpdates.ToChatResponse();
 
-                    if (!string.IsNullOrWhiteSpace(aggregatedResponse.ConversationId))
+            if (reachedEndOfStream && disposedSuccessfully)
+            {
+                TimeSpan latency = this._timeProvider.GetElapsedTime(streamStartTimestamp);
+
+                ChatResponse aggregatedResponse = retainedUpdates.ToChatResponse();
+
+                if (!string.IsNullOrWhiteSpace(aggregatedResponse.ConversationId))
+                {
+                    session_.ConversationId = aggregatedResponse.ConversationId;
+                    session_.History.Clear();
+                }
+                else if (session_.ConversationId is null)
+                {
+                    session_.History.Add(userMessage);
+                    if (aggregatedResponse.Messages is not null)
                     {
-                        session_.ConversationId = aggregatedResponse.ConversationId;
-                        session_.History.Clear();
-                    }
-                    else if (session_.ConversationId is null)
-                    {
-                        session_.History.Add(userMessage);
-                        if (aggregatedResponse.Messages is not null)
+                        foreach (ChatMessage message in aggregatedResponse.Messages)
                         {
-                            foreach (ChatMessage message in aggregatedResponse.Messages)
-                            {
-                                session_.History.Add(message);
-                            }
+                            session_.History.Add(message);
                         }
                     }
                 }
+
+                ModelExecutionTelemetry telemetry = CreateTelemetry(accumulatedUsage, latency);
+                yield return new ModelExecutionUpdate(string.Empty, telemetry);
             }
-            finally
-            {
-                session_.EndTurn();
-            }
+        }
+        finally
+        {
+            session_.EndTurn();
         }
     }
 
@@ -735,6 +814,68 @@ public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRu
         }
 
         return ended;
+    }
+
+    private ModelExecutionTelemetry CreateTelemetry(
+        UsageDetails? usageDetails_,
+        TimeSpan latency_)
+    {
+        ModelTokenUsage? tokenUsage = NormalizeUsage(usageDetails_);
+        decimal? estimatedCost = null;
+        string? currencyCode = null;
+
+        if (this._pricing is not null &&
+            tokenUsage is not null &&
+            tokenUsage.InputTokenCount.HasValue &&
+            tokenUsage.OutputTokenCount.HasValue)
+        {
+            decimal inputComponent;
+            if (tokenUsage.CachedInputTokenCount.HasValue)
+            {
+                decimal nonCachedInput = tokenUsage.InputTokenCount.Value - tokenUsage.CachedInputTokenCount.Value;
+                decimal cachedRate = this._pricing.CachedInputCostPerMillionTokens ?? this._pricing.InputCostPerMillionTokens;
+                inputComponent = (nonCachedInput * this._pricing.InputCostPerMillionTokens) +
+                                 (tokenUsage.CachedInputTokenCount.Value * cachedRate);
+            }
+            else
+            {
+                inputComponent = tokenUsage.InputTokenCount.Value * this._pricing.InputCostPerMillionTokens;
+            }
+
+            decimal outputComponent = tokenUsage.OutputTokenCount.Value * this._pricing.OutputCostPerMillionTokens;
+            estimatedCost = (inputComponent + outputComponent) / 1_000_000m;
+            currencyCode = this._pricing.CurrencyCode;
+        }
+
+        return new ModelExecutionTelemetry(
+            tokenUsage,
+            latency_,
+            estimatedCost,
+            currencyCode);
+    }
+
+    private static ModelTokenUsage? NormalizeUsage(UsageDetails? details_)
+    {
+        if (details_ is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return new ModelTokenUsage(
+                details_.InputTokenCount,
+                details_.OutputTokenCount,
+                details_.TotalTokenCount,
+                details_.CachedInputTokenCount,
+                details_.ReasoningTokenCount);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            throw new InvalidOperationException(
+                "Provider-supplied token usage violates normalized usage invariants.",
+                ex);
+        }
     }
 
     private static ChatOptions? CreateChatOptions(

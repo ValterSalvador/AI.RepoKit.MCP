@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Xml.Linq;
 using AiRepoKit.Agents;
 using AiRepoKit.Agents.Runtime;
+using Microsoft.Extensions.AI;
 using Xunit;
 
 public sealed class RuntimeArchitectureAndBoundaryTests
@@ -21,11 +22,14 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         "IProcessExecutionRuntime",
         "ModelExecutionRequest",
         "ModelExecutionResult",
+        "ModelExecutionTelemetry",
         "ModelExecutionUpdate",
         "ModelHealthSnapshot",
         "ModelHealthStatus",
         "ModelRouteCandidate",
         "ModelRuntimeRegistration",
+        "ModelTokenPricing",
+        "ModelTokenUsage",
         "ProcessExecutionRequest",
         "ProcessExecutionResult",
         "SystemProcessExecutionRuntime"
@@ -116,7 +120,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void RuntimeAssembly_ExportsExactlyNineteenAuthorizedPublicTypes()
+    public void RuntimeAssembly_ExportsExactlyTwentyTwoAuthorizedPublicTypes()
     {
         Assembly assembly = typeof(IProcessExecutionRuntime).Assembly;
         Type[] exportedTypes = assembly.GetExportedTypes();
@@ -126,7 +130,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(19, exportedTypes.Length);
+        Assert.Equal(22, exportedTypes.Length);
         Assert.Equal(_expectedPublicRuntimeTypes, exportedNames);
 
         foreach (Type type in exportedTypes)
@@ -203,7 +207,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     [Fact]
     public void RuntimePublicSurface_DoesNotExposeMicrosoftExtensionsAITypes()
     {
-        Type[] p04AndP05Types =
+        Type[] p04P05AndP06Types =
         [
             typeof(ConfiguredModelDiscoveryRuntime),
             typeof(DeterministicModelRoutingRuntime),
@@ -212,10 +216,15 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             typeof(ModelHealthSnapshot),
             typeof(ModelHealthStatus),
             typeof(ModelRouteCandidate),
-            typeof(ModelRuntimeRegistration)
+            typeof(ModelRuntimeRegistration),
+            typeof(ModelExecutionTelemetry),
+            typeof(ModelTokenPricing),
+            typeof(ModelTokenUsage),
+            typeof(ModelExecutionResult),
+            typeof(ModelExecutionUpdate)
         ];
 
-        foreach (Type type in p04AndP05Types)
+        foreach (Type type in p04P05AndP06Types)
         {
             foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
@@ -234,6 +243,78 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             foreach (ConstructorInfo ctor in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance))
             {
                 foreach (ParameterInfo param in ctor.GetParameters())
+                {
+                    AssertNotMicrosoftExtensionsAi(param.ParameterType);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void ModelExecutionResult_TelemetryProperty_ReturnsModelExecutionTelemetryType()
+    {
+        PropertyInfo? prop = typeof(ModelExecutionResult).GetProperty("Telemetry", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(prop);
+        Assert.Equal(typeof(ModelExecutionTelemetry), prop.PropertyType);
+    }
+
+    [Fact]
+    public void ModelExecutionUpdate_TelemetryProperty_ReturnsModelExecutionTelemetryType()
+    {
+        PropertyInfo? prop = typeof(ModelExecutionUpdate).GetProperty("Telemetry", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(prop);
+        Assert.Equal(typeof(ModelExecutionTelemetry), prop.PropertyType);
+    }
+
+    [Fact]
+    public void ChatClientModelExecutionRuntime_PublicConstructors_RetainExactCount()
+    {
+        ConstructorInfo[] publicConstructors = typeof(ChatClientModelExecutionRuntime)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+
+        Assert.Equal(2, publicConstructors.Length);
+
+        List<Type[]> parameterSignatures = publicConstructors
+            .Select(c => c.GetParameters().Select(p => p.ParameterType).ToArray())
+            .ToList();
+
+        Assert.Contains(
+            parameterSignatures,
+            sig => sig.SequenceEqual([typeof(IChatClient)]));
+
+        Assert.Contains(
+            parameterSignatures,
+            sig => sig.SequenceEqual([typeof(IChatClient), typeof(ModelTokenPricing)]));
+
+        Assert.DoesNotContain(
+            publicConstructors,
+            c => c.GetParameters().Any(p => p.ParameterType == typeof(TimeProvider)));
+
+        Assert.DoesNotContain(
+            parameterSignatures,
+            sig => sig.SequenceEqual([typeof(IChatClient), typeof(TimeProvider)]));
+    }
+
+    [Fact]
+    public void RuntimeInterfaces_RetainExactSignaturesWithoutMutation()
+    {
+        Type[] runtimeInterfaces =
+        [
+            typeof(IModelExecutionRuntime),
+            typeof(IModelSessionRuntime),
+            typeof(IModelStreamingExecutionRuntime),
+            typeof(IModelDiscoveryRuntime),
+            typeof(IModelRoutingRuntime),
+            typeof(IProcessExecutionRuntime)
+        ];
+
+        foreach (Type iface in runtimeInterfaces)
+        {
+            Assert.True(iface.IsInterface);
+            foreach (MethodInfo method in iface.GetMethods())
+            {
+                AssertNotMicrosoftExtensionsAi(method.ReturnType);
+                foreach (ParameterInfo param in method.GetParameters())
                 {
                     AssertNotMicrosoftExtensionsAi(param.ParameterType);
                 }

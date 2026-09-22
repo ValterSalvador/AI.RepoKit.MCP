@@ -54,4 +54,75 @@ public sealed class ModelExecutionUpdateTests
         Assert.NotEqual(update1, update2);
         Assert.True(update1 != update2);
     }
+
+    [Fact]
+    public void Constructor_DeltaOnly_SetsTelemetryToNull()
+    {
+        ModelExecutionUpdate update = new("delta");
+
+        Assert.Null(update.Telemetry);
+    }
+
+    [Fact]
+    public void TelemetryConstructor_RetainsExactDeltaAndExactTelemetry()
+    {
+        string delta = "delta";
+        ModelExecutionTelemetry telemetry = new(null, TimeSpan.FromMilliseconds(10));
+        ModelExecutionUpdate update = new(delta, telemetry);
+
+        Assert.Same(delta, update.ResponseTextDelta);
+        Assert.Same(telemetry, update.Telemetry);
+    }
+
+    [Fact]
+    public void Constructor_NullTelemetryExplicit_ThrowsArgumentNullException()
+    {
+        ArgumentNullException ex = Assert.Throws<ArgumentNullException>(
+            () => new ModelExecutionUpdate("delta", null!));
+
+        Assert.Equal("telemetry_", ex.ParamName);
+    }
+
+    [Fact]
+    public void TelemetryConstructor_AcceptsEmptyDeltaWithTelemetry()
+    {
+        ModelExecutionTelemetry telemetry = new(null, TimeSpan.Zero);
+        ModelExecutionUpdate update = new(string.Empty, telemetry);
+
+        Assert.Equal(string.Empty, update.ResponseTextDelta);
+        Assert.Same(telemetry, update.Telemetry);
+    }
+
+    [Fact]
+    public void TelemetryConstructor_NullDelta_ThrowsArgumentNullException()
+    {
+        ModelExecutionTelemetry telemetry = new(null, TimeSpan.Zero);
+        ArgumentNullException ex = Assert.Throws<ArgumentNullException>(
+            () => new ModelExecutionUpdate(null!, telemetry));
+
+        Assert.Equal("responseTextDelta_", ex.ParamName);
+    }
+
+    [Fact]
+    public void RecordEquality_SameDeltaAndTelemetry_AreEqual()
+    {
+        ModelExecutionTelemetry telemetry = new(null, TimeSpan.FromMilliseconds(5));
+        ModelExecutionUpdate update1 = new("delta", telemetry);
+        ModelExecutionUpdate update2 = new("delta", telemetry);
+
+        Assert.Equal(update1, update2);
+        Assert.True(update1 == update2);
+    }
+
+    [Fact]
+    public void RecordEquality_SameDeltaDifferentTelemetry_AreNotEqual()
+    {
+        ModelExecutionTelemetry telemetry1 = new(null, TimeSpan.FromMilliseconds(5));
+        ModelExecutionTelemetry telemetry2 = new(null, TimeSpan.FromMilliseconds(10));
+        ModelExecutionUpdate update1 = new("delta", telemetry1);
+        ModelExecutionUpdate update2 = new("delta", telemetry2);
+
+        Assert.NotEqual(update1, update2);
+        Assert.True(update1 != update2);
+    }
 }

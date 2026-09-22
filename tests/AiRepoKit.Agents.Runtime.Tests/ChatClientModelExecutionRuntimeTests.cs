@@ -449,7 +449,13 @@ public sealed class ChatClientModelExecutionRuntimeTests
 
         Assert.Equal(1, fakeClient.GetStreamingResponseCallCount);
         Assert.Equal(0, fakeClient.GetResponseCallCount);
-        Assert.Equal(2, updates.Count);
+        Assert.Equal(3, updates.Count);
+        Assert.Equal("Hello", updates[0].ResponseTextDelta);
+        Assert.Null(updates[0].Telemetry);
+        Assert.Equal(" World", updates[1].ResponseTextDelta);
+        Assert.Null(updates[1].Telemetry);
+        Assert.Equal(string.Empty, updates[2].ResponseTextDelta);
+        Assert.NotNull(updates[2].Telemetry);
     }
 
     [Fact]
@@ -488,13 +494,15 @@ public sealed class ChatClientModelExecutionRuntimeTests
         };
         ChatClientModelExecutionRuntime runtime = new(fakeClient);
 
-        List<string> received = [];
+        List<ModelExecutionUpdate> updates = [];
         await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
         {
-            received.Add(update.ResponseTextDelta);
+            updates.Add(update);
         }
 
-        Assert.Equal(["chunk1", "chunk2", "chunk3"], received);
+        Assert.Equal(["chunk1", "chunk2", "chunk3"], updates.Where(u => u.Telemetry is null).Select(u => u.ResponseTextDelta).ToArray());
+        Assert.Equal(string.Empty, updates.Last().ResponseTextDelta);
+        Assert.NotNull(updates.Last().Telemetry);
     }
 
     [Fact]
@@ -512,13 +520,15 @@ public sealed class ChatClientModelExecutionRuntimeTests
         };
         ChatClientModelExecutionRuntime runtime = new(fakeClient);
 
-        int updateCount = 0;
+        List<ModelExecutionUpdate> updates = [];
         await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
         {
-            updateCount++;
+            updates.Add(update);
         }
 
-        Assert.Equal(4, updateCount);
+        Assert.Equal(4, updates.Count(u => u.Telemetry is null));
+        Assert.Single(updates, u => u.Telemetry is not null);
+        Assert.Equal(5, updates.Count);
     }
 
     [Fact]
@@ -535,13 +545,15 @@ public sealed class ChatClientModelExecutionRuntimeTests
         };
         ChatClientModelExecutionRuntime runtime = new(fakeClient);
 
-        List<string> received = [];
+        List<ModelExecutionUpdate> updates = [];
         await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
         {
-            received.Add(update.ResponseTextDelta);
+            updates.Add(update);
         }
 
-        Assert.Equal(["start", string.Empty, "end"], received);
+        Assert.Equal(["start", string.Empty, "end"], updates.Where(u => u.Telemetry is null).Select(u => u.ResponseTextDelta).ToArray());
+        Assert.Equal(string.Empty, updates.Last().ResponseTextDelta);
+        Assert.NotNull(updates.Last().Telemetry);
     }
 
     [Fact]
@@ -921,5 +933,870 @@ public sealed class ChatClientModelExecutionRuntimeTests
         yield return new ChatResponseUpdate(ChatRole.Assistant, "chunk1");
         await chunk2Proceed.Task;
         yield return new ChatResponseUpdate(ChatRole.Assistant, "chunk2");
+    }
+
+    // =========================================================================
+    // Section 54: V5.P06 ExecuteAsync Telemetry & Latency Tests
+    // =========================================================================
+
+    [Fact]
+    public void Constructor_PricingConstructor_NullClient_ThrowsArgumentNullException()
+    {
+        ModelTokenPricing pricing = new("USD", 1m, 2m);
+        Assert.Throws<ArgumentNullException>(
+            () => new ChatClientModelExecutionRuntime(null!, pricing));
+    }
+
+    [Fact]
+    public void Constructor_PricingConstructor_NullPricing_ThrowsArgumentNullException()
+    {
+        FakeChatClient fakeClient = new();
+        Assert.Throws<ArgumentNullException>(
+            () => new ChatClientModelExecutionRuntime(fakeClient, (ModelTokenPricing)null!));
+    }
+
+    [Fact]
+    public void Constructor_OneArgumentConstructor_ConfiguresNullPricing()
+    {
+        FakeChatClient fakeClient = new();
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        Assert.NotNull(runtime);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SuccessfulCall_AlwaysReturnsNonNullTelemetry()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ResponseWithoutUsage_TelemetryHasNullUsageAndNullCostAndNullCurrency()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+            {
+                Usage = null
+            }
+        };
+        ModelTokenPricing pricing = new("USD", 1m, 2m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Null(result.Telemetry.TokenUsage);
+        Assert.Null(result.Telemetry.EstimatedCost);
+        Assert.Null(result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsageDetails_MapsAllFiveNormalizedTokenFieldsExactly()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 100,
+            OutputTokenCount = 50,
+            TotalTokenCount = 150,
+            CachedInputTokenCount = 20,
+            ReasoningTokenCount = 10
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+            {
+                Usage = usage
+            }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry?.TokenUsage);
+        Assert.Equal(100, result.Telemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(50, result.Telemetry.TokenUsage.OutputTokenCount);
+        Assert.Equal(150, result.Telemetry.TokenUsage.TotalTokenCount);
+        Assert.Equal(20, result.Telemetry.TokenUsage.CachedInputTokenCount);
+        Assert.Equal(10, result.Telemetry.TokenUsage.ReasoningTokenCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsageWithZeroValues_Retained()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 0,
+            OutputTokenCount = 0,
+            TotalTokenCount = 0,
+            CachedInputTokenCount = 0,
+            ReasoningTokenCount = 0
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+            {
+                Usage = usage
+            }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry?.TokenUsage);
+        Assert.Equal(0, result.Telemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(0, result.Telemetry.TokenUsage.OutputTokenCount);
+        Assert.Equal(0, result.Telemetry.TokenUsage.TotalTokenCount);
+        Assert.Equal(0, result.Telemetry.TokenUsage.CachedInputTokenCount);
+        Assert.Equal(0, result.Telemetry.TokenUsage.ReasoningTokenCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TotalDoesNotEqualInputPlusOutput_IsPreserved()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 10,
+            OutputTokenCount = 20,
+            TotalTokenCount = 999
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry?.TokenUsage);
+        Assert.Equal(10, result.Telemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(20, result.Telemetry.TokenUsage.OutputTokenCount);
+        Assert.Equal(999, result.Telemetry.TokenUsage.TotalTokenCount);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NegativeInputTokenCount_ThrowsInvalidOperationException()
+    {
+        UsageDetails usage = new() { InputTokenCount = -1 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NegativeOutputTokenCount_ThrowsInvalidOperationException()
+    {
+        UsageDetails usage = new() { OutputTokenCount = -1 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NegativeTotalTokenCount_ThrowsInvalidOperationException()
+    {
+        UsageDetails usage = new() { TotalTokenCount = -1 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NegativeCachedInputTokenCount_ThrowsInvalidOperationException()
+    {
+        UsageDetails usage = new() { CachedInputTokenCount = -1 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NegativeReasoningTokenCount_ThrowsInvalidOperationException()
+    {
+        UsageDetails usage = new() { ReasoningTokenCount = -1 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CachedInputExceedsInput_ThrowsInvalidOperationException()
+    {
+        UsageDetails usage = new() { InputTokenCount = 50, CachedInputTokenCount = 51 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReasoningExceedsOutput_ThrowsInvalidOperationException()
+    {
+        UsageDetails usage = new() { OutputTokenCount = 20, ReasoningTokenCount = 21 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_InvalidUsage_PreservesInnerValidationException()
+    {
+        UsageDetails usage = new() { InputTokenCount = -5 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => runtime.ExecuteAsync(new ModelExecutionRequest("Test")));
+        Assert.NotNull(ex.InnerException);
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_OneArgumentConstructor_DoesNotEstimateCost()
+    {
+        UsageDetails usage = new() { InputTokenCount = 100, OutputTokenCount = 50 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry?.TokenUsage);
+        Assert.Null(result.Telemetry.EstimatedCost);
+        Assert.Null(result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_EstimatesCostWithCompleteInputAndOutput()
+    {
+        UsageDetails usage = new() { InputTokenCount = 1_000_000, OutputTokenCount = 500_000 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 2.00m, 4.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry?.EstimatedCost);
+        // (1M * 2.00 + 0.5M * 4.00) / 1M = (2 + 2) = 4.00
+        Assert.Equal(4.00m, result.Telemetry.EstimatedCost);
+        Assert.Equal("USD", result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_MissingInput_DoesNotEstimateCost()
+    {
+        UsageDetails usage = new() { InputTokenCount = null, OutputTokenCount = 500 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 2.00m, 4.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Null(result.Telemetry.EstimatedCost);
+        Assert.Null(result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_MissingOutput_DoesNotEstimateCost()
+    {
+        UsageDetails usage = new() { InputTokenCount = 1000, OutputTokenCount = null };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 2.00m, 4.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Null(result.Telemetry.EstimatedCost);
+        Assert.Null(result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_CachedPricingFormulaExact()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 1_000_000,
+            CachedInputTokenCount = 400_000,
+            OutputTokenCount = 200_000
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 3.00m, 5.00m, 1.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(3.20m, result.Telemetry.EstimatedCost);
+        Assert.Equal("USD", result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_NullCachedPrice_FallsBackToInputPrice()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 1_000_000,
+            CachedInputTokenCount = 400_000,
+            OutputTokenCount = 500_000
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 2.00m, 4.00m, null);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(4.00m, result.Telemetry.EstimatedCost);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_ReasoningNotDoubleCharged()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 1_000_000,
+            OutputTokenCount = 500_000,
+            ReasoningTokenCount = 200_000
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 2.00m, 4.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(4.00m, result.Telemetry.EstimatedCost);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_TotalNotDoubleCharged()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 1_000_000,
+            OutputTokenCount = 500_000,
+            TotalTokenCount = 1_500_000
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 2.00m, 4.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(4.00m, result.Telemetry.EstimatedCost);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_DecimalEstimateNotAutomaticallyRounded()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 1,
+            OutputTokenCount = 1
+        };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("USD", 1.00m, 1.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(0.000002m, result.Telemetry.EstimatedCost);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithPricing_CostCurrencyCodeEqualsConfiguredCurrency()
+    {
+        UsageDetails usage = new() { InputTokenCount = 100, OutputTokenCount = 100 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")) { Usage = usage }
+        };
+        ModelTokenPricing pricing = new("BRL", 5.00m, 10.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal("BRL", result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PricingIsNotDerivedFromResponseModelId()
+    {
+        UsageDetails usage = new() { InputTokenCount = 1_000_000, OutputTokenCount = 1_000_000 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+            {
+                Usage = usage,
+                ModelId = "gpt-4o"
+            }
+        };
+        ModelTokenPricing pricing = new("USD", 1.00m, 1.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(2.00m, result.Telemetry.EstimatedCost);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PricingIsNotDerivedFromChatClientMetadata()
+    {
+        UsageDetails usage = new() { InputTokenCount = 1_000_000, OutputTokenCount = 1_000_000 };
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+            {
+                Usage = usage
+            }
+        };
+        ModelTokenPricing pricing = new("EUR", 2.00m, 3.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(5.00m, result.Telemetry.EstimatedCost);
+        Assert.Equal("EUR", result.Telemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DeterministicLatency_ZeroElapsed_ReturnsZeroLatency()
+    {
+        ManualTimeProvider timeProvider = new();
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, timeProvider);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(TimeSpan.Zero, result.Telemetry.Latency);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DeterministicLatency_AdvancedTime_ReturnsExactLatency()
+    {
+        ManualTimeProvider timeProvider = new();
+        FakeChatClient fakeClient = new();
+        TaskCompletionSource callStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource callProceed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        fakeClient.CallStartedTcs = callStarted;
+        fakeClient.CallProceedTcs = callProceed;
+        fakeClient.EnqueueResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello")));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, timeProvider);
+
+        Task<ModelExecutionResult> task = runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+        await callStarted.Task;
+
+        TimeSpan advanceBy = TimeSpan.FromMilliseconds(250);
+        timeProvider.Advance(advanceBy);
+        callProceed.SetResult();
+
+        ModelExecutionResult result = await task;
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Equal(advanceBy, result.Telemetry.Latency);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TelemetryDoesNotIncludeWallClockTimestamp()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            ResponseToReturn = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello"))
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        ModelExecutionResult result = await runtime.ExecuteAsync(new ModelExecutionRequest("Test"));
+
+        Assert.NotNull(result.Telemetry);
+        Assert.Null(typeof(ModelExecutionTelemetry).GetProperty("Timestamp"));
+        Assert.Null(typeof(ModelExecutionTelemetry).GetProperty("CreatedAt"));
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_ProviderCallCountRemainsOne_NonStreamingCallCountRemainsZero()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [new ChatResponseUpdate(ChatRole.Assistant, "chunk")]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+        }
+
+        Assert.Equal(1, fakeClient.GetStreamingResponseCallCount);
+        Assert.Equal(0, fakeClient.GetResponseCallCount);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_ProviderDerivedItemsRetainOriginalTextAndHaveNullTelemetry()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, "a"),
+                new ChatResponseUpdate(ChatRole.Assistant, "b")
+            ]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Equal(3, updates.Count);
+        Assert.Equal("a", updates[0].ResponseTextDelta);
+        Assert.Null(updates[0].Telemetry);
+        Assert.Equal("b", updates[1].ResponseTextDelta);
+        Assert.Null(updates[1].Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_ExactlyOneFinalSyntheticTelemetryItemExistsAfterSuccess()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, "hello")
+            ]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Single(updates, u => u.Telemetry is not null);
+        Assert.Same(updates.Last(), updates.Single(u => u.Telemetry is not null));
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_FinalTelemetryItem_EmptyDeltaAndNonNullTelemetry()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [new ChatResponseUpdate(ChatRole.Assistant, "res")]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        ModelExecutionUpdate finalUpdate = updates.Last();
+        Assert.Equal(string.Empty, finalUpdate.ResponseTextDelta);
+        Assert.NotNull(finalUpdate.Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_FinalTelemetryWithNoUsage_HasNullTokenUsage()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [new ChatResponseUpdate(ChatRole.Assistant, "res")]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        ModelExecutionTelemetry finalTelemetry = updates.Last().Telemetry!;
+        Assert.Null(finalTelemetry.TokenUsage);
+        Assert.Null(finalTelemetry.EstimatedCost);
+        Assert.Null(finalTelemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_EmptyProviderStream_YieldsExactlyOneFinalTelemetryItem()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = []
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Single(updates);
+        Assert.Equal(string.Empty, updates[0].ResponseTextDelta);
+        Assert.NotNull(updates[0].Telemetry);
+        Assert.Null(updates[0].Telemetry!.TokenUsage);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_SingleUsageContent_MapsCorrectly()
+    {
+        UsageDetails usage = new()
+        {
+            InputTokenCount = 10,
+            OutputTokenCount = 20,
+            TotalTokenCount = 30
+        };
+        ChatResponseUpdate updateWithUsage = new(ChatRole.Assistant, "done")
+        {
+            Contents = [new UsageContent(usage)]
+        };
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [updateWithUsage]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        ModelExecutionTelemetry finalTelemetry = updates.Last().Telemetry!;
+        Assert.NotNull(finalTelemetry.TokenUsage);
+        Assert.Equal(10, finalTelemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(20, finalTelemetry.TokenUsage.OutputTokenCount);
+        Assert.Equal(30, finalTelemetry.TokenUsage.TotalTokenCount);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_MultipleUsageContentValues_AreSummed()
+    {
+        ChatResponseUpdate update1 = new(ChatRole.Assistant, "part1")
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5, TotalTokenCount = 15 })]
+        };
+        ChatResponseUpdate update2 = new(ChatRole.Assistant, "part2")
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 5, OutputTokenCount = 15, TotalTokenCount = 20 })]
+        };
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [update1, update2]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        ModelExecutionTelemetry finalTelemetry = updates.Last().Telemetry!;
+        Assert.NotNull(finalTelemetry.TokenUsage);
+        Assert.Equal(15, finalTelemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(20, finalTelemetry.TokenUsage.OutputTokenCount);
+        Assert.Equal(35, finalTelemetry.TokenUsage.TotalTokenCount);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_UsageOnlyProviderUpdate_YieldsEmptyTextUpdateAndNoIntermediateTelemetry()
+    {
+        ChatResponseUpdate usageOnly = new()
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 50, OutputTokenCount = 25 })]
+        };
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [usageOnly]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Equal(2, updates.Count);
+        Assert.Equal(string.Empty, updates[0].ResponseTextDelta);
+        Assert.Null(updates[0].Telemetry);
+        Assert.Equal(string.Empty, updates[1].ResponseTextDelta);
+        Assert.NotNull(updates[1].Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_FinalUsageNormalizedOnce_AndFinalCostUsesAggregateUsage()
+    {
+        ChatResponseUpdate chunk1 = new(ChatRole.Assistant, "a")
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 500_000, OutputTokenCount = 200_000 })]
+        };
+        ChatResponseUpdate chunk2 = new(ChatRole.Assistant, "b")
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 500_000, OutputTokenCount = 300_000 })]
+        };
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [chunk1, chunk2]
+        };
+        ModelTokenPricing pricing = new("USD", 1.00m, 2.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        ModelExecutionTelemetry finalTelemetry = updates.Last().Telemetry!;
+        Assert.NotNull(finalTelemetry.TokenUsage);
+        Assert.Equal(1_000_000, finalTelemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(500_000, finalTelemetry.TokenUsage.OutputTokenCount);
+        Assert.Equal(2.00m, finalTelemetry.EstimatedCost);
+        Assert.Equal("USD", finalTelemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_FinalLatencyExactUnderManualTimeProvider()
+    {
+        ManualTimeProvider timeProvider = new();
+        FakeChatClient fakeClient = new();
+        TaskCompletionSource chunk1Proceed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource chunk2Proceed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        fakeClient.EnqueueStreamingSequence(() => CreateDelayedStream(chunk1Proceed, chunk2Proceed));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, timeProvider);
+
+        IAsyncEnumerator<ModelExecutionUpdate> enumerator =
+            runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")).GetAsyncEnumerator();
+
+        chunk1Proceed.SetResult();
+        Assert.True(await enumerator.MoveNextAsync());
+
+        TimeSpan advanceBy = TimeSpan.FromMilliseconds(150);
+        timeProvider.Advance(advanceBy);
+        chunk2Proceed.SetResult();
+
+        Assert.True(await enumerator.MoveNextAsync()); // chunk2
+        Assert.True(await enumerator.MoveNextAsync()); // final telemetry
+        ModelExecutionUpdate finalUpdate = enumerator.Current;
+
+        Assert.NotNull(finalUpdate.Telemetry);
+        Assert.Equal(advanceBy, finalUpdate.Telemetry.Latency);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingAsync_InvalidAccumulatedUsage_ThrowsInvalidOperationException_AndYieldsNoFinalTelemetry()
+    {
+        ChatResponseUpdate chunk = new(ChatRole.Assistant, "done");
+        chunk.Contents.Add(new UsageContent(new UsageDetails { InputTokenCount = -10 }));
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [chunk]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+
+        IAsyncEnumerator<ModelExecutionUpdate> enumerator =
+            runtime.ExecuteStreamingAsync(new ModelExecutionRequest("Test")).GetAsyncEnumerator();
+
+        Assert.True(await enumerator.MoveNextAsync()); // provider chunk "done"
+        Assert.Equal("done", enumerator.Current.ResponseTextDelta);
+
+        InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await enumerator.MoveNextAsync());
+        Assert.NotNull(ex.InnerException);
+        Assert.IsType<ArgumentOutOfRangeException>(ex.InnerException);
     }
 }

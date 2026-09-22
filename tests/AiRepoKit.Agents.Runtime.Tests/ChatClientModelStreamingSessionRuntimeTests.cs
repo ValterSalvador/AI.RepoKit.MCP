@@ -210,15 +210,18 @@ public sealed class ChatClientModelStreamingSessionRuntimeTests
         ChatClientModelExecutionRuntime runtime = new(fakeClient);
         AgentSessionReference sessionRef = runtime.CreateSession();
 
-        List<string> deltas = [];
+        List<ModelExecutionUpdate> updates = [];
         await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(
             sessionRef,
             new ModelExecutionRequest("User1 message")))
         {
-            deltas.Add(update.ResponseTextDelta);
+            updates.Add(update);
         }
 
-        Assert.Equal(["Hello", " ", "World"], deltas);
+        Assert.Equal(["Hello", " ", "World"], updates.Where(u => u.Telemetry is null).Select(u => u.ResponseTextDelta).ToArray());
+        Assert.Single(updates, u => u.Telemetry is not null);
+        Assert.Equal(string.Empty, updates.Last().ResponseTextDelta);
+        Assert.NotNull(updates.Last().Telemetry);
         Assert.Equal(1, fakeClient.GetStreamingResponseCallCount);
 
         // Input sent to provider was user message only
@@ -982,5 +985,423 @@ public sealed class ChatClientModelStreamingSessionRuntimeTests
         startedTcs.TrySetResult();
         await proceedTcs.Task;
         yield return new ChatResponseUpdate(ChatRole.Assistant, name);
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> CreateDelayedStream(
+        TaskCompletionSource chunk1Proceed,
+        TaskCompletionSource chunk2Proceed)
+    {
+        await chunk1Proceed.Task;
+        yield return new ChatResponseUpdate(ChatRole.Assistant, "chunk1");
+        await chunk2Proceed.Task;
+        yield return new ChatResponseUpdate(ChatRole.Assistant, "chunk2");
+    }
+
+
+    // =========================================================================
+    // V5.P06: Session Streaming Telemetry Tests (Section 51)
+    // =========================================================================
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_ProviderDerivedDeltasUnchanged_AndFinalTelemetryAppendedOnce()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, "Part 1"),
+                new ChatResponseUpdate(ChatRole.Assistant, " Part 2")
+            ]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Equal(3, updates.Count);
+        Assert.Equal("Part 1", updates[0].ResponseTextDelta);
+        Assert.Null(updates[0].Telemetry);
+        Assert.Equal(" Part 2", updates[1].ResponseTextDelta);
+        Assert.Null(updates[1].Telemetry);
+        Assert.Equal(string.Empty, updates[2].ResponseTextDelta);
+        Assert.NotNull(updates[2].Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_FinalTelemetryDeltaEmpty_AndNoIntermediateTelemetry()
+    {
+        ChatResponseUpdate update1 = new(ChatRole.Assistant, "chunk1");
+        ChatResponseUpdate update2 = new()
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 })]
+        };
+        ChatResponseUpdate update3 = new(ChatRole.Assistant, "chunk2");
+
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [update1, update2, update3]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        Assert.Equal(4, updates.Count);
+        Assert.Null(updates[0].Telemetry);
+        Assert.Null(updates[1].Telemetry);
+        Assert.Null(updates[2].Telemetry);
+        Assert.Equal(string.Empty, updates[3].ResponseTextDelta);
+        Assert.NotNull(updates[3].Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_TokenAndCostAggregation_Correct()
+    {
+        ChatResponseUpdate update1 = new(ChatRole.Assistant, "a")
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 600_000, OutputTokenCount = 200_000 })]
+        };
+        ChatResponseUpdate update2 = new(ChatRole.Assistant, "b")
+        {
+            Contents = [new UsageContent(new UsageDetails { InputTokenCount = 400_000, OutputTokenCount = 300_000 })]
+        };
+
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [update1, update2]
+        };
+        ModelTokenPricing pricing = new("USD", 1.50m, 3.00m);
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, pricing);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(
+            sessionRef,
+            new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+        }
+
+        ModelExecutionTelemetry finalTelemetry = updates.Last().Telemetry!;
+        Assert.NotNull(finalTelemetry.TokenUsage);
+        Assert.Equal(1_000_000, finalTelemetry.TokenUsage.InputTokenCount);
+        Assert.Equal(500_000, finalTelemetry.TokenUsage.OutputTokenCount);
+        // Cost: 1M * 1.50 + 0.5M * 3.00 = 1.50 + 1.50 = 3.00m
+        Assert.Equal(3.00m, finalTelemetry.EstimatedCost);
+        Assert.Equal("USD", finalTelemetry.CostCurrencyCode);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_DeterministicLatency_Correct()
+    {
+        ManualTimeProvider timeProvider = new();
+        FakeChatClient fakeClient = new();
+        TaskCompletionSource chunk1Proceed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource chunk2Proceed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        fakeClient.EnqueueStreamingSequence(() => CreateDelayedStream(chunk1Proceed, chunk2Proceed));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, timeProvider);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        IAsyncEnumerator<ModelExecutionUpdate> enumerator =
+            runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Test")).GetAsyncEnumerator();
+
+        chunk1Proceed.SetResult();
+        Assert.True(await enumerator.MoveNextAsync());
+
+        TimeSpan advanceBy = TimeSpan.FromMilliseconds(400);
+        timeProvider.Advance(advanceBy);
+        chunk2Proceed.SetResult();
+
+        Assert.True(await enumerator.MoveNextAsync()); // chunk2
+        Assert.True(await enumerator.MoveNextAsync()); // final telemetry
+        ModelExecutionUpdate finalUpdate = enumerator.Current;
+
+        Assert.NotNull(finalUpdate.Telemetry);
+        Assert.Equal(advanceBy, finalUpdate.Telemetry.Latency);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_ConversationIdStateCommittedBeforeFinalTelemetry()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Turn 1 stream")
+            {
+                ConversationId = "conv-stream-p06"
+            }
+        ]);
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Turn 2 stream")
+        ]);
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("U1")))
+        {
+        }
+
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("U2")))
+        {
+        }
+
+        Assert.Equal("conv-stream-p06", fakeClient.InvocationsStreamingOptions[1]?.ConversationId);
+        Assert.Single(fakeClient.InvocationsStreamingMessages[1]);
+        Assert.Equal("U2", fakeClient.InvocationsStreamingMessages[1][0].Text);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_LocalStatelessHistoryCommittedBeforeFinalTelemetry()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Response 1")
+        ]);
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Response 2")
+        ]);
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Prompt 1")))
+        {
+        }
+
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Prompt 2")))
+        {
+        }
+
+        IReadOnlyList<ChatMessage> turn2Sent = fakeClient.InvocationsStreamingMessages[1];
+        Assert.Equal(3, turn2Sent.Count);
+        Assert.Equal("Prompt 1", turn2Sent[0].Text);
+        Assert.Equal("Response 1", turn2Sent[1].Text);
+        Assert.Equal("Prompt 2", turn2Sent[2].Text);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_StatelessToStatefulTransition_RemainsCorrect()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Stateless turn")
+        ]);
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Stateful transition")
+            {
+                ConversationId = "conv-new-state"
+            }
+        ]);
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Post-stateful turn")
+        ]);
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("U1"))) { }
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("U2"))) { }
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("U3"))) { }
+
+        Assert.Equal("conv-new-state", fakeClient.InvocationsStreamingOptions[2]?.ConversationId);
+        Assert.Single(fakeClient.InvocationsStreamingMessages[2]);
+        Assert.Equal("U3", fakeClient.InvocationsStreamingMessages[2][0].Text);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_FinalTelemetryAppearsOnlyAfterSessionStateCommit()
+    {
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueStreamingUpdates(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, "Hello")
+            {
+                ConversationId = "conv-committed"
+            }
+        ]);
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        bool sawFinalTelemetry = false;
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("U1")))
+        {
+            if (update.Telemetry is not null)
+            {
+                sawFinalTelemetry = true;
+            }
+        }
+
+        Assert.True(sawFinalTelemetry);
+
+        fakeClient.EnqueueStreamingUpdates([new ChatResponseUpdate(ChatRole.Assistant, "Reply")]);
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("U2"))) { }
+
+        Assert.Equal("conv-committed", fakeClient.InvocationsStreamingOptions[1]?.ConversationId);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_Cancellation_ProducesNoFinalTelemetry()
+    {
+        TaskCompletionSource proceedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueStreamingSequence(() => CreateCancellableStream(proceedTcs));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        using CancellationTokenSource cts = new();
+        List<ModelExecutionUpdate> updates = [];
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Test"), cts.Token))
+            {
+                updates.Add(update);
+                cts.Cancel();
+                proceedTcs.TrySetResult();
+            }
+        });
+
+        Assert.Single(updates);
+        Assert.Null(updates[0].Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_Timeout_ProducesNoFinalTelemetry()
+    {
+        ManualTimeProvider timeProvider = new();
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, "chunk1"),
+                new ChatResponseUpdate(ChatRole.Assistant, "chunk2")
+            ]
+        };
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient, timeProvider);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        IAsyncEnumerator<ModelExecutionUpdate> enumerator =
+            runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Test", timeout_: TimeSpan.FromSeconds(5))).GetAsyncEnumerator();
+
+        Assert.True(await enumerator.MoveNextAsync());
+        Assert.Null(enumerator.Current.Telemetry);
+
+        timeProvider.Advance(TimeSpan.FromSeconds(6));
+
+        await Assert.ThrowsAsync<TimeoutException>(async () => await enumerator.MoveNextAsync());
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_ProviderFailure_ProducesNoFinalTelemetry()
+    {
+        InvalidOperationException providerEx = new("Stream exploded");
+        FakeChatClient fakeClient = new()
+        {
+            StreamingExceptionToThrow = providerEx
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        List<ModelExecutionUpdate> updates = [];
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Test")))
+            {
+                updates.Add(update);
+            }
+        });
+
+        Assert.Empty(updates);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_DisposalFailure_ProducesNoFinalTelemetry()
+    {
+        InvalidOperationException disposalEx = new("Disposal failed");
+        FakeChatClient fakeClient = new();
+        fakeClient.EnqueueStreamingSequence(() => new ThrowingDisposeAsyncEnumerable<ChatResponseUpdate>(
+            [new ChatResponseUpdate(ChatRole.Assistant, "data")],
+            disposalEx));
+
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        List<ModelExecutionUpdate> updates = [];
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Test")))
+            {
+                updates.Add(update);
+            }
+        });
+
+        Assert.Single(updates);
+        Assert.Null(updates[0].Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_EarlyConsumerDisposal_ProducesNoFinalTelemetry()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, "c1"),
+                new ChatResponseUpdate(ChatRole.Assistant, "c2")
+            ]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        List<ModelExecutionUpdate> updates = [];
+        await foreach (ModelExecutionUpdate update in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Test")))
+        {
+            updates.Add(update);
+            break;
+        }
+
+        Assert.Single(updates);
+        Assert.Null(updates[0].Telemetry);
+    }
+
+    [Fact]
+    public async Task ExecuteStreamingInSessionAsync_TurnGateReleasesCorrectly()
+    {
+        FakeChatClient fakeClient = new()
+        {
+            StreamingUpdatesToReturn = [new ChatResponseUpdate(ChatRole.Assistant, "done")]
+        };
+        ChatClientModelExecutionRuntime runtime = new(fakeClient);
+        AgentSessionReference sessionRef = runtime.CreateSession();
+
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Turn 1"))) { }
+
+        fakeClient.StreamingUpdatesToReturn = [new ChatResponseUpdate(ChatRole.Assistant, "done 2")];
+        await foreach (ModelExecutionUpdate _ in runtime.ExecuteStreamingInSessionAsync(sessionRef, new ModelExecutionRequest("Turn 2"))) { }
+
+        Assert.Equal(2, fakeClient.GetStreamingResponseCallCount);
     }
 }

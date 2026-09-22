@@ -7,6 +7,11 @@ public sealed record ModelExecutionResult
         get;
     }
 
+    public ModelExecutionTelemetry? Telemetry
+    {
+        get;
+    }
+
     public ModelExecutionResult(
         string responseText_)
     {
@@ -16,5 +21,23 @@ public sealed record ModelExecutionResult
 
         this.ResponseText =
             responseText_;
+        this.Telemetry = null;
+    }
+
+    public ModelExecutionResult(
+        string responseText_,
+        ModelExecutionTelemetry telemetry_)
+    {
+        ArgumentNullException.ThrowIfNull(
+            responseText_,
+            nameof(responseText_));
+        ArgumentNullException.ThrowIfNull(
+            telemetry_,
+            nameof(telemetry_));
+
+        this.ResponseText =
+            responseText_;
+        this.Telemetry =
+            telemetry_;
     }
 }
