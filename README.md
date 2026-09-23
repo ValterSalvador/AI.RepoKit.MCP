@@ -2,7 +2,7 @@
 
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v3.0.0 release readiness with formal Spec-Driven Development (SDD), immutable Spec IR schema v1, evidence-backed verification, and read-only MCP Spec context. V4 agent execution is implemented and undergoing release-readiness validation (v4.0.0 is unreleased; v3.0.0 remains the released baseline). Git hooks remain enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
+Status: v3.0.0 release readiness with formal Spec-Driven Development (SDD), immutable Spec IR schema v1, evidence-backed verification, and read-only MCP Spec context. V4 agent execution is implemented (v4.0.0 is unreleased; v3.0.0 remains the released baseline). V5 model runtime through P07 is implemented (v5.0.0 is unreleased). Release publication requires a separate decision. Git hooks remain enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
 
 ## Goals
 
@@ -38,6 +38,22 @@ The frozen public contract surface consists of 11 provider-neutral types:
 Provider CLI flags (such as `--sandbox`, `--dangerously-skip-permissions`, or `--output-schema`) are internal adapter implementation mappings and are never exposed as domain contracts.
 
 For full architectural boundaries, provider mappings, cancellation semantics, and platform acceptance details, see the detailed guide: [docs/v4-agent-execution.md](docs/v4-agent-execution.md).
+
+## V5 Model Runtime
+
+V5 model runtime through P07 is implemented in the repository. **v5.0.0 is unreleased**; v3.0.0 remains the released, current baseline until a separate release decision is made.
+
+V5 introduces a reusable process and model execution runtime in `AiRepoKit.Agents.Runtime` building on V4 provider-neutral abstractions. AI.RepoKit-owned model execution interfaces govern request execution, timeout and caller cancellation, stateless streaming, model-session lifecycle, streaming session lifecycle, provider and model registration, discovery and health status, deterministic capability/health routing, normalized token usage, latency telemetry, estimated-cost telemetry, explicit runtime failure classification, fixed same-candidate retry, ordered stateless fallback, and sticky same-runtime/session resume.
+
+The runtime adapter boundary encapsulates `Microsoft.Extensions.AI` (`IChatClient`) beneath AI.RepoKit-owned contracts without delegating routing, retry, or resilience semantics to external frameworks.
+
+`AiRepoKit.Cli` does not currently expose the V5 model runtime as an `airepo` command.
+
+Deterministic platform acceptance runs across the standard CI matrix:
+- **Windows** (`windows-2025`): full solution build and tests (`AI.RepoKit.MCP.sln`), plus CLI smoke checks (`--version`, `doctor`, `plan`)
+- **Linux** (`ubuntu-24.04`): full solution build and tests (`AI.RepoKit.MCP.sln`)
+
+For full architectural boundaries, public contracts, execution lifecycles, and verification commands, see the detailed guide: [docs/v5-model-runtime.md](docs/v5-model-runtime.md).
 
 ## Quick Install And Use
 

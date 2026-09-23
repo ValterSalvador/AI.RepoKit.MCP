@@ -6,6 +6,56 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Model Runtime (V5)
+
+#### Added
+
+- Reusable process execution runtime in `AiRepoKit.Agents.Runtime`:
+  - `IProcessExecutionRuntime`: asynchronous execution interface accepting `ProcessExecutionRequest` and returning `ProcessExecutionResult` with caller cancellation support.
+  - `SystemProcessExecutionRuntime`: concrete cross-platform system process runner with UTF-8 stream redirection, process-tree termination on cancellation or timeout, and `TimeProvider` support.
+  - Request and result types: `ProcessExecutionRequest` (enforcing non-whitespace executable, fully qualified working directory, and bounded timeout) and `ProcessExecutionResult` (capturing exit code, stdout, and stderr).
+- Reusable model execution runtime contracts and Microsoft.Extensions.AI adapter:
+  - `IModelExecutionRuntime`: core model execution interface accepting `ModelExecutionRequest` and returning `ModelExecutionResult`.
+  - `ModelExecutionRequest` and `ModelExecutionResult`: input specification supporting prompts, optional `StructuredOutputContract`, and per-attempt timeout; output capturing response text and optional `ModelExecutionTelemetry`.
+  - `ChatClientModelExecutionRuntime`: concrete adapter backed by Microsoft.Extensions.AI `IChatClient` with per-attempt timeout coordination, caller cancellation, and structured output schema mapping.
+- Agent and model session lifecycle management:
+  - `IModelSessionRuntime` and `IResumableModelSessionRuntime`: session execution interfaces providing `CreateSession`, `ExecuteInSessionAsync`, and `EndSessionAsync`.
+  - Conversational turn coordination ensuring a single active turn per session (`SESSION_CONCURRENT_TURNS=NO`), with `ChatClientModelExecutionRuntime` committing its in-memory conversation state only after successful turn completion.
+  - Opaque `AgentSessionReference` pass-through preserving session identifiers across turns.
+- Request timeout and streaming execution:
+  - `IModelStreamingExecutionRuntime`: streaming execution interface exposing `ExecuteStreamingAsync` and `ExecuteStreamingInSessionAsync`.
+  - `ModelExecutionUpdate`: streaming delta update capturing incremental response text and optional telemetry.
+  - Pre-cancellation checks and manual `MoveNextAsync` advancement guards ensuring caller cancellation is terminal and prevents post-cancellation update exposure.
+- Provider and model discovery with health tracking:
+  - `ModelRuntimeRegistration`: immutable provider/model registration encapsulating `AgentProviderId`, model identifier, supported `AgentCapabilitySet`, runtime instance, and optional health probe delegate.
+  - `IModelDiscoveryRuntime` and `ConfiguredModelDiscoveryRuntime`: discovery interface and in-memory implementation supporting invariant validation, ordinal sorting by provider/model, and asynchronous health checks.
+  - `ModelHealthSnapshot` and `ModelHealthStatus`: strongly typed health snapshots reporting `Unknown`, `Healthy`, or `Unhealthy` status.
+- Deterministic model routing:
+  - `IModelRoutingRuntime`: routing interface evaluating required `AgentCapabilitySet` against discovered models.
+  - `DeterministicModelRoutingRuntime`: deterministic routing implementation that filters candidate models by capability compatibility, queries health snapshots, excludes unhealthy models, prioritizes healthy models over unknown models, and breaks ties via ordinal comparison of provider ID and model ID.
+  - `ModelRouteCandidate`: immutable route candidate pairing registration with health status.
+- Normalized token usage, explicit pricing, and telemetry:
+  - `ModelTokenUsage`: normalized token counters for input, output, total, cached input, and reasoning tokens without enforcing additive total invariants.
+  - `ModelTokenPricing`: explicit caller pricing configuration with validated 3-letter currency code, input cost, output cost, and optional cached input cost per million tokens.
+  - `ModelExecutionTelemetry`: successful-execution telemetry capturing token usage, elapsed latency, estimated cost, and currency code.
+- Runtime resilience, retry, fallback, and session resume:
+  - `ModelRuntimeResiliencePolicy`: resilience policy configuring maximum attempts per candidate (including the initial attempt) and fixed retry backoff.
+  - `IModelExecutionFailureClassifier`: pluggable failure classifier interface evaluating candidate and exception to determine retry eligibility.
+  - `ResilientModelExecutionRuntime`: resilient execution coordinator implementing candidate retry with fixed backoff, ordered stateless fallback across route candidates, streaming exposure boundary (no retry or fallback once any update has been yielded), and sticky session binding to the same underlying runtime and session reference.
+- Deterministic CI acceptance across `windows-2025` and `ubuntu-24.04` with full solution build and test execution.
+- Comprehensive V5 model runtime documentation guide in `docs/v5-model-runtime.md`.
+
+#### Architectural Boundaries
+
+- AI.RepoKit owns model execution, routing, resilience, and session semantics; external frameworks such as Microsoft.Extensions.AI are encapsulated behind adapter boundaries.
+- Runtime retry and fallback respond strictly to execution exceptions and are distinct from semantic response repair, prompt rewriting, or validation retry loops.
+- Agent-session resume maintains conversational continuity with the same bound candidate runtime and session; it is distinct from workflow resume, DAG checkpoints, or job recovery.
+- `ModelRequirement` is not implemented in V5 and remains deferred to V6.P04 (issue #44); routing evaluates required `AgentCapabilitySet`.
+- Routing is deterministic and capability/health-based; routing does not use telemetry, latency, cost weighting, benchmarks, or provider-specific rules.
+- `AiRepoKit.Cli` does not reference `AiRepoKit.Agents.Runtime` and does not expose a model runtime CLI command in V5.
+- `AiRepoKit.Agents.Runtime` is `IsPackable=false` and is not distributed as a standalone package.
+- `v5.0.0` is unreleased; `v3.0.0` remains the released baseline.
+
 ### Agent Execution (V4)
 
 #### Added
