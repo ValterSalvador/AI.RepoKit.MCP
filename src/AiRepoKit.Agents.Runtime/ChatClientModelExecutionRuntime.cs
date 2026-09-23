@@ -6,7 +6,7 @@ using System.Text.Json;
 using AiRepoKit.Agents;
 using Microsoft.Extensions.AI;
 
-public sealed class ChatClientModelExecutionRuntime : IModelStreamingExecutionRuntime
+public sealed class ChatClientModelExecutionRuntime : IResumableModelSessionRuntime
 {
     private readonly IChatClient _chatClient;
     private readonly TimeProvider _timeProvider;

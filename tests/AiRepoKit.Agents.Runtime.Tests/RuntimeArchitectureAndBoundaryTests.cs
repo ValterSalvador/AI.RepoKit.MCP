@@ -15,11 +15,13 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         "ConfiguredModelDiscoveryRuntime",
         "DeterministicModelRoutingRuntime",
         "IModelDiscoveryRuntime",
+        "IModelExecutionFailureClassifier",
         "IModelExecutionRuntime",
         "IModelRoutingRuntime",
         "IModelSessionRuntime",
         "IModelStreamingExecutionRuntime",
         "IProcessExecutionRuntime",
+        "IResumableModelSessionRuntime",
         "ModelExecutionRequest",
         "ModelExecutionResult",
         "ModelExecutionTelemetry",
@@ -28,10 +30,12 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         "ModelHealthStatus",
         "ModelRouteCandidate",
         "ModelRuntimeRegistration",
+        "ModelRuntimeResiliencePolicy",
         "ModelTokenPricing",
         "ModelTokenUsage",
         "ProcessExecutionRequest",
         "ProcessExecutionResult",
+        "ResilientModelExecutionRuntime",
         "SystemProcessExecutionRuntime"
     ];
 
@@ -120,7 +124,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void RuntimeAssembly_ExportsExactlyTwentyTwoAuthorizedPublicTypes()
+    public void RuntimeAssembly_ExportsExactlyTwentySixAuthorizedPublicTypes()
     {
         Assembly assembly = typeof(IProcessExecutionRuntime).Assembly;
         Type[] exportedTypes = assembly.GetExportedTypes();
@@ -130,7 +134,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(22, exportedTypes.Length);
+        Assert.Equal(26, exportedTypes.Length);
         Assert.Equal(_expectedPublicRuntimeTypes, exportedNames);
 
         foreach (Type type in exportedTypes)
@@ -207,7 +211,7 @@ public sealed class RuntimeArchitectureAndBoundaryTests
     [Fact]
     public void RuntimePublicSurface_DoesNotExposeMicrosoftExtensionsAITypes()
     {
-        Type[] p04P05AndP06Types =
+        Type[] p04P05P06AndP07Types =
         [
             typeof(ConfiguredModelDiscoveryRuntime),
             typeof(DeterministicModelRoutingRuntime),
@@ -221,10 +225,14 @@ public sealed class RuntimeArchitectureAndBoundaryTests
             typeof(ModelTokenPricing),
             typeof(ModelTokenUsage),
             typeof(ModelExecutionResult),
-            typeof(ModelExecutionUpdate)
+            typeof(ModelExecutionUpdate),
+            typeof(IModelExecutionFailureClassifier),
+            typeof(IResumableModelSessionRuntime),
+            typeof(ModelRuntimeResiliencePolicy),
+            typeof(ResilientModelExecutionRuntime)
         ];
 
-        foreach (Type type in p04P05AndP06Types)
+        foreach (Type type in p04P05P06AndP07Types)
         {
             foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
@@ -353,6 +361,98 @@ public sealed class RuntimeArchitectureAndBoundaryTests
         Type[] exportedTypes = assembly.GetExportedTypes();
 
         Assert.Equal(11, exportedTypes.Length);
+    }
+
+    [Fact]
+    public void IModelExecutionFailureClassifier_DeclaresExactlyOneMethod_WithAuthorizedSignature()
+    {
+        Type classifierType = typeof(IModelExecutionFailureClassifier);
+        Assert.True(classifierType.IsInterface);
+
+        MethodInfo[] methods = classifierType.GetMethods(
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+        Assert.Single(methods);
+
+        MethodInfo method = methods[0];
+        Assert.Equal("IsRetryable", method.Name);
+        Assert.Equal(typeof(bool), method.ReturnType);
+
+        ParameterInfo[] parameters = method.GetParameters();
+        Assert.Equal(2, parameters.Length);
+        Assert.Equal(typeof(ModelRouteCandidate), parameters[0].ParameterType);
+        Assert.Equal(typeof(Exception), parameters[1].ParameterType);
+    }
+
+    [Fact]
+    public void IResumableModelSessionRuntime_ExtendsStreamingRuntime_WithZeroDeclaredMembers()
+    {
+        Type resumableType = typeof(IResumableModelSessionRuntime);
+        Assert.True(resumableType.IsInterface);
+        Assert.Contains(typeof(IModelStreamingExecutionRuntime), resumableType.GetInterfaces());
+
+        MemberInfo[] declaredMembers = resumableType.GetMembers(
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+        Assert.Empty(declaredMembers);
+    }
+
+    [Fact]
+    public void ChatClientModelExecutionRuntime_ImplementsIResumableModelSessionRuntime()
+    {
+        Type chatClientRuntimeType = typeof(ChatClientModelExecutionRuntime);
+        Assert.Contains(typeof(IResumableModelSessionRuntime), chatClientRuntimeType.GetInterfaces());
+    }
+
+    [Fact]
+    public void ModelRuntimeResiliencePolicy_DeclaresExactlyTwoReadOnlyProperties_AndOneConstructor()
+    {
+        Type policyType = typeof(ModelRuntimeResiliencePolicy);
+        Assert.True(policyType.IsSealed);
+
+        PropertyInfo[] properties = policyType.GetProperties(
+            BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+        Assert.Equal(2, properties.Length);
+
+        PropertyInfo? maxAttemptsProp = policyType.GetProperty("MaxAttemptsPerCandidate", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(maxAttemptsProp);
+        Assert.Equal(typeof(int), maxAttemptsProp.PropertyType);
+        Assert.True(maxAttemptsProp.CanRead);
+        Assert.Null(maxAttemptsProp.GetSetMethod());
+
+        PropertyInfo? backoffProp = policyType.GetProperty("RetryBackoff", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(backoffProp);
+        Assert.Equal(typeof(TimeSpan), backoffProp.PropertyType);
+        Assert.True(backoffProp.CanRead);
+        Assert.Null(backoffProp.GetSetMethod());
+
+        ConstructorInfo[] constructors = policyType.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        Assert.Single(constructors);
+
+        ParameterInfo[] parameters = constructors[0].GetParameters();
+        Assert.Equal(2, parameters.Length);
+        Assert.Equal(typeof(int), parameters[0].ParameterType);
+        Assert.Equal(typeof(TimeSpan), parameters[1].ParameterType);
+    }
+
+    [Fact]
+    public void ResilientModelExecutionRuntime_ImplementsResumableInterface_AndDeclaresExactlyOnePublicConstructor()
+    {
+        Type runtimeType = typeof(ResilientModelExecutionRuntime);
+        Assert.True(runtimeType.IsSealed);
+        Assert.Contains(typeof(IResumableModelSessionRuntime), runtimeType.GetInterfaces());
+
+        ConstructorInfo[] publicConstructors = runtimeType.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        Assert.Single(publicConstructors);
+
+        ParameterInfo[] parameters = publicConstructors[0].GetParameters();
+        Assert.Equal(4, parameters.Length);
+        Assert.Equal(typeof(IModelRoutingRuntime), parameters[0].ParameterType);
+        Assert.Equal(typeof(AgentCapabilitySet), parameters[1].ParameterType);
+        Assert.Equal(typeof(ModelRuntimeResiliencePolicy), parameters[2].ParameterType);
+        Assert.Equal(typeof(IModelExecutionFailureClassifier), parameters[3].ParameterType);
+
+        Assert.DoesNotContain(
+            publicConstructors,
+            c => c.GetParameters().Any(p => p.ParameterType == typeof(TimeProvider)));
     }
 
     private static void AssertNotMicrosoftExtensionsAi(Type type_)
