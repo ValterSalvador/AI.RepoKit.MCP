@@ -11,8 +11,10 @@ public sealed class ArchitectureAndBoundaryTests
     private static readonly string[] _expectedPublicTypeNames =
     [
         "AgentRequirement",
+        "DeterministicWorkEstimator",
         "ExecutableTask",
         "ExecutableTaskDependency",
+        "ExecutableTaskEstimate",
         "ExecutableWork",
         "ModelRequirement",
         "ValidationRequirement",
@@ -20,7 +22,7 @@ public sealed class ArchitectureAndBoundaryTests
     ];
 
     [Fact]
-    public void PublicSurface_ContainsExactlySevenFrozenTypes()
+    public void PublicSurface_ContainsExactlyNineFrozenTypes()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -29,7 +31,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            7,
+            9,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -459,7 +461,7 @@ public sealed class ArchitectureAndBoundaryTests
             "ModelId",
             "Fallback",
             "Retry",
-            "Complexity",
+            "ComplexityCategory",
             "TokenBudget",
             "EstimatedTokens",
             "ContextCompiler",
@@ -564,6 +566,197 @@ public sealed class ArchitectureAndBoundaryTests
         }
     }
 
+    [Fact]
+    public void ExecutableTaskEstimate_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(ExecutableTaskEstimate);
+
+        Assert.True(
+            type.IsSealed);
+
+        string[] propertyNames =
+            type
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "ComplexityScore",
+                "EstimatedInstructionTokens",
+                "TaskId"
+            ],
+            propertyNames);
+
+        ConstructorInfo[] constructors =
+            type.GetConstructors();
+
+        Assert.Single(
+            constructors);
+
+        ParameterInfo[] parameters =
+            constructors[0].GetParameters();
+
+        Assert.Equal(
+            3,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            "taskId_",
+            parameters[0].Name);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            "complexityScore_",
+            parameters[1].Name);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            "estimatedInstructionTokens_",
+            parameters[2].Name);
+    }
+
+    [Fact]
+    public void DeterministicWorkEstimator_IsStaticWithFrozenConstants()
+    {
+        Type type =
+            typeof(DeterministicWorkEstimator);
+
+        Assert.True(
+            type.IsAbstract);
+
+        Assert.True(
+            type.IsSealed);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        FieldInfo[] fields =
+            type
+                .GetFields(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly)
+                .OrderBy(
+                    field_ =>
+                        field_.Name,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            2,
+            fields.Length);
+
+        Assert.Equal(
+            "AlgorithmId",
+            fields[0].Name);
+
+        Assert.True(
+            fields[0].IsLiteral);
+
+        Assert.Equal(
+            "ai.repokit.deterministic-work-estimator/v1",
+            fields[0].GetRawConstantValue());
+
+        Assert.Equal(
+            "CharactersPerEstimatedToken",
+            fields[1].Name);
+
+        Assert.True(
+            fields[1].IsLiteral);
+
+        Assert.Equal(
+            4,
+            fields[1].GetRawConstantValue());
+
+        Assert.Empty(
+            type.GetNestedTypes(
+                BindingFlags.Public));
+    }
+
+    [Fact]
+    public void DeterministicWorkEstimator_PublicMethodsAreFrozen()
+    {
+        MethodInfo[] methods =
+            typeof(DeterministicWorkEstimator)
+                .GetMethods(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly)
+                .OrderBy(
+                    method_ =>
+                        method_.Name,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            2,
+            methods.Length);
+
+        Assert.Equal(
+            "Estimate",
+            methods[0].Name);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<ExecutableTaskEstimate>),
+            methods[0].ReturnType);
+
+        ParameterInfo[] estimateParameters =
+            methods[0].GetParameters();
+
+        Assert.Single(
+            estimateParameters);
+
+        Assert.Equal(
+            typeof(ExecutableWork),
+            estimateParameters[0].ParameterType);
+
+        Assert.Equal(
+            "work_",
+            estimateParameters[0].Name);
+
+        Assert.Equal(
+            "EstimateTokens",
+            methods[1].Name);
+
+        Assert.Equal(
+            typeof(int),
+            methods[1].ReturnType);
+
+        ParameterInfo[] tokenParameters =
+            methods[1].GetParameters();
+
+        Assert.Single(
+            tokenParameters);
+
+        Assert.Equal(
+            typeof(string),
+            tokenParameters[0].ParameterType);
+
+        Assert.Equal(
+            "text_",
+            tokenParameters[0].Name);
+    }
     [Fact]
     public void SolutionFile_ContainsBothExecutionProjects()
     {
