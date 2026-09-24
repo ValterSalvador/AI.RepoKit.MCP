@@ -11,11 +11,13 @@ public sealed class ArchitectureAndBoundaryTests
     [
         "ExecutableTask",
         "ExecutableTaskDependency",
-        "ExecutableWork"
+        "ExecutableWork",
+        "ValidationRequirement",
+        "ValidationStrategy"
     ];
 
     [Fact]
-    public void PublicSurface_ContainsExactlyThreeFrozenTypes()
+    public void PublicSurface_ContainsExactlyFiveFrozenTypes()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -24,7 +26,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            3,
+            5,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -71,7 +73,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void ExecutableTaskDependency_PublicPropertiesAreFrozen()
+    public void ExecutableTaskDependency_PublicPropertiesRemainFrozen()
     {
         string[] propertyNames =
             typeof(ExecutableTaskDependency)
@@ -97,6 +99,105 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
+    public void ValidationRequirement_PublicPropertiesAreFrozen()
+    {
+        string[] propertyNames =
+            typeof(ValidationRequirement)
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "Id",
+                "SourceAcceptanceCriterionId",
+                "Statement",
+                "Strategy",
+                "TaskId"
+            ],
+            propertyNames);
+    }
+
+    [Fact]
+    public void ValidationRequirement_HasExactlyOneFrozenConstructor()
+    {
+        ConstructorInfo[] constructors =
+            typeof(ValidationRequirement)
+                .GetConstructors();
+
+        Assert.Single(
+            constructors);
+
+        ParameterInfo[] parameters =
+            constructors[0].GetParameters();
+
+        Assert.Equal(
+            5,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            typeof(ValidationStrategy),
+            parameters[3].ParameterType);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[4].ParameterType);
+    }
+
+    [Fact]
+    public void ValidationStrategy_PublicValuesAreFrozen()
+    {
+        ValidationStrategy[] values =
+            Enum.GetValues<ValidationStrategy>();
+
+        Assert.Equal(
+            [
+                ValidationStrategy.Build,
+                ValidationStrategy.Test,
+                ValidationStrategy.Policy
+            ],
+            values);
+
+        Assert.Equal(
+            1,
+            (int) ValidationStrategy.Build);
+
+        Assert.Equal(
+            2,
+            (int) ValidationStrategy.Test);
+
+        Assert.Equal(
+            3,
+            (int) ValidationStrategy.Policy);
+
+        Assert.False(
+            Enum.IsDefined(
+                typeof(ValidationStrategy),
+                0));
+    }
+
+    [Fact]
     public void ExecutableWork_ExposesFrozenDependenciesProperty()
     {
         PropertyInfo? property =
@@ -108,6 +209,21 @@ public sealed class ArchitectureAndBoundaryTests
 
         Assert.Equal(
             typeof(IReadOnlyList<ExecutableTaskDependency>),
+            property.PropertyType);
+    }
+
+    [Fact]
+    public void ExecutableWork_ExposesFrozenValidationRequirementsProperty()
+    {
+        PropertyInfo? property =
+            typeof(ExecutableWork).GetProperty(
+                nameof(ExecutableWork.ValidationRequirements));
+
+        Assert.NotNull(
+            property);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<ValidationRequirement>),
             property.PropertyType);
     }
 
@@ -148,7 +264,7 @@ public sealed class ArchitectureAndBoundaryTests
         AssemblyName[] referencedAssemblies =
             assembly.GetReferencedAssemblies();
 
-        string[] forbiddenNamespaces =
+        string[] forbiddenAssemblies =
         [
             "AiRepoKit.Spec",
             "AiRepoKit.Agents.Abstractions",
@@ -165,7 +281,7 @@ public sealed class ArchitectureAndBoundaryTests
                 reference.Name ??
                 string.Empty;
 
-            foreach (string forbidden in forbiddenNamespaces)
+            foreach (string forbidden in forbiddenAssemblies)
             {
                 Assert.False(
                     string.Equals(
@@ -185,15 +301,18 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicApi_ContainsNoSchedulingOrFuturePhaseConcepts()
+    public void PublicApi_ContainsNoDeferredValidationOrFuturePhaseConcepts()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
 
         string[] forbiddenTerms =
         [
-            "ValidationStrategy",
-            "ValidationRequirement",
+            "ValidationEngine",
+            "ValidationResult",
+            "ValidationEvidence",
+            "Evaluator",
+            "Runner",
             "ModelRequirement",
             "AgentRequirement",
             "Complexity",
@@ -249,6 +368,37 @@ public sealed class ArchitectureAndBoundaryTests
                         term,
                         method.Name,
                         StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void PublicApi_ContainsNoSpecTypes()
+    {
+        Assembly executionAssembly =
+            typeof(ExecutableWork).Assembly;
+
+        foreach (Type type in executionAssembly.GetExportedTypes())
+        {
+            foreach (PropertyInfo property in type.GetProperties())
+            {
+                Assert.DoesNotContain(
+                    "AiRepoKit.Spec",
+                    property.PropertyType.FullName ??
+                        string.Empty,
+                    StringComparison.Ordinal);
+            }
+
+            foreach (ConstructorInfo constructor in type.GetConstructors())
+            {
+                foreach (ParameterInfo parameter in constructor.GetParameters())
+                {
+                    Assert.DoesNotContain(
+                        "AiRepoKit.Spec",
+                        parameter.ParameterType.FullName ??
+                            string.Empty,
+                        StringComparison.Ordinal);
                 }
             }
         }

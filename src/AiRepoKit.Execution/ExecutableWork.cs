@@ -6,7 +6,7 @@ public sealed record ExecutableWork
         "ai.repokit.executable-work";
 
     public const int CurrentSchemaVersion =
-        2;
+        3;
 
     public string SchemaId
     {
@@ -33,13 +33,19 @@ public sealed record ExecutableWork
         get;
     }
 
+    public IReadOnlyList<ValidationRequirement> ValidationRequirements
+    {
+        get;
+    }
+
     public ExecutableWork(
         int sourceImplementationPlanRevision_,
         IReadOnlyList<ExecutableTask> tasks_)
         : this(
             sourceImplementationPlanRevision_,
             tasks_,
-            Array.Empty<ExecutableTaskDependency>())
+            Array.Empty<ExecutableTaskDependency>(),
+            Array.Empty<ValidationRequirement>())
     {
     }
 
@@ -47,6 +53,19 @@ public sealed record ExecutableWork
         int sourceImplementationPlanRevision_,
         IReadOnlyList<ExecutableTask> tasks_,
         IReadOnlyList<ExecutableTaskDependency> dependencies_)
+        : this(
+            sourceImplementationPlanRevision_,
+            tasks_,
+            dependencies_,
+            Array.Empty<ValidationRequirement>())
+    {
+    }
+
+    public ExecutableWork(
+        int sourceImplementationPlanRevision_,
+        IReadOnlyList<ExecutableTask> tasks_,
+        IReadOnlyList<ExecutableTaskDependency> dependencies_,
+        IReadOnlyList<ValidationRequirement> validationRequirements_)
     {
         if (sourceImplementationPlanRevision_ <= 0)
         {
@@ -63,6 +82,10 @@ public sealed record ExecutableWork
         ArgumentNullException.ThrowIfNull(
             dependencies_,
             nameof(dependencies_));
+
+        ArgumentNullException.ThrowIfNull(
+            validationRequirements_,
+            nameof(validationRequirements_));
 
         ExecutableTask[] taskSnapshot =
             tasks_.ToArray();
@@ -145,6 +168,41 @@ public sealed record ExecutableWork
                 nameof(dependencies_));
         }
 
+        ValidationRequirement[] validationRequirementSnapshot =
+            validationRequirements_.ToArray();
+
+        HashSet<string> validationRequirementIds =
+            new(
+                validationRequirementSnapshot.Length,
+                StringComparer.Ordinal);
+
+        for (int i = 0; i < validationRequirementSnapshot.Length; i++)
+        {
+            ValidationRequirement requirement =
+                validationRequirementSnapshot[i];
+
+            if (requirement is null)
+            {
+                throw new ArgumentException(
+                    "Validation requirement collection cannot contain null elements.",
+                    nameof(validationRequirements_));
+            }
+
+            if (!validationRequirementIds.Add(requirement.Id))
+            {
+                throw new ArgumentException(
+                    $"Duplicate validation requirement identifier detected: '{requirement.Id}'.",
+                    nameof(validationRequirements_));
+            }
+
+            if (!taskIds.Contains(requirement.TaskId))
+            {
+                throw new ArgumentException(
+                    $"Validation requirement references unknown task identifier '{requirement.TaskId}'.",
+                    nameof(validationRequirements_));
+            }
+        }
+
         this.SchemaId =
             CurrentSchemaId;
         this.SchemaVersion =
@@ -155,6 +213,8 @@ public sealed record ExecutableWork
             Array.AsReadOnly(taskSnapshot);
         this.Dependencies =
             Array.AsReadOnly(dependencySnapshot);
+        this.ValidationRequirements =
+            Array.AsReadOnly(validationRequirementSnapshot);
     }
 
     public bool Equals(
@@ -176,7 +236,8 @@ public sealed record ExecutableWork
             !string.Equals(this.SchemaId, other_.SchemaId, StringComparison.Ordinal) ||
             this.SchemaVersion != other_.SchemaVersion ||
             this.Tasks.Count != other_.Tasks.Count ||
-            this.Dependencies.Count != other_.Dependencies.Count)
+            this.Dependencies.Count != other_.Dependencies.Count ||
+            this.ValidationRequirements.Count != other_.ValidationRequirements.Count)
         {
             return false;
         }
@@ -192,6 +253,15 @@ public sealed record ExecutableWork
         for (int i = 0; i < this.Dependencies.Count; i++)
         {
             if (!this.Dependencies[i].Equals(other_.Dependencies[i]))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < this.ValidationRequirements.Count; i++)
+        {
+            if (!this.ValidationRequirements[i].Equals(
+                    other_.ValidationRequirements[i]))
             {
                 return false;
             }
@@ -223,6 +293,12 @@ public sealed record ExecutableWork
         {
             hash.Add(
                 this.Dependencies[i]);
+        }
+
+        for (int i = 0; i < this.ValidationRequirements.Count; i++)
+        {
+            hash.Add(
+                this.ValidationRequirements[i]);
         }
 
         return hash.ToHashCode();
