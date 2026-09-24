@@ -2,6 +2,7 @@ namespace AiRepoKit.Execution.Tests;
 
 using System.Reflection;
 using System.Xml.Linq;
+using AiRepoKit.Agents;
 using AiRepoKit.Execution;
 using Xunit;
 
@@ -9,15 +10,17 @@ public sealed class ArchitectureAndBoundaryTests
 {
     private static readonly string[] _expectedPublicTypeNames =
     [
+        "AgentRequirement",
         "ExecutableTask",
         "ExecutableTaskDependency",
         "ExecutableWork",
+        "ModelRequirement",
         "ValidationRequirement",
         "ValidationStrategy"
     ];
 
     [Fact]
-    public void PublicSurface_ContainsExactlyFiveFrozenTypes()
+    public void PublicSurface_ContainsExactlySevenFrozenTypes()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -26,7 +29,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            5,
+            7,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -99,7 +102,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void ValidationRequirement_PublicPropertiesAreFrozen()
+    public void ValidationRequirement_PublicPropertiesRemainFrozen()
     {
         string[] propertyNames =
             typeof(ValidationRequirement)
@@ -166,7 +169,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void ValidationStrategy_PublicValuesAreFrozen()
+    public void ValidationStrategy_PublicValuesRemainFrozen()
     {
         ValidationStrategy[] values =
             Enum.GetValues<ValidationStrategy>();
@@ -195,6 +198,90 @@ public sealed class ArchitectureAndBoundaryTests
             Enum.IsDefined(
                 typeof(ValidationStrategy),
                 0));
+    }
+
+    [Fact]
+    public void ModelRequirement_PublicPropertiesAreFrozen()
+    {
+        string[] propertyNames =
+            typeof(ModelRequirement)
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "RequiredCapabilities",
+                "TaskId"
+            ],
+            propertyNames);
+    }
+
+    [Fact]
+    public void AgentRequirement_PublicPropertiesAreFrozen()
+    {
+        string[] propertyNames =
+            typeof(AgentRequirement)
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "RequiredCapabilities",
+                "TaskId"
+            ],
+            propertyNames);
+    }
+
+    [Fact]
+    public void ModelAndAgentRequirement_PublicConstructorsAreFrozen()
+    {
+        foreach (Type type in new[]
+        {
+            typeof(ModelRequirement),
+            typeof(AgentRequirement)
+        })
+        {
+            ConstructorInfo[] constructors =
+                type.GetConstructors();
+
+            Assert.Single(
+                constructors);
+
+            ParameterInfo[] parameters =
+                constructors[0].GetParameters();
+
+            Assert.Equal(
+                2,
+                parameters.Length);
+
+            Assert.Equal(
+                typeof(string),
+                parameters[0].ParameterType);
+
+            Assert.Equal(
+                typeof(AgentCapabilitySet),
+                parameters[1].ParameterType);
+        }
     }
 
     [Fact]
@@ -228,46 +315,91 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
+    public void ExecutableWork_ExposesFrozenModelRequirementsProperty()
+    {
+        PropertyInfo? property =
+            typeof(ExecutableWork).GetProperty(
+                nameof(ExecutableWork.ModelRequirements));
+
+        Assert.NotNull(
+            property);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<ModelRequirement>),
+            property.PropertyType);
+    }
+
+    [Fact]
+    public void ExecutableWork_ExposesFrozenAgentRequirementsProperty()
+    {
+        PropertyInfo? property =
+            typeof(ExecutableWork).GetProperty(
+                nameof(ExecutableWork.AgentRequirements));
+
+        Assert.NotNull(
+            property);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<AgentRequirement>),
+            property.PropertyType);
+    }
+
+    [Fact]
     public void ProductionProject_HasZeroPackageReferences()
     {
-        string projectPath =
-            GetProductionProjectPath();
-
         XDocument document =
             XDocument.Load(
-                projectPath);
+                GetProductionProjectPath());
 
         Assert.Empty(
             document.Descendants("PackageReference"));
     }
 
     [Fact]
-    public void ProductionProject_HasZeroProjectReferences()
+    public void ProductionProject_HasExactlyOneAgentsAbstractionsProjectReference()
     {
-        string projectPath =
-            GetProductionProjectPath();
-
         XDocument document =
             XDocument.Load(
-                projectPath);
+                GetProductionProjectPath());
 
-        Assert.Empty(
-            document.Descendants("ProjectReference"));
+        XElement[] references =
+            document
+                .Descendants("ProjectReference")
+                .ToArray();
+
+        Assert.Single(
+            references);
+
+        Assert.Equal(
+            @"..\AiRepoKit.Agents.Abstractions\AiRepoKit.Agents.Abstractions.csproj",
+            references[0].Attribute("Include")?.Value);
     }
 
     [Fact]
-    public void Assembly_ReferencesOnlyBclAssemblies()
+    public void Assembly_ReferencesOnlyBclAndAgentsAbstractions()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
 
-        AssemblyName[] referencedAssemblies =
+        AssemblyName[] references =
             assembly.GetReferencedAssemblies();
+
+        AssemblyName[] agentsReferences =
+            references
+                .Where(
+                    reference_ =>
+                        string.Equals(
+                            reference_.Name,
+                            "AiRepoKit.Agents.Abstractions",
+                            StringComparison.Ordinal))
+                .ToArray();
+
+        Assert.Single(
+            agentsReferences);
 
         string[] forbiddenAssemblies =
         [
             "AiRepoKit.Spec",
-            "AiRepoKit.Agents.Abstractions",
             "AiRepoKit.Agents.Antigravity",
             "AiRepoKit.Agents.Codex",
             "AiRepoKit.Agents.Runtime",
@@ -275,7 +407,7 @@ public sealed class ArchitectureAndBoundaryTests
             "Microsoft.Extensions.AI"
         ];
 
-        foreach (AssemblyName reference in referencedAssemblies)
+        foreach (AssemblyName reference in references)
         {
             string name =
                 reference.Name ??
@@ -290,18 +422,23 @@ public sealed class ArchitectureAndBoundaryTests
                         StringComparison.OrdinalIgnoreCase));
             }
 
-            Assert.True(
+            bool allowed =
+                name == "AiRepoKit.Agents.Abstractions" ||
                 name == "System.Runtime" ||
                 name.StartsWith(
                     "System.",
                     StringComparison.Ordinal) ||
                 name == "mscorlib" ||
-                name == "netstandard");
+                name == "netstandard";
+
+            Assert.True(
+                allowed,
+                $"Unexpected production assembly reference: {name}");
         }
     }
 
     [Fact]
-    public void PublicApi_ContainsNoDeferredValidationOrFuturePhaseConcepts()
+    public void PublicApi_ContainsNoDeferredOrConcreteSelectionConcepts()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -313,8 +450,15 @@ public sealed class ArchitectureAndBoundaryTests
             "ValidationEvidence",
             "Evaluator",
             "Runner",
-            "ModelRequirement",
-            "AgentRequirement",
+            "Selector",
+            "Router",
+            "Resolver",
+            "ModelRoute",
+            "ModelHealth",
+            "ProviderId",
+            "ModelId",
+            "Fallback",
+            "Retry",
             "Complexity",
             "TokenBudget",
             "EstimatedTokens",
@@ -374,7 +518,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicApi_ContainsNoSpecTypes()
+    public void PublicApi_ContainsNoSpecOrRuntimeTypes()
     {
         Assembly executionAssembly =
             typeof(ExecutableWork).Assembly;
@@ -383,10 +527,18 @@ public sealed class ArchitectureAndBoundaryTests
         {
             foreach (PropertyInfo property in type.GetProperties())
             {
+                string propertyTypeName =
+                    property.PropertyType.FullName ??
+                    string.Empty;
+
                 Assert.DoesNotContain(
                     "AiRepoKit.Spec",
-                    property.PropertyType.FullName ??
-                        string.Empty,
+                    propertyTypeName,
+                    StringComparison.Ordinal);
+
+                Assert.DoesNotContain(
+                    "AiRepoKit.Agents.Runtime",
+                    propertyTypeName,
                     StringComparison.Ordinal);
             }
 
@@ -394,10 +546,18 @@ public sealed class ArchitectureAndBoundaryTests
             {
                 foreach (ParameterInfo parameter in constructor.GetParameters())
                 {
+                    string parameterTypeName =
+                        parameter.ParameterType.FullName ??
+                        string.Empty;
+
                     Assert.DoesNotContain(
                         "AiRepoKit.Spec",
-                        parameter.ParameterType.FullName ??
-                            string.Empty,
+                        parameterTypeName,
+                        StringComparison.Ordinal);
+
+                    Assert.DoesNotContain(
+                        "AiRepoKit.Agents.Runtime",
+                        parameterTypeName,
                         StringComparison.Ordinal);
                 }
             }

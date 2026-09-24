@@ -6,7 +6,7 @@ public sealed record ExecutableWork
         "ai.repokit.executable-work";
 
     public const int CurrentSchemaVersion =
-        3;
+        4;
 
     public string SchemaId
     {
@@ -38,14 +38,23 @@ public sealed record ExecutableWork
         get;
     }
 
+    public IReadOnlyList<ModelRequirement> ModelRequirements
+    {
+        get;
+    }
+
+    public IReadOnlyList<AgentRequirement> AgentRequirements
+    {
+        get;
+    }
+
     public ExecutableWork(
         int sourceImplementationPlanRevision_,
         IReadOnlyList<ExecutableTask> tasks_)
         : this(
             sourceImplementationPlanRevision_,
             tasks_,
-            Array.Empty<ExecutableTaskDependency>(),
-            Array.Empty<ValidationRequirement>())
+            Array.Empty<ExecutableTaskDependency>())
     {
     }
 
@@ -66,6 +75,23 @@ public sealed record ExecutableWork
         IReadOnlyList<ExecutableTask> tasks_,
         IReadOnlyList<ExecutableTaskDependency> dependencies_,
         IReadOnlyList<ValidationRequirement> validationRequirements_)
+        : this(
+            sourceImplementationPlanRevision_,
+            tasks_,
+            dependencies_,
+            validationRequirements_,
+            Array.Empty<ModelRequirement>(),
+            Array.Empty<AgentRequirement>())
+    {
+    }
+
+    public ExecutableWork(
+        int sourceImplementationPlanRevision_,
+        IReadOnlyList<ExecutableTask> tasks_,
+        IReadOnlyList<ExecutableTaskDependency> dependencies_,
+        IReadOnlyList<ValidationRequirement> validationRequirements_,
+        IReadOnlyList<ModelRequirement> modelRequirements_,
+        IReadOnlyList<AgentRequirement> agentRequirements_)
     {
         if (sourceImplementationPlanRevision_ <= 0)
         {
@@ -86,6 +112,14 @@ public sealed record ExecutableWork
         ArgumentNullException.ThrowIfNull(
             validationRequirements_,
             nameof(validationRequirements_));
+
+        ArgumentNullException.ThrowIfNull(
+            modelRequirements_,
+            nameof(modelRequirements_));
+
+        ArgumentNullException.ThrowIfNull(
+            agentRequirements_,
+            nameof(agentRequirements_));
 
         ExecutableTask[] taskSnapshot =
             tasks_.ToArray();
@@ -203,6 +237,76 @@ public sealed record ExecutableWork
             }
         }
 
+        ModelRequirement[] modelRequirementSnapshot =
+            modelRequirements_.ToArray();
+
+        HashSet<string> modelRequirementTaskIds =
+            new(
+                modelRequirementSnapshot.Length,
+                StringComparer.Ordinal);
+
+        for (int i = 0; i < modelRequirementSnapshot.Length; i++)
+        {
+            ModelRequirement requirement =
+                modelRequirementSnapshot[i];
+
+            if (requirement is null)
+            {
+                throw new ArgumentException(
+                    "Model requirement collection cannot contain null elements.",
+                    nameof(modelRequirements_));
+            }
+
+            if (!taskIds.Contains(requirement.TaskId))
+            {
+                throw new ArgumentException(
+                    $"Model requirement references unknown task identifier '{requirement.TaskId}'.",
+                    nameof(modelRequirements_));
+            }
+
+            if (!modelRequirementTaskIds.Add(requirement.TaskId))
+            {
+                throw new ArgumentException(
+                    $"Duplicate model requirement for task identifier '{requirement.TaskId}'.",
+                    nameof(modelRequirements_));
+            }
+        }
+
+        AgentRequirement[] agentRequirementSnapshot =
+            agentRequirements_.ToArray();
+
+        HashSet<string> agentRequirementTaskIds =
+            new(
+                agentRequirementSnapshot.Length,
+                StringComparer.Ordinal);
+
+        for (int i = 0; i < agentRequirementSnapshot.Length; i++)
+        {
+            AgentRequirement requirement =
+                agentRequirementSnapshot[i];
+
+            if (requirement is null)
+            {
+                throw new ArgumentException(
+                    "Agent requirement collection cannot contain null elements.",
+                    nameof(agentRequirements_));
+            }
+
+            if (!taskIds.Contains(requirement.TaskId))
+            {
+                throw new ArgumentException(
+                    $"Agent requirement references unknown task identifier '{requirement.TaskId}'.",
+                    nameof(agentRequirements_));
+            }
+
+            if (!agentRequirementTaskIds.Add(requirement.TaskId))
+            {
+                throw new ArgumentException(
+                    $"Duplicate agent requirement for task identifier '{requirement.TaskId}'.",
+                    nameof(agentRequirements_));
+            }
+        }
+
         this.SchemaId =
             CurrentSchemaId;
         this.SchemaVersion =
@@ -215,6 +319,10 @@ public sealed record ExecutableWork
             Array.AsReadOnly(dependencySnapshot);
         this.ValidationRequirements =
             Array.AsReadOnly(validationRequirementSnapshot);
+        this.ModelRequirements =
+            Array.AsReadOnly(modelRequirementSnapshot);
+        this.AgentRequirements =
+            Array.AsReadOnly(agentRequirementSnapshot);
     }
 
     public bool Equals(
@@ -237,7 +345,9 @@ public sealed record ExecutableWork
             this.SchemaVersion != other_.SchemaVersion ||
             this.Tasks.Count != other_.Tasks.Count ||
             this.Dependencies.Count != other_.Dependencies.Count ||
-            this.ValidationRequirements.Count != other_.ValidationRequirements.Count)
+            this.ValidationRequirements.Count != other_.ValidationRequirements.Count ||
+            this.ModelRequirements.Count != other_.ModelRequirements.Count ||
+            this.AgentRequirements.Count != other_.AgentRequirements.Count)
         {
             return false;
         }
@@ -262,6 +372,24 @@ public sealed record ExecutableWork
         {
             if (!this.ValidationRequirements[i].Equals(
                     other_.ValidationRequirements[i]))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < this.ModelRequirements.Count; i++)
+        {
+            if (!this.ModelRequirements[i].Equals(
+                    other_.ModelRequirements[i]))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < this.AgentRequirements.Count; i++)
+        {
+            if (!this.AgentRequirements[i].Equals(
+                    other_.AgentRequirements[i]))
             {
                 return false;
             }
@@ -299,6 +427,18 @@ public sealed record ExecutableWork
         {
             hash.Add(
                 this.ValidationRequirements[i]);
+        }
+
+        for (int i = 0; i < this.ModelRequirements.Count; i++)
+        {
+            hash.Add(
+                this.ModelRequirements[i]);
+        }
+
+        for (int i = 0; i < this.AgentRequirements.Count; i++)
+        {
+            hash.Add(
+                this.AgentRequirements[i]);
         }
 
         return hash.ToHashCode();

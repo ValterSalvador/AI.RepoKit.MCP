@@ -7,4 +7,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\AiRepoKit.Agents.Abstractions\AiRepoKit.Agents.Abstractions.csproj" />
+  </ItemGroup>
+
 </Project>
