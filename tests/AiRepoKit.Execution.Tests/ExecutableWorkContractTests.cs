@@ -26,7 +26,7 @@ public sealed class ExecutableWorkContractTests
             new(1, Array.Empty<ExecutableTask>());
 
         Assert.Equal(
-            1,
+            2,
             work.SchemaVersion);
         Assert.Equal(
             ExecutableWork.CurrentSchemaVersion,

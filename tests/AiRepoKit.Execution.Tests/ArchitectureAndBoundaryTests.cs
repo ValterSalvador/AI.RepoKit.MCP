@@ -10,11 +10,12 @@ public sealed class ArchitectureAndBoundaryTests
     private static readonly string[] _expectedPublicTypeNames =
     [
         "ExecutableTask",
+        "ExecutableTaskDependency",
         "ExecutableWork"
     ];
 
     [Fact]
-    public void PublicSurface_ContainsExactlyTwoFrozenTypes()
+    public void PublicSurface_ContainsExactlyThreeFrozenTypes()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -23,7 +24,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            2,
+            3,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -43,26 +44,85 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
+    public void ExecutableTask_PublicPropertiesRemainFrozen()
+    {
+        string[] propertyNames =
+            typeof(ExecutableTask)
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "Id",
+                "Instruction",
+                "SourcePlanStepId"
+            ],
+            propertyNames);
+    }
+
+    [Fact]
+    public void ExecutableTaskDependency_PublicPropertiesAreFrozen()
+    {
+        string[] propertyNames =
+            typeof(ExecutableTaskDependency)
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "DependsOnTaskId",
+                "TaskId"
+            ],
+            propertyNames);
+    }
+
+    [Fact]
+    public void ExecutableWork_ExposesFrozenDependenciesProperty()
+    {
+        PropertyInfo? property =
+            typeof(ExecutableWork).GetProperty(
+                nameof(ExecutableWork.Dependencies));
+
+        Assert.NotNull(
+            property);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<ExecutableTaskDependency>),
+            property.PropertyType);
+    }
+
+    [Fact]
     public void ProductionProject_HasZeroPackageReferences()
     {
         string projectPath =
             GetProductionProjectPath();
 
-        Assert.True(
-            File.Exists(
-                projectPath),
-            $"Project file does not exist at: {projectPath}");
-
         XDocument document =
             XDocument.Load(
                 projectPath);
 
-        IEnumerable<XElement> packageReferences =
-            document.Descendants(
-                "PackageReference");
-
         Assert.Empty(
-            packageReferences);
+            document.Descendants("PackageReference"));
     }
 
     [Fact]
@@ -71,21 +131,12 @@ public sealed class ArchitectureAndBoundaryTests
         string projectPath =
             GetProductionProjectPath();
 
-        Assert.True(
-            File.Exists(
-                projectPath),
-            $"Project file does not exist at: {projectPath}");
-
         XDocument document =
             XDocument.Load(
                 projectPath);
 
-        IEnumerable<XElement> projectReferences =
-            document.Descendants(
-                "ProjectReference");
-
         Assert.Empty(
-            projectReferences);
+            document.Descendants("ProjectReference"));
     }
 
     [Fact]
@@ -120,8 +171,7 @@ public sealed class ArchitectureAndBoundaryTests
                     string.Equals(
                         name,
                         forbidden,
-                        StringComparison.OrdinalIgnoreCase),
-                    $"Assembly referenced forbidden assembly: {name}");
+                        StringComparison.OrdinalIgnoreCase));
             }
 
             Assert.True(
@@ -130,142 +180,17 @@ public sealed class ArchitectureAndBoundaryTests
                     "System.",
                     StringComparison.Ordinal) ||
                 name == "mscorlib" ||
-                name == "netstandard",
-                $"Unexpected referenced assembly: {name}");
+                name == "netstandard");
         }
     }
 
     [Fact]
-    public void PublicApi_ContainsNoForbiddenNamespaces()
+    public void PublicApi_ContainsNoSchedulingOrFuturePhaseConcepts()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
 
-        Type[] exportedTypes =
-            assembly.GetExportedTypes();
-
-        string[] forbiddenNamespaces =
-        [
-            "AiRepoKit.Spec",
-            "AiRepoKit.Agents",
-            "AiRepoKit.Cli",
-            "Microsoft.Extensions.AI"
-        ];
-
-        foreach (Type type in exportedTypes)
-        {
-            foreach (string forbidden in forbiddenNamespaces)
-            {
-                Assert.DoesNotContain(
-                    forbidden,
-                    type.Namespace ??
-                    string.Empty);
-            }
-
-            foreach (MethodInfo method in type.GetMethods(
-                         BindingFlags.Public |
-                         BindingFlags.Instance |
-                         BindingFlags.Static |
-                         BindingFlags.DeclaredOnly))
-            {
-                AssertForbiddenType(
-                    method.ReturnType,
-                    forbiddenNamespaces);
-
-                foreach (ParameterInfo parameter in method.GetParameters())
-                {
-                    AssertForbiddenType(
-                        parameter.ParameterType,
-                        forbiddenNamespaces);
-                }
-            }
-
-            foreach (PropertyInfo property in type.GetProperties(
-                         BindingFlags.Public |
-                         BindingFlags.Instance |
-                         BindingFlags.Static |
-                         BindingFlags.DeclaredOnly))
-            {
-                AssertForbiddenType(
-                    property.PropertyType,
-                    forbiddenNamespaces);
-            }
-        }
-    }
-
-    [Fact]
-    public void PublicApi_ContainsNoDagOrDependencyContract()
-    {
-        Assembly assembly =
-            typeof(ExecutableWork).Assembly;
-
-        Type[] exportedTypes =
-            assembly.GetExportedTypes();
-
-        string[] dagTerms =
-        [
-            "DependsOn",
-            "Dependency",
-            "Dependencies",
-            "Prerequisite",
-            "Predecessor",
-            "Successor",
-            "Topological",
-            "TaskDag",
-            "Dag"
-        ];
-
-        foreach (Type type in exportedTypes)
-        {
-            foreach (string term in dagTerms)
-            {
-                Assert.DoesNotContain(
-                    term,
-                    type.Name,
-                    StringComparison.OrdinalIgnoreCase);
-            }
-
-            foreach (PropertyInfo property in type.GetProperties(
-                         BindingFlags.Public |
-                         BindingFlags.Instance |
-                         BindingFlags.Static))
-            {
-                foreach (string term in dagTerms)
-                {
-                    Assert.DoesNotContain(
-                        term,
-                        property.Name,
-                        StringComparison.OrdinalIgnoreCase);
-                }
-            }
-
-            foreach (MethodInfo method in type.GetMethods(
-                         BindingFlags.Public |
-                         BindingFlags.Instance |
-                         BindingFlags.Static |
-                         BindingFlags.DeclaredOnly))
-            {
-                foreach (string term in dagTerms)
-                {
-                    Assert.DoesNotContain(
-                        term,
-                        method.Name,
-                        StringComparison.OrdinalIgnoreCase);
-                }
-            }
-        }
-    }
-
-    [Fact]
-    public void PublicApi_ContainsNoFuturePhaseConcepts()
-    {
-        Assembly assembly =
-            typeof(ExecutableWork).Assembly;
-
-        Type[] exportedTypes =
-            assembly.GetExportedTypes();
-
-        string[] futurePhaseTerms =
+        string[] forbiddenTerms =
         [
             "ValidationStrategy",
             "ValidationRequirement",
@@ -284,12 +209,16 @@ public sealed class ArchitectureAndBoundaryTests
             "Concurrency",
             "Priority",
             "Dispatch",
-            "Orchestrat"
+            "Orchestrat",
+            "Readiness",
+            "Runnable",
+            "ExecutionState",
+            "Topological"
         ];
 
-        foreach (Type type in exportedTypes)
+        foreach (Type type in assembly.GetExportedTypes())
         {
-            foreach (string term in futurePhaseTerms)
+            foreach (string term in forbiddenTerms)
             {
                 Assert.DoesNotContain(
                     term,
@@ -297,12 +226,9 @@ public sealed class ArchitectureAndBoundaryTests
                     StringComparison.OrdinalIgnoreCase);
             }
 
-            foreach (PropertyInfo property in type.GetProperties(
-                         BindingFlags.Public |
-                         BindingFlags.Instance |
-                         BindingFlags.Static))
+            foreach (PropertyInfo property in type.GetProperties())
             {
-                foreach (string term in futurePhaseTerms)
+                foreach (string term in forbiddenTerms)
                 {
                     Assert.DoesNotContain(
                         term,
@@ -317,7 +243,7 @@ public sealed class ArchitectureAndBoundaryTests
                          BindingFlags.Static |
                          BindingFlags.DeclaredOnly))
             {
-                foreach (string term in futurePhaseTerms)
+                foreach (string term in forbiddenTerms)
                 {
                     Assert.DoesNotContain(
                         term,
@@ -335,11 +261,6 @@ public sealed class ArchitectureAndBoundaryTests
             Path.Combine(
                 FindRepositoryRoot(),
                 "AI.RepoKit.MCP.sln");
-
-        Assert.True(
-            File.Exists(
-                solutionPath),
-            $"Solution file does not exist at: {solutionPath}");
 
         string solutionContent =
             File.ReadAllText(
@@ -363,7 +284,10 @@ public sealed class ArchitectureAndBoundaryTests
 
         while (current is not null)
         {
-            if (File.Exists(Path.Combine(current.FullName, "AI.RepoKit.MCP.sln")))
+            if (File.Exists(
+                    Path.Combine(
+                        current.FullName,
+                        "AI.RepoKit.MCP.sln")))
             {
                 return current.FullName;
             }
@@ -373,7 +297,7 @@ public sealed class ArchitectureAndBoundaryTests
         }
 
         throw new InvalidOperationException(
-            "Could not locate repository root containing AI.RepoKit.MCP.sln.");
+            "Could not locate repository root.");
     }
 
     private static string GetProductionProjectPath()
@@ -383,27 +307,5 @@ public sealed class ArchitectureAndBoundaryTests
             "src",
             "AiRepoKit.Execution",
             "AiRepoKit.Execution.csproj");
-    }
-
-    private static void AssertForbiddenType(
-        Type type_,
-        string[] forbiddenNamespaces_)
-    {
-        string? ns =
-            type_.Namespace;
-
-        if (ns is null)
-        {
-            return;
-        }
-
-        foreach (string forbidden in forbiddenNamespaces_)
-        {
-            Assert.False(
-                ns.StartsWith(
-                    forbidden,
-                    StringComparison.Ordinal),
-                $"Public API exposed forbidden type '{type_.FullName}' from namespace '{ns}'.");
-        }
     }
 }

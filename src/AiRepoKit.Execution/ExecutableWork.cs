@@ -1,14 +1,12 @@
 namespace AiRepoKit.Execution;
 
-using System.Collections.ObjectModel;
-
 public sealed record ExecutableWork
 {
     public const string CurrentSchemaId =
         "ai.repokit.executable-work";
 
     public const int CurrentSchemaVersion =
-        1;
+        2;
 
     public string SchemaId
     {
@@ -30,9 +28,25 @@ public sealed record ExecutableWork
         get;
     }
 
+    public IReadOnlyList<ExecutableTaskDependency> Dependencies
+    {
+        get;
+    }
+
     public ExecutableWork(
         int sourceImplementationPlanRevision_,
         IReadOnlyList<ExecutableTask> tasks_)
+        : this(
+            sourceImplementationPlanRevision_,
+            tasks_,
+            Array.Empty<ExecutableTaskDependency>())
+    {
+    }
+
+    public ExecutableWork(
+        int sourceImplementationPlanRevision_,
+        IReadOnlyList<ExecutableTask> tasks_,
+        IReadOnlyList<ExecutableTaskDependency> dependencies_)
     {
         if (sourceImplementationPlanRevision_ <= 0)
         {
@@ -46,16 +60,22 @@ public sealed record ExecutableWork
             tasks_,
             nameof(tasks_));
 
-        ExecutableTask[] snapshot =
+        ArgumentNullException.ThrowIfNull(
+            dependencies_,
+            nameof(dependencies_));
+
+        ExecutableTask[] taskSnapshot =
             tasks_.ToArray();
 
-        HashSet<string> seenIds =
-            new(snapshot.Length, StringComparer.Ordinal);
+        HashSet<string> taskIds =
+            new(
+                taskSnapshot.Length,
+                StringComparer.Ordinal);
 
-        for (int i = 0; i < snapshot.Length; i++)
+        for (int i = 0; i < taskSnapshot.Length; i++)
         {
             ExecutableTask task =
-                snapshot[i];
+                taskSnapshot[i];
 
             if (task is null)
             {
@@ -64,12 +84,65 @@ public sealed record ExecutableWork
                     nameof(tasks_));
             }
 
-            if (!seenIds.Add(task.Id))
+            if (!taskIds.Add(task.Id))
             {
                 throw new ArgumentException(
                     $"Duplicate task identifier detected: '{task.Id}'. Task IDs must be unique.",
                     nameof(tasks_));
             }
+        }
+
+        ExecutableTaskDependency[] dependencySnapshot =
+            dependencies_.ToArray();
+
+        HashSet<(string TaskId, string DependsOnTaskId)> seenEdges =
+            new();
+
+        for (int i = 0; i < dependencySnapshot.Length; i++)
+        {
+            ExecutableTaskDependency dependency =
+                dependencySnapshot[i];
+
+            if (dependency is null)
+            {
+                throw new ArgumentException(
+                    "Dependency collection cannot contain null elements.",
+                    nameof(dependencies_));
+            }
+
+            if (!taskIds.Contains(dependency.TaskId))
+            {
+                throw new ArgumentException(
+                    $"Dependency references unknown task identifier '{dependency.TaskId}'.",
+                    nameof(dependencies_));
+            }
+
+            if (!taskIds.Contains(dependency.DependsOnTaskId))
+            {
+                throw new ArgumentException(
+                    $"Dependency references unknown prerequisite task identifier '{dependency.DependsOnTaskId}'.",
+                    nameof(dependencies_));
+            }
+
+            if (!seenEdges.Add(
+                    (
+                        dependency.TaskId,
+                        dependency.DependsOnTaskId
+                    )))
+            {
+                throw new ArgumentException(
+                    $"Duplicate dependency edge detected: '{dependency.TaskId}' depends on '{dependency.DependsOnTaskId}'.",
+                    nameof(dependencies_));
+            }
+        }
+
+        if (HasDirectedCycle(
+                taskSnapshot,
+                dependencySnapshot))
+        {
+            throw new ArgumentException(
+                "Dependency graph must be acyclic.",
+                nameof(dependencies_));
         }
 
         this.SchemaId =
@@ -79,7 +152,9 @@ public sealed record ExecutableWork
         this.SourceImplementationPlanRevision =
             sourceImplementationPlanRevision_;
         this.Tasks =
-            Array.AsReadOnly(snapshot);
+            Array.AsReadOnly(taskSnapshot);
+        this.Dependencies =
+            Array.AsReadOnly(dependencySnapshot);
     }
 
     public bool Equals(
@@ -100,7 +175,8 @@ public sealed record ExecutableWork
         if (this.SourceImplementationPlanRevision != other_.SourceImplementationPlanRevision ||
             !string.Equals(this.SchemaId, other_.SchemaId, StringComparison.Ordinal) ||
             this.SchemaVersion != other_.SchemaVersion ||
-            this.Tasks.Count != other_.Tasks.Count)
+            this.Tasks.Count != other_.Tasks.Count ||
+            this.Dependencies.Count != other_.Dependencies.Count)
         {
             return false;
         }
@@ -108,6 +184,14 @@ public sealed record ExecutableWork
         for (int i = 0; i < this.Tasks.Count; i++)
         {
             if (!this.Tasks[i].Equals(other_.Tasks[i]))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < this.Dependencies.Count; i++)
+        {
+            if (!this.Dependencies[i].Equals(other_.Dependencies[i]))
             {
                 return false;
             }
@@ -135,6 +219,97 @@ public sealed record ExecutableWork
                 this.Tasks[i]);
         }
 
+        for (int i = 0; i < this.Dependencies.Count; i++)
+        {
+            hash.Add(
+                this.Dependencies[i]);
+        }
+
         return hash.ToHashCode();
+    }
+
+    private static bool HasDirectedCycle(
+        IReadOnlyList<ExecutableTask> tasks_,
+        IReadOnlyList<ExecutableTaskDependency> dependencies_)
+    {
+        Dictionary<string, List<string>> successors =
+            new(
+                tasks_.Count,
+                StringComparer.Ordinal);
+
+        for (int i = 0; i < tasks_.Count; i++)
+        {
+            successors.Add(
+                tasks_[i].Id,
+                []);
+        }
+
+        for (int i = 0; i < dependencies_.Count; i++)
+        {
+            ExecutableTaskDependency dependency =
+                dependencies_[i];
+
+            successors[dependency.DependsOnTaskId].Add(
+                dependency.TaskId);
+        }
+
+        Dictionary<string, byte> state =
+            new(
+                tasks_.Count,
+                StringComparer.Ordinal);
+
+        for (int i = 0; i < tasks_.Count; i++)
+        {
+            if (Visit(
+                    tasks_[i].Id,
+                    successors,
+                    state))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool Visit(
+        string taskId_,
+        IReadOnlyDictionary<string, List<string>> successors_,
+        IDictionary<string, byte> state_)
+    {
+        if (state_.TryGetValue(
+                taskId_,
+                out byte currentState))
+        {
+            if (currentState == 1)
+            {
+                return true;
+            }
+
+            if (currentState == 2)
+            {
+                return false;
+            }
+        }
+
+        state_[taskId_] = 1;
+
+        IReadOnlyList<string> successors =
+            successors_[taskId_];
+
+        for (int i = 0; i < successors.Count; i++)
+        {
+            if (Visit(
+                    successors[i],
+                    successors_,
+                    state_))
+            {
+                return true;
+            }
+        }
+
+        state_[taskId_] = 2;
+
+        return false;
     }
 }
