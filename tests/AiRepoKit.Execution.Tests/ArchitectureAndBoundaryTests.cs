@@ -13,6 +13,7 @@ public sealed class ArchitectureAndBoundaryTests
         "AgentRequirement",
         "CompiledContext",
         "CompiledContextItem",
+        "CompiledPrompt",
         "ContextCandidate",
         "ContextCompiler",
         "DeterministicWorkEstimator",
@@ -21,12 +22,13 @@ public sealed class ArchitectureAndBoundaryTests
         "ExecutableTaskEstimate",
         "ExecutableWork",
         "ModelRequirement",
+        "PromptCompiler",
         "ValidationRequirement",
         "ValidationStrategy"
     ];
 
     [Fact]
-    public void PublicSurface_ContainsExactlyThirteenFrozenTypes()
+    public void PublicSurface_ContainsExactlyFifteenFrozenTypes()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -35,7 +37,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            13,
+            15,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -468,8 +470,6 @@ public sealed class ArchitectureAndBoundaryTests
             "ComplexityCategory",
             "RetrievalMetrics",
             "RetrievalBenchmarkEvaluator",
-            "PromptCompiler",
-            "CompiledPrompt",
             "ExecutionEnvelope",
             "Scheduler",
             "Queue",
@@ -1044,6 +1044,155 @@ public sealed class ArchitectureAndBoundaryTests
 
         Assert.Equal(
             "itemLimit_",
+            parameters[2].Name);
+
+        Assert.Empty(
+            type.GetProperties(
+                BindingFlags.Public |
+                BindingFlags.Static |
+                BindingFlags.DeclaredOnly));
+
+        Assert.Empty(
+            type.GetNestedTypes(
+                BindingFlags.Public));
+    }
+    [Fact]
+    public void CompiledPrompt_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(CompiledPrompt);
+
+        Assert.True(
+            type.IsSealed);
+
+        string[] propertyNames =
+            type
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "Content",
+                "EstimatedTokens",
+                "TaskId"
+            ],
+            propertyNames);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        ParameterInfo[] parameters =
+            constructor.GetParameters();
+
+        Assert.Equal(
+            2,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            "taskId_",
+            parameters[0].Name);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            "content_",
+            parameters[1].Name);
+    }
+
+    [Fact]
+    public void PromptCompiler_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(PromptCompiler);
+
+        Assert.True(
+            type.IsAbstract);
+
+        Assert.True(
+            type.IsSealed);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        FieldInfo field =
+            Assert.Single(
+                type.GetFields(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly));
+
+        Assert.Equal(
+            "AlgorithmId",
+            field.Name);
+
+        Assert.True(
+            field.IsLiteral);
+
+        Assert.Equal(
+            "ai.repokit.prompt-compiler/v1",
+            field.GetRawConstantValue());
+
+        MethodInfo method =
+            Assert.Single(
+                type.GetMethods(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly));
+
+        Assert.Equal(
+            "Compile",
+            method.Name);
+
+        Assert.Equal(
+            typeof(CompiledPrompt),
+            method.ReturnType);
+
+        ParameterInfo[] parameters =
+            method.GetParameters();
+
+        Assert.Equal(
+            3,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(ExecutableWork),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            "work_",
+            parameters[0].Name);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            "taskId_",
+            parameters[1].Name);
+
+        Assert.Equal(
+            typeof(CompiledContext),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            "context_",
             parameters[2].Name);
 
         Assert.Empty(
