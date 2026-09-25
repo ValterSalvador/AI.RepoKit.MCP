@@ -21,6 +21,7 @@ public sealed class ArchitectureAndBoundaryTests
         "ExecutableTaskDependency",
         "ExecutableTaskEstimate",
         "ExecutableWork",
+        "ExecutionEnvelope",
         "ModelRequirement",
         "PromptCompiler",
         "ValidationRequirement",
@@ -28,7 +29,7 @@ public sealed class ArchitectureAndBoundaryTests
     ];
 
     [Fact]
-    public void PublicSurface_ContainsExactlyFifteenFrozenTypes()
+    public void PublicSurface_ContainsExactlySixteenFrozenTypes()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -37,7 +38,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            15,
+            16,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -470,7 +471,6 @@ public sealed class ArchitectureAndBoundaryTests
             "ComplexityCategory",
             "RetrievalMetrics",
             "RetrievalBenchmarkEvaluator",
-            "ExecutionEnvelope",
             "Scheduler",
             "Queue",
             "Worker",
@@ -1200,6 +1200,133 @@ public sealed class ArchitectureAndBoundaryTests
                 BindingFlags.Public |
                 BindingFlags.Static |
                 BindingFlags.DeclaredOnly));
+
+        Assert.Empty(
+            type.GetNestedTypes(
+                BindingFlags.Public));
+    }
+    [Fact]
+    public void ExecutionEnvelope_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(ExecutionEnvelope);
+
+        Assert.True(
+            type.IsSealed);
+
+        string[] propertyNames =
+            type
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(
+                    property_ =>
+                        property_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "AgentRequiredCapabilities",
+                "Environment",
+                "ModelRequiredCapabilities",
+                "Permission",
+                "Prompt",
+                "SessionReference",
+                "StructuredOutput",
+                "TaskId",
+                "Timeout"
+            ],
+            propertyNames);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        MethodInfo[] createMethods =
+            type
+                .GetMethods(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly)
+                .Where(
+                    method_ =>
+                        method_.Name == "Create")
+                .ToArray();
+
+        MethodInfo create =
+            Assert.Single(
+                createMethods);
+
+        Assert.Equal(
+            typeof(ExecutionEnvelope),
+            create.ReturnType);
+
+        ParameterInfo[] parameters =
+            create.GetParameters();
+
+        Assert.Equal(
+            7,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(ExecutableWork),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            "work_",
+            parameters[0].Name);
+
+        Assert.Equal(
+            typeof(CompiledPrompt),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            "prompt_",
+            parameters[1].Name);
+
+        Assert.Equal(
+            typeof(ExecutionPermission),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            "permission_",
+            parameters[2].Name);
+
+        Assert.Equal(
+            typeof(ExecutionEnvironment),
+            parameters[3].ParameterType);
+
+        Assert.Equal(
+            "environment_",
+            parameters[3].Name);
+
+        Assert.Equal(
+            typeof(AgentSessionReference),
+            parameters[4].ParameterType);
+
+        Assert.Equal(
+            "sessionReference_",
+            parameters[4].Name);
+
+        Assert.Equal(
+            typeof(StructuredOutputContract),
+            parameters[5].ParameterType);
+
+        Assert.Equal(
+            "structuredOutput_",
+            parameters[5].Name);
+
+        Assert.Equal(
+            typeof(TimeSpan?),
+            parameters[6].ParameterType);
+
+        Assert.Equal(
+            "timeout_",
+            parameters[6].Name);
 
         Assert.Empty(
             type.GetNestedTypes(
