@@ -11,6 +11,10 @@ public sealed class ArchitectureAndBoundaryTests
     private static readonly string[] _expectedPublicTypeNames =
     [
         "AgentRequirement",
+        "CompiledContext",
+        "CompiledContextItem",
+        "ContextCandidate",
+        "ContextCompiler",
         "DeterministicWorkEstimator",
         "ExecutableTask",
         "ExecutableTaskDependency",
@@ -22,7 +26,7 @@ public sealed class ArchitectureAndBoundaryTests
     ];
 
     [Fact]
-    public void PublicSurface_ContainsExactlyNineFrozenTypes()
+    public void PublicSurface_ContainsExactlyThirteenFrozenTypes()
     {
         Assembly assembly =
             typeof(ExecutableWork).Assembly;
@@ -31,7 +35,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            9,
+            13,
             exportedTypes.Length);
 
         string[] exportedNames =
@@ -462,9 +466,8 @@ public sealed class ArchitectureAndBoundaryTests
             "Fallback",
             "Retry",
             "ComplexityCategory",
-            "TokenBudget",
-            "EstimatedTokens",
-            "ContextCompiler",
+            "RetrievalMetrics",
+            "RetrievalBenchmarkEvaluator",
             "PromptCompiler",
             "CompiledPrompt",
             "ExecutionEnvelope",
@@ -756,6 +759,302 @@ public sealed class ArchitectureAndBoundaryTests
         Assert.Equal(
             "text_",
             tokenParameters[0].Name);
+    }
+    [Fact]
+    public void ContextCandidate_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(ContextCandidate);
+
+        Assert.True(
+            type.IsSealed);
+
+        string[] propertyNames =
+            type
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(property_ => property_.Name)
+                .OrderBy(
+                    name_ => name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "Content",
+                "Id",
+                "RelevanceScore"
+            ],
+            propertyNames);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        ParameterInfo[] parameters =
+            constructor.GetParameters();
+
+        Assert.Equal(
+            3,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            "id_",
+            parameters[0].Name);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            "content_",
+            parameters[1].Name);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            "relevanceScore_",
+            parameters[2].Name);
+    }
+
+    [Fact]
+    public void CompiledContextItem_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(CompiledContextItem);
+
+        Assert.True(
+            type.IsSealed);
+
+        string[] propertyNames =
+            type
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(property_ => property_.Name)
+                .OrderBy(
+                    name_ => name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "Content",
+                "EstimatedTokens",
+                "Id",
+                "RelevanceScore"
+            ],
+            propertyNames);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        ParameterInfo[] parameters =
+            constructor.GetParameters();
+
+        Assert.Equal(
+            4,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            "id_",
+            parameters[0].Name);
+
+        Assert.Equal(
+            typeof(string),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            "content_",
+            parameters[1].Name);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            "relevanceScore_",
+            parameters[2].Name);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[3].ParameterType);
+
+        Assert.Equal(
+            "estimatedTokens_",
+            parameters[3].Name);
+    }
+
+    [Fact]
+    public void CompiledContext_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(CompiledContext);
+
+        Assert.True(
+            type.IsSealed);
+
+        string[] propertyNames =
+            type
+                .GetProperties(
+                    BindingFlags.Public |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly)
+                .Select(property_ => property_.Name)
+                .OrderBy(
+                    name_ => name_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            [
+                "EstimatedTokens",
+                "ItemLimit",
+                "Items",
+                "OmittedCandidateIds",
+                "TokenBudget",
+                "Truncated"
+            ],
+            propertyNames);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        ParameterInfo[] parameters =
+            constructor.GetParameters();
+
+        Assert.Equal(
+            6,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            typeof(bool),
+            parameters[3].ParameterType);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<CompiledContextItem>),
+            parameters[4].ParameterType);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<string>),
+            parameters[5].ParameterType);
+    }
+
+    [Fact]
+    public void ContextCompiler_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(ContextCompiler);
+
+        Assert.True(
+            type.IsAbstract);
+
+        Assert.True(
+            type.IsSealed);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        FieldInfo field =
+            Assert.Single(
+                type.GetFields(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly));
+
+        Assert.Equal(
+            "AlgorithmId",
+            field.Name);
+
+        Assert.True(
+            field.IsLiteral);
+
+        Assert.Equal(
+            "ai.repokit.context-compiler/v1",
+            field.GetRawConstantValue());
+
+        MethodInfo method =
+            Assert.Single(
+                type.GetMethods(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly));
+
+        Assert.Equal(
+            "Compile",
+            method.Name);
+
+        Assert.Equal(
+            typeof(CompiledContext),
+            method.ReturnType);
+
+        ParameterInfo[] parameters =
+            method.GetParameters();
+
+        Assert.Equal(
+            3,
+            parameters.Length);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<ContextCandidate>),
+            parameters[0].ParameterType);
+
+        Assert.Equal(
+            "candidates_",
+            parameters[0].Name);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[1].ParameterType);
+
+        Assert.Equal(
+            "tokenBudget_",
+            parameters[1].Name);
+
+        Assert.Equal(
+            typeof(int),
+            parameters[2].ParameterType);
+
+        Assert.Equal(
+            "itemLimit_",
+            parameters[2].Name);
+
+        Assert.Empty(
+            type.GetProperties(
+                BindingFlags.Public |
+                BindingFlags.Static |
+                BindingFlags.DeclaredOnly));
+
+        Assert.Empty(
+            type.GetNestedTypes(
+                BindingFlags.Public));
     }
     [Fact]
     public void SolutionFile_ContainsBothExecutionProjects()
