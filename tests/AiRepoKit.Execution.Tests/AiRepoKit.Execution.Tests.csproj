@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AiRepoKit.Execution\AiRepoKit.Execution.csproj" />
+    <ProjectReference Include="..\..\src\AiRepoKit.Spec\AiRepoKit.Spec.csproj" />
   </ItemGroup>
 
 </Project>
