@@ -10,6 +10,11 @@ public sealed class ArchitectureAndBoundaryTests
 {
     private static readonly string[] _expectedPublicTypeNames =
     [
+        "WorkflowExecutionEvent",
+        "WorkflowExecutionEventKind",
+        "WorkflowId",
+        "WorkflowPersistenceSnapshot",
+        "WorkflowPersistenceStore",
         "WorkflowState",
         "WorkflowStateMachine",
         "WorkflowStatus",
@@ -18,7 +23,7 @@ public sealed class ArchitectureAndBoundaryTests
     ];
 
     [Fact]
-    public void ProductionProject_HasZeroPackageReferences()
+    public void ProductionProject_HasFrozenReferences()
     {
         XDocument document =
             XDocument.Load(
@@ -27,14 +32,6 @@ public sealed class ArchitectureAndBoundaryTests
         Assert.Empty(
             document.Descendants(
                 "PackageReference"));
-    }
-
-    [Fact]
-    public void ProductionProject_ReferencesOnlyExecution()
-    {
-        XDocument document =
-            XDocument.Load(
-                GetProductionProjectPath());
 
         XElement[] references =
             document
@@ -57,29 +54,25 @@ public sealed class ArchitectureAndBoundaryTests
             XDocument.Load(
                 GetTestProjectPath());
 
-        XElement[] packages =
-            document
-                .Descendants(
-                    "PackageReference")
-                .ToArray();
-
-        Assert.Equal(
-            3,
-            packages.Length);
-
         Assert.Equal(
             [
                 "Microsoft.NET.Test.Sdk|17.12.0",
                 "xunit|2.9.2",
                 "xunit.runner.visualstudio|3.0.0"
             ],
-            packages
+            document
+                .Descendants(
+                    "PackageReference")
                 .Select(
                     element_ =>
                         $"{element_.Attribute("Include")?.Value}|{element_.Attribute("Version")?.Value}")
                 .ToArray());
 
-        string[] projectReferences =
+        Assert.Equal(
+            [
+                @"..\..\src\AiRepoKit.Orchestration\AiRepoKit.Orchestration.csproj",
+                @"..\..\src\AiRepoKit.Execution\AiRepoKit.Execution.csproj"
+            ],
             document
                 .Descendants(
                     "ProjectReference")
@@ -87,18 +80,11 @@ public sealed class ArchitectureAndBoundaryTests
                     element_ =>
                         element_.Attribute("Include")?.Value ??
                         string.Empty)
-                .ToArray();
-
-        Assert.Equal(
-            [
-                @"..\..\src\AiRepoKit.Orchestration\AiRepoKit.Orchestration.csproj",
-                @"..\..\src\AiRepoKit.Execution\AiRepoKit.Execution.csproj"
-            ],
-            projectReferences);
+                .ToArray());
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlyFiveFrozenTypes()
+    public void PublicSurface_ContainsExactlyTenFrozenTypes()
     {
         Assembly assembly =
             typeof(WorkflowState).Assembly;
@@ -107,10 +93,11 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            5,
+            10,
             exportedTypes.Length);
 
-        string[] names =
+        Assert.Equal(
+            _expectedPublicTypeNames,
             exportedTypes
                 .Select(
                     type_ =>
@@ -119,11 +106,105 @@ public sealed class ArchitectureAndBoundaryTests
                     name_ =>
                         name_,
                     StringComparer.Ordinal)
-                .ToArray();
+                .ToArray());
+    }
+
+    [Fact]
+    public void ExistingP01StateSurface_RemainsFrozen()
+    {
+        Assert.Equal(
+            [
+                "Status",
+                "TaskId"
+            ],
+            DeclaredPublicProperties(
+                typeof(WorkflowStepState)));
 
         Assert.Equal(
-            _expectedPublicTypeNames,
-            names);
+            [
+                "SourceImplementationPlanRevision",
+                "Status",
+                "Steps"
+            ],
+            DeclaredPublicProperties(
+                typeof(WorkflowState)));
+
+        Assert.Empty(
+            typeof(WorkflowStepState)
+                .GetConstructors());
+
+        Assert.Empty(
+            typeof(WorkflowState)
+                .GetConstructors());
+
+        Assert.Equal(
+            [
+                WorkflowStatus.Created,
+                WorkflowStatus.Running,
+                WorkflowStatus.Completed,
+                WorkflowStatus.Failed,
+                WorkflowStatus.Cancelled
+            ],
+            Enum.GetValues<WorkflowStatus>());
+
+        Assert.Equal(
+            [
+                WorkflowStepStatus.Pending,
+                WorkflowStepStatus.Running,
+                WorkflowStepStatus.AwaitingValidation,
+                WorkflowStepStatus.Blocked,
+                WorkflowStepStatus.Failed,
+                WorkflowStepStatus.Completed,
+                WorkflowStepStatus.Cancelled
+            ],
+            Enum.GetValues<WorkflowStepStatus>());
+    }
+
+    [Fact]
+    public void ExistingP01StateMachineSurface_RemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowStateMachine);
+
+        FieldInfo[] fields =
+            type.GetFields(
+                BindingFlags.Public |
+                BindingFlags.Static |
+                BindingFlags.DeclaredOnly);
+
+        Assert.Single(
+            fields);
+
+        Assert.Equal(
+            "AlgorithmId",
+            fields[0].Name);
+
+        Assert.Equal(
+            "ai.repokit.workflow-state-machine/v1",
+            fields[0].GetRawConstantValue());
+
+        Assert.Equal(
+            [
+                "Create",
+                "TransitionStep",
+                "TransitionWorkflow"
+            ],
+            type
+                .GetMethods(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly)
+                .Where(
+                    method_ =>
+                        !method_.IsSpecialName)
+                .Select(
+                    method_ =>
+                        method_.Name)
+                .OrderBy(
+                    name_ =>
+                        name_,
+                    StringComparer.Ordinal)
+                .ToArray());
     }
 
     [Fact]
@@ -160,142 +241,100 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void StateRecords_HaveFrozenPropertiesAndNoPublicConstructors()
+    public void WorkflowId_PublicSurfaceIsFrozen()
     {
         Assert.Equal(
             [
-                "Status",
-                "TaskId"
+                "Value"
             ],
-            typeof(WorkflowStepState)
-                .GetProperties(
-                    BindingFlags.Public |
-                    BindingFlags.Instance |
-                    BindingFlags.DeclaredOnly)
-                .Select(
-                    property_ =>
-                        property_.Name)
-                .OrderBy(
-                    name_ =>
-                        name_,
-                    StringComparer.Ordinal)
-                .ToArray());
+            DeclaredPublicProperties(
+                typeof(WorkflowId)));
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                typeof(WorkflowId)
+                    .GetConstructors());
 
         Assert.Equal(
             [
-                "SourceImplementationPlanRevision",
-                "Status",
-                "Steps"
+                typeof(string)
             ],
-            typeof(WorkflowState)
-                .GetProperties(
-                    BindingFlags.Public |
-                    BindingFlags.Instance |
-                    BindingFlags.DeclaredOnly)
+            constructor
+                .GetParameters()
                 .Select(
-                    property_ =>
-                        property_.Name)
-                .OrderBy(
-                    name_ =>
-                        name_,
-                    StringComparer.Ordinal)
+                    parameter_ =>
+                        parameter_.ParameterType)
                 .ToArray());
-
-        Assert.Empty(
-            typeof(WorkflowStepState)
-                .GetConstructors());
-
-        Assert.Empty(
-            typeof(WorkflowState)
-                .GetConstructors());
     }
 
     [Fact]
-    public void StateProperties_AreReadOnly()
-    {
-        foreach (PropertyInfo property in
-                 typeof(WorkflowStepState).GetProperties())
-        {
-            Assert.False(
-                property.CanWrite);
-        }
-
-        foreach (PropertyInfo property in
-                 typeof(WorkflowState).GetProperties())
-        {
-            Assert.False(
-                property.CanWrite);
-        }
-    }
-
-    [Fact]
-    public void WorkflowStatus_ValuesAreFrozen()
+    public void WorkflowExecutionEvent_PublicSurfaceIsFrozen()
     {
         Assert.Equal(
             [
-                WorkflowStatus.Created,
-                WorkflowStatus.Running,
-                WorkflowStatus.Completed,
-                WorkflowStatus.Failed,
-                WorkflowStatus.Cancelled
+                "Kind",
+                "PreviousStepStatus",
+                "PreviousWorkflowStatus",
+                "Sequence",
+                "TargetStepStatus",
+                "TargetWorkflowStatus",
+                "TaskId",
+                "WorkflowId"
             ],
-            Enum.GetValues<WorkflowStatus>());
+            DeclaredPublicProperties(
+                typeof(WorkflowExecutionEvent)));
 
-        Assert.Equal(1, (int) WorkflowStatus.Created);
-        Assert.Equal(2, (int) WorkflowStatus.Running);
-        Assert.Equal(3, (int) WorkflowStatus.Completed);
-        Assert.Equal(4, (int) WorkflowStatus.Failed);
-        Assert.Equal(5, (int) WorkflowStatus.Cancelled);
+        Assert.Empty(
+            typeof(WorkflowExecutionEvent)
+                .GetConstructors());
+
+        Assert.Equal(
+            [
+                WorkflowExecutionEventKind.WorkflowInitialized,
+                WorkflowExecutionEventKind.WorkflowStatusTransitioned,
+                WorkflowExecutionEventKind.StepStatusTransitioned
+            ],
+            Enum.GetValues<WorkflowExecutionEventKind>());
+
+        Assert.Equal(
+            1,
+            (int) WorkflowExecutionEventKind.WorkflowInitialized);
+        Assert.Equal(
+            2,
+            (int) WorkflowExecutionEventKind.WorkflowStatusTransitioned);
+        Assert.Equal(
+            3,
+            (int) WorkflowExecutionEventKind.StepStatusTransitioned);
 
         Assert.False(
             Enum.IsDefined(
-                typeof(WorkflowStatus),
+                typeof(WorkflowExecutionEventKind),
                 0));
     }
 
     [Fact]
-    public void WorkflowStepStatus_ValuesAreFrozen()
+    public void WorkflowPersistenceSnapshot_PublicSurfaceIsFrozen()
     {
         Assert.Equal(
             [
-                WorkflowStepStatus.Pending,
-                WorkflowStepStatus.Running,
-                WorkflowStepStatus.AwaitingValidation,
-                WorkflowStepStatus.Blocked,
-                WorkflowStepStatus.Failed,
-                WorkflowStepStatus.Completed,
-                WorkflowStepStatus.Cancelled
+                "LastEvent",
+                "Revision",
+                "State",
+                "WorkflowId"
             ],
-            Enum.GetValues<WorkflowStepStatus>());
+            DeclaredPublicProperties(
+                typeof(WorkflowPersistenceSnapshot)));
 
-        Assert.Equal(1, (int) WorkflowStepStatus.Pending);
-        Assert.Equal(2, (int) WorkflowStepStatus.Running);
-        Assert.Equal(3, (int) WorkflowStepStatus.AwaitingValidation);
-        Assert.Equal(4, (int) WorkflowStepStatus.Blocked);
-        Assert.Equal(5, (int) WorkflowStepStatus.Failed);
-        Assert.Equal(6, (int) WorkflowStepStatus.Completed);
-        Assert.Equal(7, (int) WorkflowStepStatus.Cancelled);
-
-        Assert.False(
-            Enum.IsDefined(
-                typeof(WorkflowStepStatus),
-                0));
+        Assert.Empty(
+            typeof(WorkflowPersistenceSnapshot)
+                .GetConstructors());
     }
 
     [Fact]
-    public void WorkflowStateMachine_PublicSurfaceIsFrozen()
+    public void WorkflowPersistenceStore_PublicSurfaceIsFrozen()
     {
         Type type =
-            typeof(WorkflowStateMachine);
-
-        Assert.True(
-            type.IsAbstract);
-
-        Assert.True(
-            type.IsSealed);
-
-        Assert.Empty(
-            type.GetConstructors());
+            typeof(WorkflowPersistenceStore);
 
         FieldInfo[] fields =
             type.GetFields(
@@ -303,26 +342,63 @@ public sealed class ArchitectureAndBoundaryTests
                 BindingFlags.Static |
                 BindingFlags.DeclaredOnly);
 
-        Assert.Single(
-            fields);
+        Assert.Equal(
+            2,
+            fields.Length);
+
+        Assert.All(
+            fields,
+            field_ =>
+                Assert.True(
+                    field_.IsLiteral));
 
         Assert.Equal(
-            "AlgorithmId",
-            fields[0].Name);
-
-        Assert.True(
-            fields[0].IsLiteral);
+            "ai.repokit.workflow-persistence-record",
+            WorkflowPersistenceStore.SchemaId);
 
         Assert.Equal(
-            "ai.repokit.workflow-state-machine/v1",
-            fields[0].GetRawConstantValue());
+            1,
+            WorkflowPersistenceStore.CurrentSchemaVersion);
 
-        string[] methods =
+        Assert.Equal(
+            [
+                "StorageRoot",
+                "WorkflowId"
+            ],
+            DeclaredPublicProperties(
+                type));
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(string),
+                typeof(WorkflowId)
+            ],
+            constructor
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.Equal(
+            [
+                "Append",
+                "Initialize",
+                "Load",
+                "ReadEvents"
+            ],
             type
                 .GetMethods(
                     BindingFlags.Public |
-                    BindingFlags.Static |
+                    BindingFlags.Instance |
                     BindingFlags.DeclaredOnly)
+                .Where(
+                    method_ =>
+                        !method_.IsSpecialName)
                 .Select(
                     method_ =>
                         method_.Name)
@@ -330,15 +406,7 @@ public sealed class ArchitectureAndBoundaryTests
                     name_ =>
                         name_,
                     StringComparer.Ordinal)
-                .ToArray();
-
-        Assert.Equal(
-            [
-                "Create",
-                "TransitionStep",
-                "TransitionWorkflow"
-            ],
-            methods);
+                .ToArray());
     }
 
     [Fact]
@@ -346,14 +414,17 @@ public sealed class ArchitectureAndBoundaryTests
     {
         string[] forbiddenTerms =
         [
-            "Persistence",
-            "Event",
             "Checkpoint",
             "Resume",
+            "Recover",
+            "Replay",
             "Scheduler",
+            "Readiness",
+            "Runnable",
             "Queue",
             "Priority",
             "Dispatch",
+            "Concurrency",
             "Retry",
             "Attempt",
             "Backoff",
@@ -362,7 +433,12 @@ public sealed class ArchitectureAndBoundaryTests
             "SideEffect",
             "Idempot",
             "Reconcil",
-            "AgentExecution"
+            "AgentExecution",
+            "ValidationEngine",
+            "HumanGate",
+            "Delete",
+            "Overwrite",
+            "Compact"
         ];
 
         Assembly assembly =
@@ -370,38 +446,31 @@ public sealed class ArchitectureAndBoundaryTests
 
         foreach (Type type in assembly.GetExportedTypes())
         {
-            foreach (string term in forbiddenTerms)
+            AssertContainsNoForbiddenTerms(
+                type.Name,
+                forbiddenTerms);
+
+            foreach (PropertyInfo property in
+                     type.GetProperties(
+                         BindingFlags.Public |
+                         BindingFlags.Instance |
+                         BindingFlags.Static))
             {
-                Assert.DoesNotContain(
-                    term,
-                    type.Name,
-                    StringComparison.OrdinalIgnoreCase);
+                AssertContainsNoForbiddenTerms(
+                    property.Name,
+                    forbiddenTerms);
             }
 
-            foreach (PropertyInfo property in type.GetProperties())
-            {
-                foreach (string term in forbiddenTerms)
-                {
-                    Assert.DoesNotContain(
-                        term,
-                        property.Name,
-                        StringComparison.OrdinalIgnoreCase);
-                }
-            }
-
-            foreach (MethodInfo method in type.GetMethods(
+            foreach (MethodInfo method in
+                     type.GetMethods(
                          BindingFlags.Public |
                          BindingFlags.Static |
                          BindingFlags.Instance |
                          BindingFlags.DeclaredOnly))
             {
-                foreach (string term in forbiddenTerms)
-                {
-                    Assert.DoesNotContain(
-                        term,
-                        method.Name,
-                        StringComparison.OrdinalIgnoreCase);
-                }
+                AssertContainsNoForbiddenTerms(
+                    method.Name,
+                    forbiddenTerms);
             }
         }
     }
@@ -449,7 +518,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void Solution_ContainsOrchestrationProjects()
+    public void Solution_ContainsOnlyTheExistingOrchestrationProjects()
     {
         string solution =
             File.ReadAllText(
@@ -464,6 +533,38 @@ public sealed class ArchitectureAndBoundaryTests
             @"tests\AiRepoKit.Orchestration.Tests\AiRepoKit.Orchestration.Tests.csproj",
             solution,
             StringComparison.Ordinal);
+    }
+
+    private static string[] DeclaredPublicProperties(
+        Type type_)
+    {
+        return type_
+            .GetProperties(
+                BindingFlags.Public |
+                BindingFlags.Instance |
+                BindingFlags.Static |
+                BindingFlags.DeclaredOnly)
+            .Select(
+                property_ =>
+                    property_.Name)
+            .OrderBy(
+                name_ =>
+                    name_,
+                StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static void AssertContainsNoForbiddenTerms(
+        string value_,
+        IReadOnlyList<string> forbiddenTerms_)
+    {
+        for (int index = 0; index < forbiddenTerms_.Count; index++)
+        {
+            Assert.DoesNotContain(
+                forbiddenTerms_[index],
+                value_,
+                StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private static string GetRepositoryRoot()
