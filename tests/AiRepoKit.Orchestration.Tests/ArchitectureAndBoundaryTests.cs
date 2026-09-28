@@ -19,7 +19,8 @@ public sealed class ArchitectureAndBoundaryTests
         "WorkflowStateMachine",
         "WorkflowStatus",
         "WorkflowStepState",
-        "WorkflowStepStatus"
+        "WorkflowStepStatus",
+        "WorkflowTaskDagScheduler"
     ];
 
     [Fact]
@@ -84,7 +85,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlyTenFrozenTypes()
+    public void PublicSurface_ContainsExactlyElevenFrozenTypes()
     {
         Assembly assembly =
             typeof(WorkflowState).Assembly;
@@ -93,7 +94,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            10,
+            11,
             exportedTypes.Length);
 
         Assert.Equal(
@@ -106,6 +107,111 @@ public sealed class ArchitectureAndBoundaryTests
                     name_ =>
                         name_,
                     StringComparer.Ordinal)
+                .ToArray());
+    }
+
+    [Fact]
+    public void WorkflowTaskDagScheduler_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowTaskDagScheduler);
+
+        Assert.True(
+            type.IsClass);
+
+        Assert.True(
+            type.IsAbstract);
+
+        Assert.True(
+            type.IsSealed);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        FieldInfo field =
+            Assert.Single(
+                type.GetFields(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly));
+
+        Assert.True(
+            field.IsLiteral);
+
+        Assert.Equal(
+            "AlgorithmId",
+            field.Name);
+
+        Assert.Equal(
+            "ai.repokit.task-dag-scheduler/v1",
+            field.GetRawConstantValue());
+
+        MethodInfo[] methods =
+            type
+                .GetMethods(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly)
+                .Where(
+                    method_ =>
+                        !method_.IsSpecialName)
+                .OrderBy(
+                    method_ =>
+                        method_.Name,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        Assert.Equal(
+            2,
+            methods.Length);
+
+        Assert.Equal(
+            [
+                "GetReadyTaskIds",
+                "SelectNextTaskId"
+            ],
+            methods
+                .Select(
+                    method_ =>
+                        method_.Name)
+                .ToArray());
+
+        MethodInfo getReady =
+            methods[0];
+
+        Assert.Equal(
+            typeof(IReadOnlyList<string>),
+            getReady.ReturnType);
+
+        Assert.Equal(
+            [
+                typeof(ExecutableWork),
+                typeof(WorkflowState)
+            ],
+            getReady
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        MethodInfo selectNext =
+            methods[1];
+
+        Assert.Equal(
+            typeof(string),
+            selectNext.ReturnType);
+
+        Assert.Equal(
+            [
+                typeof(ExecutableWork),
+                typeof(WorkflowState)
+            ],
+            selectNext
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
                 .ToArray());
     }
 
@@ -418,8 +524,6 @@ public sealed class ArchitectureAndBoundaryTests
             "Resume",
             "Recover",
             "Replay",
-            "Scheduler",
-            "Readiness",
             "Runnable",
             "Queue",
             "Priority",
