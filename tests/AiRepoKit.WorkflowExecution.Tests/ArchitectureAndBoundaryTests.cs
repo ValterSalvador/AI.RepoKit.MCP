@@ -12,8 +12,13 @@ public sealed class ArchitectureAndBoundaryTests
 {
     private static readonly string[] _expectedPublicTypeNames =
     [
+        "IValidationExecutor",
+        "ValidationExecutionResult",
         "WorkflowAgentStepExecutor",
-        "WorkflowAgentStepResult"
+        "WorkflowAgentStepResult",
+        "WorkflowValidationEngine",
+        "WorkflowValidationEvidence",
+        "WorkflowValidationResult"
     ];
 
     [Fact]
@@ -79,16 +84,16 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlyTwoFrozenTypes()
+    public void PublicSurface_ContainsExactlySevenFrozenTypes()
     {
         Assembly assembly =
-            typeof(WorkflowAgentStepExecutor).Assembly;
+            typeof(WorkflowValidationEngine).Assembly;
 
         Type[] exportedTypes =
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            2,
+            7,
             exportedTypes.Length);
 
         Assert.Equal(
@@ -105,7 +110,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void WorkflowAgentStepExecutor_PublicSurfaceIsFrozen()
+    public void WorkflowAgentStepExecutor_PublicSurfaceRemainsFrozen()
     {
         Type type =
             typeof(WorkflowAgentStepExecutor);
@@ -138,13 +143,94 @@ public sealed class ArchitectureAndBoundaryTests
             typeof(Task<WorkflowAgentStepResult>),
             method.ReturnType);
 
+        Assert.Equal(
+            [
+                typeof(WorkflowState),
+                typeof(ExecutionEnvelope),
+                typeof(CancellationToken)
+            ],
+            method
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        FieldInfo field =
+            Assert.Single(
+                type.GetFields(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly));
+
+        Assert.Equal(
+            "AlgorithmId",
+            field.Name);
+
+        Assert.Equal(
+            "ai.repokit.workflow-agent-step-executor/v1",
+            field.GetRawConstantValue());
+    }
+
+    [Fact]
+    public void WorkflowAgentStepResult_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowAgentStepResult);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "AgentResult",
+                "ProviderId",
+                "State"
+            ],
+            DeclaredPublicProperties(
+                type));
+    }
+
+    [Fact]
+    public void IValidationExecutor_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(IValidationExecutor);
+
+        Assert.True(
+            type.IsInterface);
+
+        Assert.Equal(
+            [
+                "Strategy"
+            ],
+            DeclaredPublicProperties(
+                type));
+
+        Assert.Equal(
+            typeof(ValidationStrategy),
+            type.GetProperty("Strategy")!.PropertyType);
+
+        MethodInfo method =
+            Assert.Single(
+                DeclaredPublicMethods(
+                    type));
+
+        Assert.Equal(
+            "ValidateAsync",
+            method.Name);
+
+        Assert.Equal(
+            typeof(Task<ValidationExecutionResult>),
+            method.ReturnType);
+
         ParameterInfo[] parameters =
             method.GetParameters();
 
         Assert.Equal(
             [
-                typeof(WorkflowState),
-                typeof(ExecutionEnvelope),
+                typeof(ValidationRequirement),
+                typeof(ExecutionEnvironment),
                 typeof(CancellationToken)
             ],
             parameters
@@ -155,6 +241,92 @@ public sealed class ArchitectureAndBoundaryTests
 
         Assert.True(
             parameters[2].HasDefaultValue);
+    }
+
+    [Fact]
+    public void ValidationExecutionResult_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(ValidationExecutionResult);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(bool),
+                typeof(string)
+            ],
+            constructor
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.Equal(
+            [
+                "Evidence",
+                "Passed"
+            ],
+            DeclaredPublicProperties(
+                type));
+    }
+
+    [Fact]
+    public void WorkflowValidationEngine_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowValidationEngine);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(IEnumerable<IValidationExecutor>)
+            ],
+            constructor
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        MethodInfo method =
+            Assert.Single(
+                DeclaredPublicMethods(
+                    type));
+
+        Assert.Equal(
+            "ValidateAsync",
+            method.Name);
+
+        Assert.Equal(
+            typeof(Task<WorkflowValidationResult>),
+            method.ReturnType);
+
+        ParameterInfo[] parameters =
+            method.GetParameters();
+
+        Assert.Equal(
+            [
+                typeof(WorkflowState),
+                typeof(ExecutableWork),
+                typeof(ExecutionEnvironment),
+                typeof(string),
+                typeof(CancellationToken)
+            ],
+            parameters
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.True(
+            parameters[4].HasDefaultValue);
 
         Assert.Empty(
             DeclaredPublicProperties(
@@ -171,27 +343,49 @@ public sealed class ArchitectureAndBoundaryTests
             "AlgorithmId",
             field.Name);
 
-        Assert.True(
-            field.IsLiteral);
-
         Assert.Equal(
-            "ai.repokit.workflow-agent-step-executor/v1",
+            "ai.repokit.workflow-validation-engine/v1",
             field.GetRawConstantValue());
     }
 
     [Fact]
-    public void WorkflowAgentStepResult_PublicSurfaceIsFrozen()
+    public void WorkflowValidationEvidence_PublicSurfaceIsFrozen()
     {
         Type type =
-            typeof(WorkflowAgentStepResult);
+            typeof(WorkflowValidationEvidence);
 
         Assert.Empty(
             type.GetConstructors());
 
         Assert.Equal(
             [
-                "AgentResult",
-                "ProviderId",
+                "Requirement",
+                "ValidationResult"
+            ],
+            DeclaredPublicProperties(
+                type));
+
+        Assert.Equal(
+            typeof(ValidationRequirement),
+            type.GetProperty("Requirement")!.PropertyType);
+
+        Assert.Equal(
+            typeof(ValidationExecutionResult),
+            type.GetProperty("ValidationResult")!.PropertyType);
+    }
+
+    [Fact]
+    public void WorkflowValidationResult_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowValidationResult);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "Evidence",
                 "State"
             ],
             DeclaredPublicProperties(
@@ -199,22 +393,15 @@ public sealed class ArchitectureAndBoundaryTests
 
         Assert.Equal(
             typeof(WorkflowState),
-            type.GetProperty(
-                "State")!.PropertyType);
+            type.GetProperty("State")!.PropertyType);
 
         Assert.Equal(
-            typeof(AgentProviderId),
-            type.GetProperty(
-                "ProviderId")!.PropertyType);
-
-        Assert.Equal(
-            typeof(AgentExecutionResult),
-            type.GetProperty(
-                "AgentResult")!.PropertyType);
+            typeof(IReadOnlyList<WorkflowValidationEvidence>),
+            type.GetProperty("Evidence")!.PropertyType);
     }
 
     [Fact]
-    public void Solution_ContainsExactlyTheNewWorkflowExecutionProjectsByPath()
+    public void Solution_ContainsExistingWorkflowExecutionProjectsExactlyOnce()
     {
         string solution =
             File.ReadAllText(
@@ -234,7 +421,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void ProductionSource_RespectsFrozenP06Boundary()
+    public void ProductionSource_RespectsFrozenP07Boundary()
     {
         string source =
             string.Join(
@@ -263,7 +450,6 @@ public sealed class ArchitectureAndBoundaryTests
             "AiRepoKit.Agents.Runtime",
             "AiRepoKit.Agents.Codex",
             "AiRepoKit.Agents.Antigravity",
-            "ValidationEngine",
             "Microsoft.Agents",
             "Microsoft.Extensions.AI"
         })
@@ -275,12 +461,12 @@ public sealed class ArchitectureAndBoundaryTests
         }
 
         Assert.Contains(
-            "SupportsAll(",
+            "WorkflowValidationEngine",
             source,
             StringComparison.Ordinal);
 
         Assert.Contains(
-            "string.CompareOrdinal(",
+            "ValidationStrategy",
             source,
             StringComparison.Ordinal);
 
@@ -289,18 +475,58 @@ public sealed class ArchitectureAndBoundaryTests
             source,
             StringComparison.Ordinal);
 
-        Assert.Contains(
-            "CancellationTokenSource.CreateLinkedTokenSource(",
+        Assert.DoesNotContain(
+            "Process.Start(",
             source,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void P06AgentCompletionBoundary_RemainsFrozen()
+    {
+        string source =
+            File.ReadAllText(
+                Path.Combine(
+                    GetProductionDirectory(),
+                    "WorkflowAgentStepExecutor.cs"));
 
         Assert.Contains(
-            "new TimeoutException(",
+            "WorkflowStepStatus.AwaitingValidation",
             source,
             StringComparison.Ordinal);
 
         Assert.DoesNotContain(
             "WorkflowStepStatus.Completed",
+            source,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void P07ValidationEngine_OwnsOnlyValidationCompletionTransition()
+    {
+        string source =
+            File.ReadAllText(
+                Path.Combine(
+                    GetProductionDirectory(),
+                    "WorkflowValidationEngine.cs"));
+
+        Assert.Contains(
+            "WorkflowStepStatus.Completed",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "WorkflowStepStatus.Failed",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain(
+            "WorkflowStepStatus.Blocked",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain(
+            "TransitionWorkflow(",
             source,
             StringComparison.Ordinal);
     }
