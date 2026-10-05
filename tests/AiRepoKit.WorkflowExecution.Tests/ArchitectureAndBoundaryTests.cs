@@ -16,6 +16,10 @@ public sealed class ArchitectureAndBoundaryTests
         "ValidationExecutionResult",
         "WorkflowAgentStepExecutor",
         "WorkflowAgentStepResult",
+        "WorkflowRepairAttempt",
+        "WorkflowRepairCoordinator",
+        "WorkflowRepairPolicy",
+        "WorkflowRepairResult",
         "WorkflowValidationEngine",
         "WorkflowValidationEvidence",
         "WorkflowValidationResult"
@@ -84,7 +88,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlySevenFrozenTypes()
+    public void PublicSurface_ContainsExactlyElevenFrozenTypes()
     {
         Assembly assembly =
             typeof(WorkflowValidationEngine).Assembly;
@@ -93,7 +97,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            7,
+            11,
             exportedTypes.Length);
 
         Assert.Equal(
@@ -400,6 +404,249 @@ public sealed class ArchitectureAndBoundaryTests
             type.GetProperty("Evidence")!.PropertyType);
     }
 
+    [Fact]
+    public void WorkflowRepairPolicy_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowRepairPolicy);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(int),
+                typeof(int)
+            ],
+            constructor
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.Equal(
+            [
+                "MaxAttemptsPerProvider",
+                "MaxTotalAttempts"
+            ],
+            DeclaredPublicProperties(
+                type));
+    }
+
+    [Fact]
+    public void WorkflowRepairAttempt_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowRepairAttempt);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "AgentResult",
+                "AttemptNumber",
+                "Prompt",
+                "ProviderAttemptNumber",
+                "ProviderId",
+                "SemanticRepair",
+                "ValidationEvidence"
+            ],
+            DeclaredPublicProperties(
+                type));
+
+        Assert.Equal(
+            typeof(int),
+            type.GetProperty("AttemptNumber")!.PropertyType);
+
+        Assert.Equal(
+            typeof(int),
+            type.GetProperty("ProviderAttemptNumber")!.PropertyType);
+
+        Assert.Equal(
+            typeof(AgentProviderId),
+            type.GetProperty("ProviderId")!.PropertyType);
+
+        Assert.Equal(
+            typeof(CompiledPrompt),
+            type.GetProperty("Prompt")!.PropertyType);
+
+        Assert.Equal(
+            typeof(AgentExecutionResult),
+            type.GetProperty("AgentResult")!.PropertyType);
+
+        Assert.Equal(
+            typeof(bool),
+            type.GetProperty("SemanticRepair")!.PropertyType);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<WorkflowValidationEvidence>),
+            type.GetProperty("ValidationEvidence")!.PropertyType);
+    }
+
+    [Fact]
+    public void WorkflowRepairResult_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowRepairResult);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "Attempts",
+                "BudgetExhausted",
+                "State"
+            ],
+            DeclaredPublicProperties(
+                type));
+
+        Assert.Equal(
+            typeof(WorkflowState),
+            type.GetProperty("State")!.PropertyType);
+
+        Assert.Equal(
+            typeof(IReadOnlyList<WorkflowRepairAttempt>),
+            type.GetProperty("Attempts")!.PropertyType);
+
+        Assert.Equal(
+            typeof(bool),
+            type.GetProperty("BudgetExhausted")!.PropertyType);
+    }
+
+    [Fact]
+    public void WorkflowRepairCoordinator_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowRepairCoordinator);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(IEnumerable<IAgentExecutor>),
+                typeof(IEnumerable<IValidationExecutor>),
+                typeof(WorkflowRepairPolicy)
+            ],
+            constructor
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        MethodInfo method =
+            Assert.Single(
+                DeclaredPublicMethods(
+                    type));
+
+        Assert.Equal(
+            "ExecuteAsync",
+            method.Name);
+
+        Assert.Equal(
+            typeof(Task<WorkflowRepairResult>),
+            method.ReturnType);
+
+        ParameterInfo[] parameters =
+            method.GetParameters();
+
+        Assert.Equal(
+            [
+                typeof(WorkflowState),
+                typeof(ExecutableWork),
+                typeof(ExecutionEnvelope),
+                typeof(CancellationToken)
+            ],
+            parameters
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.True(
+            parameters[3].HasDefaultValue);
+
+        Assert.Empty(
+            DeclaredPublicProperties(
+                type));
+
+        FieldInfo field =
+            Assert.Single(
+                type.GetFields(
+                    BindingFlags.Public |
+                    BindingFlags.Static |
+                    BindingFlags.DeclaredOnly));
+
+        Assert.Equal(
+            "AlgorithmId",
+            field.Name);
+
+        Assert.Equal(
+            "ai.repokit.workflow-repair-coordinator/v1",
+            field.GetRawConstantValue());
+    }
+
+    [Fact]
+    public void WorkflowRepairCoordinator_ComposesFrozenP06P07Boundaries()
+    {
+        string source =
+            File.ReadAllText(
+                Path.Combine(
+                    GetProductionDirectory(),
+                    "WorkflowRepairCoordinator.cs"));
+
+        Assert.Contains(
+            "WorkflowAgentStepExecutor",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "WorkflowValidationEngine",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "WorkflowStateMachine.TransitionStep(",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "ExecutionEnvelope.Create(",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "AIRepoKit.SemanticRepair/v1",
+            source,
+            StringComparison.Ordinal);
+
+        foreach (string forbidden in new[]
+        {
+            "AgentExecutionRequest(",
+            "Process.Start(",
+            "HttpClient",
+            "AiRepoKit.Agents.Runtime",
+            "AiRepoKit.Agents.Codex",
+            "AiRepoKit.Agents.Antigravity",
+            "TransitionWorkflow(",
+            "DateTime.",
+            "DateTimeOffset.",
+            "Guid.",
+            "Random."
+        })
+        {
+            Assert.DoesNotContain(
+                forbidden,
+                source,
+                StringComparison.Ordinal);
+        }
+    }
     [Fact]
     public void Solution_ContainsExistingWorkflowExecutionProjectsExactlyOnce()
     {
