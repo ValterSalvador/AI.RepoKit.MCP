@@ -13,13 +13,17 @@ public sealed class ArchitectureAndBoundaryTests
     private static readonly string[] _expectedPublicTypeNames =
     [
         "IValidationExecutor",
+        "IWorkflowSideEffectReconciler",
         "ValidationExecutionResult",
         "WorkflowAgentStepExecutor",
         "WorkflowAgentStepResult",
+        "WorkflowCheckpointCoordinator",
+        "WorkflowCheckpointResult",
         "WorkflowRepairAttempt",
         "WorkflowRepairCoordinator",
         "WorkflowRepairPolicy",
         "WorkflowRepairResult",
+        "WorkflowSideEffectReconciliationResult",
         "WorkflowValidationEngine",
         "WorkflowValidationEvidence",
         "WorkflowValidationResult"
@@ -88,7 +92,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlyElevenFrozenTypes()
+    public void PublicSurface_ContainsExactlyFifteenFrozenTypes()
     {
         Assembly assembly =
             typeof(WorkflowValidationEngine).Assembly;
@@ -97,7 +101,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            11,
+            15,
             exportedTypes.Length);
 
         Assert.Equal(
@@ -647,6 +651,369 @@ public sealed class ArchitectureAndBoundaryTests
                 StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public void IWorkflowSideEffectReconciler_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(IWorkflowSideEffectReconciler);
+
+        Assert.True(
+            type.IsInterface);
+
+        Assert.Empty(
+            DeclaredPublicProperties(
+                type));
+
+        MethodInfo[] methods =
+            DeclaredPublicMethods(
+                type)
+            .OrderBy(
+                method_ =>
+                    method_.Name,
+                StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            2,
+            methods.Length);
+
+        MethodInfo agentMethod =
+            methods[0];
+
+        Assert.Equal(
+            "ReconcileAgentAsync",
+            agentMethod.Name);
+
+        Assert.Equal(
+            typeof(Task<WorkflowSideEffectReconciliationResult>),
+            agentMethod.ReturnType);
+
+        ParameterInfo[] agentParams =
+            agentMethod.GetParameters();
+
+        Assert.Equal(
+            [
+                typeof(WorkflowId),
+                typeof(string),
+                typeof(string),
+                typeof(long),
+                typeof(int),
+                typeof(AgentProviderId),
+                typeof(AgentExecutionRequest),
+                typeof(CancellationToken)
+            ],
+            agentParams
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.True(
+            agentParams[7].HasDefaultValue);
+
+        MethodInfo validationMethod =
+            methods[1];
+
+        Assert.Equal(
+            "ReconcileValidationAsync",
+            validationMethod.Name);
+
+        Assert.Equal(
+            typeof(Task<WorkflowSideEffectReconciliationResult>),
+            validationMethod.ReturnType);
+
+        ParameterInfo[] valParams =
+            validationMethod.GetParameters();
+
+        Assert.Equal(
+            [
+                typeof(WorkflowId),
+                typeof(string),
+                typeof(string),
+                typeof(long),
+                typeof(int),
+                typeof(ValidationRequirement),
+                typeof(ExecutionEnvironment),
+                typeof(CancellationToken)
+            ],
+            valParams
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.True(
+            valParams[7].HasDefaultValue);
+    }
+
+    [Fact]
+    public void WorkflowSideEffectReconciliationResult_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowSideEffectReconciliationResult);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(bool),
+                typeof(AgentExecutionResult),
+                typeof(ValidationExecutionResult)
+            ],
+            constructor
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.Equal(
+            [
+                "AgentResult",
+                "IsProvenNotExecuted",
+                "ValidationResult"
+            ],
+            DeclaredPublicProperties(
+                type));
+
+        Assert.Equal(
+            typeof(bool),
+            type.GetProperty("IsProvenNotExecuted")!.PropertyType);
+
+        Assert.Equal(
+            typeof(AgentExecutionResult),
+            type.GetProperty("AgentResult")!.PropertyType);
+
+        Assert.Equal(
+            typeof(ValidationExecutionResult),
+            type.GetProperty("ValidationResult")!.PropertyType);
+    }
+
+    [Fact]
+    public void WorkflowCheckpointResult_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowCheckpointResult);
+
+        Assert.Empty(
+            type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "ReconciliationUsed",
+                "RepairResult",
+                "Resumed",
+                "Snapshot"
+            ],
+            DeclaredPublicProperties(
+                type));
+
+        Assert.Equal(
+            typeof(WorkflowPersistenceSnapshot),
+            type.GetProperty("Snapshot")!.PropertyType);
+
+        Assert.Equal(
+            typeof(WorkflowRepairResult),
+            type.GetProperty("RepairResult")!.PropertyType);
+
+        Assert.Equal(
+            typeof(bool),
+            type.GetProperty("Resumed")!.PropertyType);
+
+        Assert.Equal(
+            typeof(bool),
+            type.GetProperty("ReconciliationUsed")!.PropertyType);
+    }
+
+    [Fact]
+    public void WorkflowCheckpointCoordinator_PublicSurfaceIsFrozen()
+    {
+        Type type =
+            typeof(WorkflowCheckpointCoordinator);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(WorkflowPersistenceStore),
+                typeof(IEnumerable<IAgentExecutor>),
+                typeof(IEnumerable<IValidationExecutor>),
+                typeof(WorkflowRepairPolicy),
+                typeof(IWorkflowSideEffectReconciler)
+            ],
+            constructor
+                .GetParameters()
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        MethodInfo method =
+            Assert.Single(
+                DeclaredPublicMethods(
+                    type));
+
+        Assert.Equal(
+            "ExecuteAsync",
+            method.Name);
+
+        Assert.Equal(
+            typeof(Task<WorkflowCheckpointResult>),
+            method.ReturnType);
+
+        ParameterInfo[] parameters =
+            method.GetParameters();
+
+        Assert.Equal(
+            [
+                typeof(ExecutableWork),
+                typeof(ExecutionEnvelope),
+                typeof(CancellationToken)
+            ],
+            parameters
+                .Select(
+                    parameter_ =>
+                        parameter_.ParameterType)
+                .ToArray());
+
+        Assert.True(
+            parameters[2].HasDefaultValue);
+
+        Assert.Empty(
+            DeclaredPublicProperties(
+                type));
+
+        FieldInfo[] fields =
+            type.GetFields(
+                BindingFlags.Public |
+                BindingFlags.Static |
+                BindingFlags.DeclaredOnly)
+            .OrderBy(
+                field_ =>
+                    field_.Name,
+                StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            3,
+            fields.Length);
+
+        Assert.Equal(
+            "AlgorithmId",
+            fields[0].Name);
+
+        Assert.Equal(
+            "ai.repokit.workflow-checkpoint-coordinator/v1",
+            fields[0].GetRawConstantValue());
+
+        Assert.Equal(
+            "JournalSchemaId",
+            fields[1].Name);
+
+        Assert.Equal(
+            "ai.repokit.workflow-execution-journal-record",
+            fields[1].GetRawConstantValue());
+
+        Assert.Equal(
+            "JournalSchemaVersion",
+            fields[2].Name);
+
+        Assert.Equal(
+            1,
+            fields[2].GetRawConstantValue());
+    }
+
+    [Fact]
+    public void WorkflowCheckpointCoordinator_ComposesFrozenBoundaries()
+    {
+        string source =
+            File.ReadAllText(
+                Path.Combine(
+                    GetProductionDirectory(),
+                    "WorkflowCheckpointCoordinator.cs"));
+
+        Assert.Contains(
+            "WorkflowRepairCoordinator",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "WorkflowCheckpointJournal",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "WorkflowCheckpointAgentExecutor",
+            source,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "WorkflowCheckpointValidationExecutor",
+            source,
+            StringComparison.Ordinal);
+
+        foreach (string forbidden in new[]
+        {
+            "Process.Start(",
+            "HttpClient",
+            "AiRepoKit.Agents.Runtime",
+            "AiRepoKit.Agents.Codex",
+            "AiRepoKit.Agents.Antigravity",
+            "DateTime.",
+            "DateTimeOffset.",
+            "Random."
+        })
+        {
+            Assert.DoesNotContain(
+                forbidden,
+                source,
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ProductionSource_RespectsFrozenP09FuturePhaseExclusions()
+    {
+        string source =
+            string.Join(
+                "\n",
+                Directory
+                    .GetFiles(
+                        GetProductionDirectory(),
+                        "*.cs",
+                        SearchOption.TopDirectoryOnly)
+                    .OrderBy(
+                        path_ =>
+                            path_,
+                        StringComparer.Ordinal)
+                    .Select(
+                        File.ReadAllText));
+
+        // P10 Human Gates, P11 Evidence Packs / Audit Trail, P12 Controlled Concurrency, P13 Promptfoo Golden Security
+        foreach (string forbidden in new[]
+        {
+            "Promptfoo",
+            "HumanGate",
+            "HumanApproval",
+            "EvidencePackExport",
+            "AuditExport",
+            "AuditTrail",
+            "ControlledConcurrency",
+            "AutonomousSchedule"
+        })
+        {
+            Assert.DoesNotContain(
+                forbidden,
+                source,
+                StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void Solution_ContainsExistingWorkflowExecutionProjectsExactlyOnce()
     {
@@ -670,18 +1037,25 @@ public sealed class ArchitectureAndBoundaryTests
     [Fact]
     public void ProductionSource_RespectsFrozenP07Boundary()
     {
-        string source =
+        string[] files =
+            Directory
+                .GetFiles(
+                    GetProductionDirectory(),
+                    "*.cs",
+                    SearchOption.TopDirectoryOnly)
+                .OrderBy(
+                    path_ =>
+                        path_,
+                    StringComparer.Ordinal)
+                .ToArray();
+
+        string nonJournalSource =
             string.Join(
                 "\n",
-                Directory
-                    .GetFiles(
-                        GetProductionDirectory(),
-                        "*.cs",
-                        SearchOption.TopDirectoryOnly)
-                    .OrderBy(
+                files
+                    .Where(
                         path_ =>
-                            path_,
-                        StringComparer.Ordinal)
+                            !Path.GetFileName(path_).Equals("WorkflowCheckpointJournal.cs", StringComparison.Ordinal))
                     .Select(
                         File.ReadAllText));
 
@@ -703,28 +1077,69 @@ public sealed class ArchitectureAndBoundaryTests
         {
             Assert.DoesNotContain(
                 forbidden,
-                source,
+                nonJournalSource,
+                StringComparison.Ordinal);
+        }
+
+        string journalSource =
+            File.ReadAllText(
+                Path.Combine(
+                    GetProductionDirectory(),
+                    "WorkflowCheckpointJournal.cs"));
+
+        foreach (string forbidden in new[]
+        {
+            "DateTime.",
+            "DateTimeOffset.",
+            "Random.",
+            "HttpClient",
+            "System.Diagnostics",
+            "AiRepoKit.Git",
+            "AiRepoKit.Agents.Runtime",
+            "AiRepoKit.Agents.Codex",
+            "AiRepoKit.Agents.Antigravity",
+            "Microsoft.Agents",
+            "Microsoft.Extensions.AI"
+        })
+        {
+            Assert.DoesNotContain(
+                forbidden,
+                journalSource,
                 StringComparison.Ordinal);
         }
 
         Assert.Contains(
+            ".tmp\");",
+            journalSource,
+            StringComparison.Ordinal);
+
+        Assert.Equal(
+            1,
+            CountOccurrences(
+                journalSource,
+                "Guid.NewGuid()"));
+
+        string fullSource =
+            string.Join("\n", files.Select(File.ReadAllText));
+
+        Assert.Contains(
             "WorkflowValidationEngine",
-            source,
+            fullSource,
             StringComparison.Ordinal);
 
         Assert.Contains(
             "ValidationStrategy",
-            source,
+            fullSource,
             StringComparison.Ordinal);
 
         Assert.Contains(
             "WorkflowStateMachine.TransitionStep(",
-            source,
+            fullSource,
             StringComparison.Ordinal);
 
         Assert.DoesNotContain(
             "Process.Start(",
-            source,
+            fullSource,
             StringComparison.Ordinal);
     }
 
