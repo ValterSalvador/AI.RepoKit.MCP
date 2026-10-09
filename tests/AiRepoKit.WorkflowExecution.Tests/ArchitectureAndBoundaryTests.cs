@@ -13,12 +13,20 @@ public sealed class ArchitectureAndBoundaryTests
     private static readonly string[] _expectedPublicTypeNames =
     [
         "IValidationExecutor",
+        "IWorkflowGateVerifier",
         "IWorkflowSideEffectReconciler",
         "ValidationExecutionResult",
         "WorkflowAgentStepExecutor",
         "WorkflowAgentStepResult",
         "WorkflowCheckpointCoordinator",
         "WorkflowCheckpointResult",
+        "WorkflowGateChallenge",
+        "WorkflowGateCoordinator",
+        "WorkflowGatePolicy",
+        "WorkflowGateProof",
+        "WorkflowGateResult",
+        "WorkflowGateStatus",
+        "WorkflowGateVerificationResult",
         "WorkflowRepairAttempt",
         "WorkflowRepairCoordinator",
         "WorkflowRepairPolicy",
@@ -92,7 +100,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlyFifteenFrozenTypes()
+    public void PublicSurface_ContainsExactlyTwentyThreeFrozenTypes()
     {
         Assembly assembly =
             typeof(WorkflowValidationEngine).Assembly;
@@ -101,7 +109,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            15,
+            23,
             exportedTypes.Length);
 
         Assert.Equal(
@@ -1193,6 +1201,260 @@ public sealed class ArchitectureAndBoundaryTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void WorkflowGateStatus_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(WorkflowGateStatus);
+
+        Assert.True(type.IsEnum);
+
+        Assert.Equal(
+            [
+                "Approved",
+                "Bypassed",
+                "Denied",
+                "Pending"
+            ],
+            Enum.GetNames(type).OrderBy(name_ => name_, StringComparer.Ordinal).ToArray());
+
+        Assert.Equal(1, (int) WorkflowGateStatus.Pending);
+        Assert.Equal(2, (int) WorkflowGateStatus.Denied);
+        Assert.Equal(3, (int) WorkflowGateStatus.Approved);
+        Assert.Equal(4, (int) WorkflowGateStatus.Bypassed);
+    }
+
+    [Fact]
+    public void WorkflowGatePolicy_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(WorkflowGatePolicy);
+
+        ConstructorInfo constructor = Assert.Single(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(bool),
+                typeof(bool),
+                typeof(bool)
+            ],
+            constructor.GetParameters().Select(parameter_ => parameter_.ParameterType).ToArray());
+
+        Assert.Equal(
+            [
+                "RequireGateForReadOnly",
+                "RequireGateForUnrestricted",
+                "RequireGateForWorkspaceWrite"
+            ],
+            DeclaredPublicProperties(type));
+
+        MethodInfo method = Assert.Single(DeclaredPublicMethods(type));
+
+        Assert.Equal("RequiresGate", method.Name);
+        Assert.Equal(typeof(bool), method.ReturnType);
+        Assert.Equal([typeof(ExecutionPermission)], method.GetParameters().Select(parameter_ => parameter_.ParameterType).ToArray());
+    }
+
+    [Fact]
+    public void WorkflowGateChallenge_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(WorkflowGateChallenge);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "BasePersistenceRevision",
+                "BaseStateFingerprint",
+                "GateId",
+                "GateOrdinal",
+                "InputFingerprint",
+                "PolicyFingerprint",
+                "RegistryFingerprint",
+                "RequiredPermission",
+                "SourceImplementationPlanRevision",
+                "TaskId",
+                "WorkflowId"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowGateProof_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(WorkflowGateProof);
+
+        ConstructorInfo constructor = Assert.Single(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(string),
+                typeof(string)
+            ],
+            constructor.GetParameters().Select(parameter_ => parameter_.ParameterType).ToArray());
+
+        Assert.Equal(
+            [
+                "GateId",
+                "OpaqueEvidence"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowGateVerificationResult_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(WorkflowGateVerificationResult);
+
+        ConstructorInfo constructor = Assert.Single(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(bool),
+                typeof(bool),
+                typeof(string),
+                typeof(string),
+                typeof(string),
+                typeof(string)
+            ],
+            constructor.GetParameters().Select(parameter_ => parameter_.ParameterType).ToArray());
+
+        Assert.Equal(
+            [
+                "EvidenceFingerprint",
+                "FailureReason",
+                "IsAuthenticated",
+                "IsAuthorized",
+                "MechanismId",
+                "PrincipalId"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void IWorkflowGateVerifier_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(IWorkflowGateVerifier);
+
+        Assert.True(type.IsInterface);
+
+        MethodInfo method = Assert.Single(DeclaredPublicMethods(type));
+
+        Assert.Equal("VerifyAsync", method.Name);
+        Assert.Equal(typeof(Task<WorkflowGateVerificationResult>), method.ReturnType);
+
+        ParameterInfo[] parameters = method.GetParameters();
+
+        Assert.Equal(
+            [
+                typeof(WorkflowGateChallenge),
+                typeof(WorkflowGateProof),
+                typeof(CancellationToken)
+            ],
+            parameters.Select(parameter_ => parameter_.ParameterType).ToArray());
+
+        Assert.True(parameters[2].HasDefaultValue);
+    }
+
+    [Fact]
+    public void WorkflowGateResult_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(WorkflowGateResult);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "Challenge",
+                "CheckpointResult",
+                "Snapshot",
+                "Status"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowGateCoordinator_PublicSurfaceIsFrozen()
+    {
+        Type type = typeof(WorkflowGateCoordinator);
+
+        ConstructorInfo constructor = Assert.Single(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(WorkflowPersistenceStore),
+                typeof(IEnumerable<IAgentExecutor>),
+                typeof(IEnumerable<IValidationExecutor>),
+                typeof(WorkflowRepairPolicy),
+                typeof(IWorkflowSideEffectReconciler),
+                typeof(WorkflowGatePolicy),
+                typeof(IWorkflowGateVerifier)
+            ],
+            constructor.GetParameters().Select(parameter_ => parameter_.ParameterType).ToArray());
+
+        MethodInfo method = Assert.Single(DeclaredPublicMethods(type));
+
+        Assert.Equal("ExecuteAsync", method.Name);
+        Assert.Equal(typeof(Task<WorkflowGateResult>), method.ReturnType);
+
+        ParameterInfo[] parameters = method.GetParameters();
+
+        Assert.Equal(
+            [
+                typeof(ExecutableWork),
+                typeof(ExecutionEnvelope),
+                typeof(WorkflowGateProof),
+                typeof(CancellationToken)
+            ],
+            parameters.Select(parameter_ => parameter_.ParameterType).ToArray());
+
+        Assert.True(parameters[2].HasDefaultValue);
+        Assert.True(parameters[3].HasDefaultValue);
+
+        FieldInfo[] fields = type.GetFields(
+            BindingFlags.Public |
+            BindingFlags.Static |
+            BindingFlags.DeclaredOnly);
+
+        Assert.Equal(3, fields.Length);
+
+        FieldInfo algorithmIdField = Assert.Single(fields, field_ => field_.Name == "AlgorithmId");
+        Assert.Equal("ai.repokit.workflow-gate-coordinator/v1", algorithmIdField.GetRawConstantValue());
+
+        FieldInfo schemaIdField = Assert.Single(fields, field_ => field_.Name == "JournalSchemaId");
+        Assert.Equal("ai.repokit.workflow-gate-journal-record", schemaIdField.GetRawConstantValue());
+
+        FieldInfo versionField = Assert.Single(fields, field_ => field_.Name == "JournalSchemaVersion");
+        Assert.Equal(1, versionField.GetRawConstantValue());
+    }
+
+    [Fact]
+    public void P10_ProductionSource_HasNoDisallowedDependenciesOrSideEffects()
+    {
+        string[] p10Files =
+        [
+            "WorkflowGateStatus.cs",
+            "WorkflowGatePolicy.cs",
+            "WorkflowGateChallenge.cs",
+            "WorkflowGateProof.cs",
+            "WorkflowGateVerificationResult.cs",
+            "IWorkflowGateVerifier.cs",
+            "WorkflowGateResult.cs",
+            "WorkflowGateCoordinator.cs",
+            "WorkflowGateJournal.cs"
+        ];
+
+        foreach (string file in p10Files)
+        {
+            string source = File.ReadAllText(Path.Combine(GetProductionDirectory(), file));
+
+            Assert.DoesNotContain("AiRepoKit.Spec", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("AiRepoKit.Cli", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("AiRepoKit.Git", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("System.Diagnostics.Process", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("System.Net.Http", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("Microsoft.Extensions.AI", source, StringComparison.Ordinal);
+        }
+    }
+
     private static MethodInfo[] DeclaredPublicMethods(
         Type type_)
     {
@@ -1204,7 +1466,12 @@ public sealed class ArchitectureAndBoundaryTests
                 BindingFlags.DeclaredOnly)
             .Where(
                 method_ =>
-                    !method_.IsSpecialName)
+                    !method_.IsSpecialName &&
+                    method_.Name != "Equals" &&
+                    method_.Name != "GetHashCode" &&
+                    method_.Name != "PrintMembers" &&
+                    method_.Name != "ToString" &&
+                    !method_.Name.StartsWith("<Clone>$", StringComparison.Ordinal))
             .ToArray();
     }
 
