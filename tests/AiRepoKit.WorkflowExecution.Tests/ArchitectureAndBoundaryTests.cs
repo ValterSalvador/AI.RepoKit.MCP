@@ -19,19 +19,28 @@ public sealed class ArchitectureAndBoundaryTests
         "WorkflowAgentStepExecutor",
         "WorkflowAgentStepResult",
         "WorkflowCheckpointCoordinator",
+        "WorkflowCheckpointJournalEvidence",
         "WorkflowCheckpointResult",
+        "WorkflowEvidenceEvent",
+        "WorkflowEvidenceManifest",
+        "WorkflowEvidencePack",
+        "WorkflowEvidencePackExporter",
+        "WorkflowEvidenceSourceRecord",
         "WorkflowGateChallenge",
         "WorkflowGateCoordinator",
+        "WorkflowGateJournalEvidence",
         "WorkflowGatePolicy",
         "WorkflowGateProof",
         "WorkflowGateResult",
         "WorkflowGateStatus",
         "WorkflowGateVerificationResult",
+        "WorkflowJournalRecordEvidence",
         "WorkflowRepairAttempt",
         "WorkflowRepairCoordinator",
         "WorkflowRepairPolicy",
         "WorkflowRepairResult",
         "WorkflowSideEffectReconciliationResult",
+        "WorkflowTaskEvidence",
         "WorkflowValidationEngine",
         "WorkflowValidationEvidence",
         "WorkflowValidationResult"
@@ -100,7 +109,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlyTwentyThreeFrozenTypes()
+    public void PublicSurface_ContainsExactlyThirtyTwoFrozenTypes()
     {
         Assembly assembly =
             typeof(WorkflowValidationEngine).Assembly;
@@ -109,7 +118,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            23,
+            32,
             exportedTypes.Length);
 
         Assert.Equal(
@@ -987,6 +996,20 @@ public sealed class ArchitectureAndBoundaryTests
     [Fact]
     public void ProductionSource_RespectsFrozenP09FuturePhaseExclusions()
     {
+        string[] p11Files =
+        [
+            "WorkflowEvidencePackExporter.cs",
+            "WorkflowEvidencePack.cs",
+            "WorkflowEvidenceManifest.cs",
+            "WorkflowEvidenceEvent.cs",
+            "WorkflowTaskEvidence.cs",
+            "WorkflowCheckpointJournalEvidence.cs",
+            "WorkflowGateJournalEvidence.cs",
+            "WorkflowJournalRecordEvidence.cs",
+            "WorkflowEvidenceSourceRecord.cs",
+            "WorkflowEvidenceManifestJson.cs"
+        ];
+
         string source =
             string.Join(
                 "\n",
@@ -995,6 +1018,9 @@ public sealed class ArchitectureAndBoundaryTests
                         GetProductionDirectory(),
                         "*.cs",
                         SearchOption.TopDirectoryOnly)
+                    .Where(
+                        path_ =>
+                            !p11Files.Contains(Path.GetFileName(path_)))
                     .OrderBy(
                         path_ =>
                             path_,
@@ -1443,6 +1469,302 @@ public sealed class ArchitectureAndBoundaryTests
         ];
 
         foreach (string file in p10Files)
+        {
+            string source = File.ReadAllText(Path.Combine(GetProductionDirectory(), file));
+
+            Assert.DoesNotContain("AiRepoKit.Spec", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("AiRepoKit.Cli", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("AiRepoKit.Git", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("System.Diagnostics.Process", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("System.Net.Http", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("Microsoft.Extensions.AI", source, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void WorkflowEvidencePackExporter_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowEvidencePackExporter);
+
+        ConstructorInfo constructor =
+            Assert.Single(
+                type.GetConstructors());
+
+        Assert.Equal(
+            [
+                typeof(WorkflowPersistenceStore)
+            ],
+            constructor
+                .GetParameters()
+                .Select(parameter_ => parameter_.ParameterType)
+                .ToArray());
+
+        MethodInfo[] methods =
+            DeclaredPublicMethods(type);
+
+        Assert.Equal(3, methods.Length);
+
+        MethodInfo exportMethod =
+            Assert.Single(methods, m => m.Name == "ExportAsync");
+
+        Assert.Equal(typeof(Task<WorkflowEvidencePack>), exportMethod.ReturnType);
+        ParameterInfo[] exportParams = exportMethod.GetParameters();
+        Assert.Single(exportParams);
+        Assert.Equal(typeof(CancellationToken), exportParams[0].ParameterType);
+        Assert.True(exportParams[0].HasDefaultValue);
+
+        MethodInfo[] verifyMethods =
+            methods.Where(m => m.Name == "VerifyPackAsync").ToArray();
+
+        Assert.Equal(2, verifyMethods.Length);
+
+        MethodInfo verifyOverload1 =
+            Assert.Single(verifyMethods, m => m.GetParameters().Length == 4);
+
+        Assert.Equal(typeof(Task<WorkflowEvidencePack>), verifyOverload1.ReturnType);
+        Assert.Equal(
+            [
+                typeof(long),
+                typeof(string),
+                typeof(string),
+                typeof(CancellationToken)
+            ],
+            verifyOverload1.GetParameters().Select(p => p.ParameterType).ToArray());
+        Assert.True(verifyOverload1.GetParameters()[3].HasDefaultValue);
+
+        MethodInfo verifyOverload2 =
+            Assert.Single(verifyMethods, m => m.GetParameters().Length == 2);
+
+        Assert.Equal(typeof(Task<WorkflowEvidencePack>), verifyOverload2.ReturnType);
+        Assert.Equal(
+            [
+                typeof(WorkflowEvidencePack),
+                typeof(CancellationToken)
+            ],
+            verifyOverload2.GetParameters().Select(p => p.ParameterType).ToArray());
+        Assert.True(verifyOverload2.GetParameters()[1].HasDefaultValue);
+
+        FieldInfo[] fields =
+            type.GetFields(
+                BindingFlags.Public |
+                BindingFlags.Static |
+                BindingFlags.DeclaredOnly);
+
+        Assert.Equal(3, fields.Length);
+
+        FieldInfo algField = Assert.Single(fields, f => f.Name == "AlgorithmId");
+        Assert.Equal("ai.repokit.workflow-evidence-pack/v1", algField.GetRawConstantValue());
+
+        FieldInfo schemaField = Assert.Single(fields, f => f.Name == "ManifestSchemaId");
+        Assert.Equal("ai.repokit.workflow-evidence-manifest", schemaField.GetRawConstantValue());
+
+        FieldInfo verField = Assert.Single(fields, f => f.Name == "CurrentSchemaVersion");
+        Assert.Equal(1, verField.GetRawConstantValue());
+    }
+
+    [Fact]
+    public void WorkflowEvidencePack_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowEvidencePack);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "CapturedPersistenceRevision",
+                "Manifest",
+                "ManifestFingerprint",
+                "ManifestPath",
+                "PackDirectory",
+                "PackId",
+                "WorkflowId"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowEvidenceManifest_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowEvidenceManifest);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "AlgorithmId",
+                "CapturedPersistenceRevision",
+                "Events",
+                "PackId",
+                "SchemaId",
+                "SchemaVersion",
+                "SourceImplementationPlanRevision",
+                "SourceRecords",
+                "SourceSetFingerprint",
+                "Tasks",
+                "WorkflowId",
+                "WorkflowStatus"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowEvidenceEvent_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowEvidenceEvent);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "Kind",
+                "PreviousStepStatus",
+                "PreviousWorkflowStatus",
+                "Revision",
+                "TargetStepStatus",
+                "TargetWorkflowStatus",
+                "TaskId",
+                "WorkflowId"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowTaskEvidence_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowTaskEvidence);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "CheckpointJournals",
+                "GateJournals",
+                "StepStatus",
+                "TaskId"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowCheckpointJournalEvidence_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowCheckpointJournalEvidence);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "AttemptCount",
+                "BasePersistenceRevision",
+                "BaseWorkflowStateFingerprint",
+                "BudgetExhausted",
+                "ExecutionCompleted",
+                "ExpectedProjectionTransitionCount",
+                "FinalPersistenceRevision",
+                "FinalStateFingerprint",
+                "InputFingerprint",
+                "ProjectionCompleted",
+                "Records",
+                "RegistryFingerprint"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowGateJournalEvidence_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowGateJournalEvidence);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "Authorized",
+                "BasePersistenceRevision",
+                "Challenge",
+                "EvidenceFingerprint",
+                "MechanismId",
+                "PrincipalId"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowJournalRecordEvidence_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowJournalRecordEvidence);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "AgentDiagnosticDigest",
+                "AgentOutputDigest",
+                "AgentStatus",
+                "AttemptCount",
+                "BudgetExhausted",
+                "ExpectedProjectionTransitionCount",
+                "FinalPersistenceRevision",
+                "FinalStateFingerprint",
+                "InvocationGeneration",
+                "IsNullReturn",
+                "JournalSequence",
+                "OperationId",
+                "OperationKind",
+                "OperationOrdinal",
+                "ProviderId",
+                "RecordKind",
+                "RequestFingerprint",
+                "ValidationEvidenceDigest",
+                "ValidationExternalIdentityDigest",
+                "ValidationPassed"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void WorkflowEvidenceSourceRecord_PublicSurfaceRemainsFrozen()
+    {
+        Type type =
+            typeof(WorkflowEvidenceSourceRecord);
+
+        Assert.Empty(type.GetConstructors());
+
+        Assert.Equal(
+            [
+                "ByteLength",
+                "RelativePath",
+                "Sha256Fingerprint"
+            ],
+            DeclaredPublicProperties(type));
+    }
+
+    [Fact]
+    public void P11_ProductionSource_HasNoDisallowedDependenciesOrSideEffects()
+    {
+        string[] p11Files =
+        [
+            "WorkflowEvidencePackExporter.cs",
+            "WorkflowEvidencePack.cs",
+            "WorkflowEvidenceManifest.cs",
+            "WorkflowEvidenceEvent.cs",
+            "WorkflowTaskEvidence.cs",
+            "WorkflowCheckpointJournalEvidence.cs",
+            "WorkflowGateJournalEvidence.cs",
+            "WorkflowJournalRecordEvidence.cs",
+            "WorkflowEvidenceSourceRecord.cs",
+            "WorkflowEvidenceManifestJson.cs"
+        ];
+
+        foreach (string file in p11Files)
         {
             string source = File.ReadAllText(Path.Combine(GetProductionDirectory(), file));
 
