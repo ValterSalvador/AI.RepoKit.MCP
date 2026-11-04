@@ -39,6 +39,11 @@ jobs:
       - name: Pack
         run: dotnet pack src/AiRepoKit.Cli/AiRepoKit.Cli.csproj -c Release -o artifacts/nuget --no-build
 
+      - name: Test Windows updater linked worktrees
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/rel4-p08-updater-worktree-smoke.ps1
+
       - name: Smoke version
         if: runner.os == 'Windows'
         run: dotnet run --project src/AiRepoKit.Cli/AiRepoKit.Cli.csproj -- --version
