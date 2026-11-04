@@ -129,7 +129,9 @@ function Run($file, [string[]]$arguments, [string]$workingDirectory = $null) {
 }
 
 function Test-RealRepo([string]$path) {
-    return [System.IO.Directory]::Exists((Join-Path $path ".git"))
+    $gitMarker = Join-Path $path ".git"
+    return [System.IO.Directory]::Exists($gitMarker) -or
+           [System.IO.File]::Exists($gitMarker)
 }
 
 function Test-AiRepoKitEnabledRepo([string]$path) {
