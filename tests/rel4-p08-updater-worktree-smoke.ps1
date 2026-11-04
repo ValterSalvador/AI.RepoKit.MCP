@@ -8,7 +8,7 @@ $repoRoot = [IO.Path]::GetFullPath(
 )
 
 $updaterPath = Join-Path $repoRoot 'scripts/airepo-update.ps1'
-$gitExe = (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source
+$gitExe = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 
 # Read only the definitions under test. Do not execute the updater entrypoint.
 $tokens = $null
