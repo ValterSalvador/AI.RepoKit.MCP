@@ -1,8 +1,16 @@
 # AI.RepoKit.MCP
 
+[![CI](https://github.com/ValterSalvador/AI.RepoKit.MCP/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ValterSalvador/AI.RepoKit.MCP/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/ValterSalvador/AI.RepoKit.MCP?label=latest%20release)](https://github.com/ValterSalvador/AI.RepoKit.MCP/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-blue.svg)](SECURITY.md)
+
 Generic .NET local tool for planning, validating, and bootstrapping AI context and MCP infrastructure in target .NET repositories.
 
-Status: v3.0.0 release readiness with formal Spec-Driven Development (SDD), immutable Spec IR schema v1, evidence-backed verification, and read-only MCP Spec context. V4 agent execution is implemented (v4.0.0 is unreleased; v3.0.0 remains the released baseline). V5 model runtime through P07 is implemented (v5.0.0 is unreleased). Release publication requires a separate decision. Git hooks remain enabled by default during applied setup and bootstrap workflows; use --no-hooks (alias --skip-hooks) to leave hooks untouched.
+**Current public release:** [v3.0.0](https://github.com/ValterSalvador/AI.RepoKit.MCP/releases/tag/v3.0.0). **Planned public release:** v4.0.0 ([REL4 roadmap](https://github.com/ValterSalvador/AI.RepoKit.MCP/issues/64)). V4-V7 are internal engineering generations, not separate published versions. Their advanced capabilities are not yet exposed through the distributed CLI/MCP. V7.P12 and V7.P13 remain pending acceptance.
+
+Git hooks remain enabled by default during applied setup and bootstrap workflows; use `--no-hooks` (alias `--skip-hooks`) to leave hooks untouched.
 
 ## Goals
 

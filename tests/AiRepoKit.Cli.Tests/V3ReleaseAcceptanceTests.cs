@@ -324,7 +324,9 @@ public sealed class V3ReleaseAcceptanceTests
         Assert.True(File.Exists(readmePath), $"Missing README.md at: {readmePath}");
         string readmeContent = File.ReadAllText(readmePath);
 
-        Assert.Contains("v3.0.0 release readiness", readmeContent);
+        Assert.Contains("**Current public release:** [v3.0.0]", readmeContent);
+        Assert.Contains("**Planned public release:** v4.0.0", readmeContent);
+        Assert.Contains("V4-V7 are internal engineering generations", readmeContent);
         Assert.Contains("## Spec-Driven Development (v3.0.0)", readmeContent);
         Assert.Contains("docs/v3-spec-driven-development.md", readmeContent);
         Assert.Contains("airepo spec init", readmeContent);
@@ -419,7 +421,8 @@ public sealed class V3ReleaseAcceptanceTests
         while (dir is not null)
         {
             if (File.Exists(Path.Combine(dir.FullName, "AI.RepoKit.sln")) ||
-                Directory.Exists(Path.Combine(dir.FullName, ".git")))
+                Directory.Exists(Path.Combine(dir.FullName, ".git")) ||
+                File.Exists(Path.Combine(dir.FullName, ".git")))
             {
                 return dir.FullName;
             }
