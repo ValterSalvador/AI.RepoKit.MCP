@@ -47,7 +47,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiRepoKit.Git.Tests", "test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiRepoKit.WorkflowExecution", "src\AiRepoKit.WorkflowExecution\AiRepoKit.WorkflowExecution.csproj", "{6A40B8D7-2E74-4D44-9C0D-96CC93F8C601}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiRepoKit.CoordinationBroker", "src\AiRepoKit.CoordinationBroker\AiRepoKit.CoordinationBroker.csproj", "{C4610BA1-5F97-48F1-9669-798BF01EB41C}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiRepoKit.WorkflowExecution.Tests", "tests\AiRepoKit.WorkflowExecution.Tests\AiRepoKit.WorkflowExecution.Tests.csproj", "{AD0CB5D4-4C70-4FFB-92D1-1274D66D9D51}"
+	ProjectSection(ProjectDependencies) = postProject
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C} = {C4610BA1-5F97-48F1-9669-798BF01EB41C}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -311,6 +316,18 @@ Global
 		{AD0CB5D4-4C70-4FFB-92D1-1274D66D9D51}.Release|x64.Build.0 = Release|Any CPU
 		{AD0CB5D4-4C70-4FFB-92D1-1274D66D9D51}.Release|x86.ActiveCfg = Release|Any CPU
 		{AD0CB5D4-4C70-4FFB-92D1-1274D66D9D51}.Release|x86.Build.0 = Release|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Debug|x64.Build.0 = Debug|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Debug|x86.Build.0 = Debug|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Release|x64.ActiveCfg = Release|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Release|x64.Build.0 = Release|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Release|x86.ActiveCfg = Release|Any CPU
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -337,5 +354,6 @@ Global
 		{820336C5-C94A-4037-A1A4-C52E03DC6681} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{6A40B8D7-2E74-4D44-9C0D-96CC93F8C601} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{AD0CB5D4-4C70-4FFB-92D1-1274D66D9D51} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{C4610BA1-5F97-48F1-9669-798BF01EB41C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

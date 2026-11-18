@@ -415,15 +415,13 @@ public sealed class WorkflowBrokerTests : IDisposable
         string exeName = OperatingSystem.IsWindows() ? "AiRepoKit.CoordinationBroker.exe" : "AiRepoKit.CoordinationBroker";
 
         string? cur = baseDir;
+        string? repoRoot = null;
         while (!string.IsNullOrEmpty(cur))
         {
-            if (File.Exists(Path.Combine(cur, "AI.RepoKit.MCP.sln")))
+            if (File.Exists(Path.Combine(cur, "AI.RepoKit.MCP.sln")) || Directory.Exists(Path.Combine(cur, ".git")))
             {
-                string candidate = Path.Combine(cur, "src", "AiRepoKit.CoordinationBroker", "bin", "Debug", "net10.0", exeName);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
+                repoRoot = cur;
+                break;
             }
 
             string? parent = Path.GetDirectoryName(cur);
@@ -435,7 +433,56 @@ public sealed class WorkflowBrokerTests : IDisposable
             cur = parent;
         }
 
-        throw new FileNotFoundException($"Could not locate {exeName} starting from {baseDir}");
+        if (string.IsNullOrEmpty(repoRoot))
+        {
+            throw new InvalidOperationException($"Could not locate repository root starting from {baseDir}");
+        }
+
+        bool isRelease = baseDir.IndexOf("Release", StringComparison.OrdinalIgnoreCase) >= 0;
+        string currentConfig = isRelease ? "Release" : "Debug";
+
+        string standardCandidate = Path.Combine(
+            repoRoot, "src", "AiRepoKit.CoordinationBroker", "bin", currentConfig, "net10.0", exeName);
+        if (IsValidBrokerExecutable(standardCandidate))
+        {
+            return standardCandidate;
+        }
+
+        string configDir = Path.Combine(repoRoot, "src", "AiRepoKit.CoordinationBroker", "bin", currentConfig);
+        if (Directory.Exists(configDir))
+        {
+            string? match = Directory.EnumerateFiles(configDir, exeName, SearchOption.AllDirectories)
+                .FirstOrDefault(IsValidBrokerExecutable);
+            if (!string.IsNullOrEmpty(match))
+            {
+                return match;
+            }
+        }
+
+        string localCandidate = Path.Combine(baseDir, exeName);
+        if (IsValidBrokerExecutable(localCandidate))
+        {
+            return localCandidate;
+        }
+
+        throw new FileNotFoundException(
+            $"Could not locate precompiled {exeName} for configuration '{currentConfig}' (with accompanying AiRepoKit.CoordinationBroker.dll) under {configDir}. Ensure AiRepoKit.CoordinationBroker is built in '{currentConfig}' before running tests.");
+    }
+
+    private static bool IsValidBrokerExecutable(string candidate)
+    {
+        if (!File.Exists(candidate))
+        {
+            return false;
+        }
+
+        string? dir = Path.GetDirectoryName(candidate);
+        if (string.IsNullOrEmpty(dir))
+        {
+            return false;
+        }
+
+        return File.Exists(Path.Combine(dir, "AiRepoKit.CoordinationBroker.dll"));
     }
 
     // =========================================================================
