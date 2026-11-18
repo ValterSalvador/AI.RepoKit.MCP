@@ -13,4 +13,8 @@
     <ProjectReference Include="..\AiRepoKit.Orchestration\AiRepoKit.Orchestration.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiRepoKit.CoordinationBroker" />
+  </ItemGroup>
+
 </Project>

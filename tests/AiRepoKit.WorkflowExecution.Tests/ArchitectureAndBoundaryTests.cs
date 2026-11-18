@@ -39,6 +39,10 @@ public sealed class ArchitectureAndBoundaryTests
         "WorkflowRepairCoordinator",
         "WorkflowRepairPolicy",
         "WorkflowRepairResult",
+        "WorkflowResourceAccessKind",
+        "WorkflowResourceClaim",
+        "WorkflowSchedulerCandidate",
+        "WorkflowSchedulerPolicy",
         "WorkflowSideEffectReconciliationResult",
         "WorkflowTaskEvidence",
         "WorkflowValidationEngine",
@@ -109,7 +113,7 @@ public sealed class ArchitectureAndBoundaryTests
     }
 
     [Fact]
-    public void PublicSurface_ContainsExactlyThirtyTwoFrozenTypes()
+    public void PublicSurface_ContainsExactlyThirtySixFrozenTypes()
     {
         Assembly assembly =
             typeof(WorkflowValidationEngine).Assembly;
@@ -118,7 +122,7 @@ public sealed class ArchitectureAndBoundaryTests
             assembly.GetExportedTypes();
 
         Assert.Equal(
-            32,
+            36,
             exportedTypes.Length);
 
         Assert.Equal(
