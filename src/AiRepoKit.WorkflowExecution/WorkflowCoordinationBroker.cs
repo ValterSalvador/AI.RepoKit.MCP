@@ -16,8 +16,23 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
     private readonly Dictionary<string, WorkflowBrokerSession> _activeLeaseSessions = new(StringComparer.Ordinal);
     private readonly HashSet<int> _occupiedSlots = [];
     private readonly List<WorkflowBrokerSession> _sessions = [];
+    private readonly HashSet<Task> _activeSessionTasks = [];
     private readonly List<IDisposable> _retainedFailedGenerationLocks = [];
     private readonly CancellationTokenSource _cts = new();
+    private readonly TaskCompletionSource<object?> _shutdownTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal Func<Task>? ControlledShutdownHook;
+    internal Action? FaultInjectionBeforeQuarantineWrite;
+    internal int ActiveSessionTaskCount
+    {
+        get
+        {
+            lock (this._activeSessionTasks)
+            {
+                return this._activeSessionTasks.Count;
+            }
+        }
+    }
 
     private WorkflowSchedulerLockHandle? _lifetimeDomainLockHandle;
     private Task? _listenerTask;
@@ -31,7 +46,9 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
     private uint _validatedWindowsStorageRootVolumeSerial;
     private volatile string? _admissionBlockedReason;
     private int _rejectedAuthenticationCount;
-    private bool _isDisposed;
+    private int _shuttingDown;
+    private volatile bool _quarantineFailedDuringShutdown;
+    private volatile Exception? _shutdownQuarantineException;
 
     public WorkflowSchedulerPaths Paths => this._paths;
     public int MaxConcurrentWorkflows => this._maxConcurrentWorkflows;
@@ -478,6 +495,41 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
         }
     }
 
+    private void StartSessionTask(WorkflowBrokerSession session, CancellationToken cancellationToken)
+    {
+        lock (this._sessions)
+        {
+            if (this._cts.IsCancellationRequested || Volatile.Read(ref this._shuttingDown) != 0)
+            {
+                session.Dispose();
+                return;
+            }
+
+            this._sessions.Add(session);
+
+            Task? sessionTask = null;
+            lock (this._activeSessionTasks)
+            {
+                sessionTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await this.ProcessSessionAsync(session, cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        lock (this._activeSessionTasks)
+                        {
+                            this._activeSessionTasks.Remove(sessionTask!);
+                        }
+                    }
+                });
+
+                this._activeSessionTasks.Add(sessionTask);
+            }
+        }
+    }
+
     private async Task WindowsPipeListenerLoopAsync(TaskCompletionSource<bool> readyTcs_, CancellationToken cancellationToken_)
     {
         string pipeName = WorkflowBrokerIpcTransport.GetEndpointIdentifier(this._paths);
@@ -527,12 +579,7 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
                     startTimeTicks,
                     clientIdentity);
 
-                lock (this._sessions)
-                {
-                    this._sessions.Add(session);
-                }
-
-                _ = Task.Run(() => this.ProcessSessionAsync(session, cancellationToken_));
+                this.StartSessionTask(session, cancellationToken_);
             }
             catch (OperationCanceledException)
             {
@@ -647,12 +694,7 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
                     startTimeTicks,
                     clientIdentity);
 
-                lock (this._sessions)
-                {
-                    this._sessions.Add(session);
-                }
-
-                _ = Task.Run(() => this.ProcessSessionAsync(session, cancellationToken_));
+                this.StartSessionTask(session, cancellationToken_);
             }
             catch (OperationCanceledException)
             {
@@ -1184,10 +1226,13 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
                 if (rollbackFailed)
                 {
                     // Retain relevant OS locks and block further admission indefinitely.
-                    if (wfLock is not null) this._retainedFailedGenerationLocks.Add(wfLock);
-                    if (slotLock is not null) this._retainedFailedGenerationLocks.Add(slotLock);
-                    if (modeLock is not null) this._retainedFailedGenerationLocks.Add(modeLock);
-                    if (ownerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(ownerAuthHandle);
+                    lock (this._retainedFailedGenerationLocks)
+                    {
+                        if (wfLock is not null) this._retainedFailedGenerationLocks.Add(wfLock);
+                        if (slotLock is not null) this._retainedFailedGenerationLocks.Add(slotLock);
+                        if (modeLock is not null) this._retainedFailedGenerationLocks.Add(modeLock);
+                        if (ownerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(ownerAuthHandle);
+                    }
 
                     wfLock = null;
                     slotLock = null;
@@ -1360,12 +1405,18 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
             }
             catch (Exception ex)
             {
+                this._quarantineFailedDuringShutdown = true;
+                this._shutdownQuarantineException ??= ex;
+
                 // CRITICAL: Fail-closed durability! Never release locks if quarantine publication fails.
                 this._admissionBlockedReason = $"Durable quarantine publication failed for workflow '{request_.WorkflowId}': {ex.Message}";
-                if (session_.WorkflowLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.WorkflowLockHandle);
-                if (session_.SlotLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.SlotLockHandle);
-                if (session_.DomainModeLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.DomainModeLockHandle);
-                if (session_.OwnerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(session_.OwnerAuthHandle);
+                lock (this._retainedFailedGenerationLocks)
+                {
+                    if (session_.WorkflowLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.WorkflowLockHandle);
+                    if (session_.SlotLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.SlotLockHandle);
+                    if (session_.DomainModeLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.DomainModeLockHandle);
+                    if (session_.OwnerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(session_.OwnerAuthHandle);
+                }
 
                 session_.WorkflowLockHandle = null;
                 session_.SlotLockHandle = null;
@@ -1676,8 +1727,11 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
 
                 if (rollbackFailed || SimulateRollbackFailure)
                 {
-                    if (wfLock is not null) this._retainedFailedGenerationLocks.Add(wfLock);
-                    if (modeLock is not null) this._retainedFailedGenerationLocks.Add(modeLock);
+                    lock (this._retainedFailedGenerationLocks)
+                    {
+                        if (wfLock is not null) this._retainedFailedGenerationLocks.Add(wfLock);
+                        if (modeLock is not null) this._retainedFailedGenerationLocks.Add(modeLock);
+                    }
                     wfLock = null;
                     modeLock = null;
 
@@ -1840,6 +1894,8 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
 
                 try
                 {
+                    this.FaultInjectionBeforeQuarantineWrite?.Invoke();
+
                     WorkflowSchedulerLeaseManifest.WriteAtomic(
                         this._paths,
                         preservedManifest,
@@ -1852,13 +1908,19 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
                 }
                 catch (Exception ex)
                 {
+                    this._quarantineFailedDuringShutdown = true;
+                    this._shutdownQuarantineException ??= ex;
+
                     // CRITICAL: Fail-closed durability!
                     // Never release workflow, slot or domain-mode OS locks when durable quarantine publication fails.
                     this._admissionBlockedReason = $"Durable quarantine publication failed upon worker disconnect for workflow '{workflowId}': {ex.Message}";
-                    if (session_.WorkflowLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.WorkflowLockHandle);
-                    if (session_.SlotLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.SlotLockHandle);
-                    if (session_.DomainModeLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.DomainModeLockHandle);
-                    if (session_.OwnerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(session_.OwnerAuthHandle);
+                    lock (this._retainedFailedGenerationLocks)
+                    {
+                        if (session_.WorkflowLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.WorkflowLockHandle);
+                        if (session_.SlotLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.SlotLockHandle);
+                        if (session_.DomainModeLockHandle is not null) this._retainedFailedGenerationLocks.Add(session_.DomainModeLockHandle);
+                        if (session_.OwnerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(session_.OwnerAuthHandle);
+                    }
 
                     session_.WorkflowLockHandle = null;
                     session_.SlotLockHandle = null;
@@ -2196,282 +2258,279 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
 
     public void Dispose()
     {
-        if (this._isDisposed)
-        {
-            return;
-        }
-
-        this._isDisposed = true;
-        this._cts.Cancel();
-
-        try
-        {
-            this._currentWindowsServerStream?.Dispose();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            this._linuxServerSocket?.Dispose();
-        }
-        catch
-        {
-        }
-
-        // Safely finalize or durably quarantine live leases before releasing singleton authority
-        lock (this._sessions)
-        {
-            foreach (var kvp in this._activeLeaseSessions.ToList())
-            {
-                string workflowId = kvp.Key;
-                WorkflowBrokerSession session = kvp.Value;
-                if (session.ActiveLease is not null)
-                {
-                    try
-                    {
-                        bool isMaintenance = string.Equals(session.ActiveLease.DomainMode, "ExclusiveMaintenance", StringComparison.Ordinal);
-
-                        WorkflowSchedulerLeaseManifest preservedManifest;
-                        if (isMaintenance)
-                        {
-                            preservedManifest = new(
-                                workflowId,
-                                WorkflowSchedulerLeaseState.MaintenanceInProgress,
-                                session.ActiveLease.OwnerToken,
-                                slot_: null,
-                                domainMode_: "ExclusiveMaintenance",
-                                resourceClaims_: [],
-                                this._maxConcurrentWorkflows);
-                        }
-                        else
-                        {
-                            preservedManifest = new(
-                                workflowId,
-                                WorkflowSchedulerLeaseState.Quarantined,
-                                session.ActiveLease.OwnerToken,
-                                slot_: null,
-                                session.ActiveLease.DomainMode,
-                                session.ActiveLease.ResourceClaims.Select(c => new WorkflowResourceClaim(c.ResourceId, (WorkflowResourceAccessKind) c.AccessKind)).ToList(),
-                                this._maxConcurrentWorkflows);
-                        }
-
-                        WorkflowSchedulerLeaseManifest.WriteAtomic(
-                            this._paths,
-                            preservedManifest,
-                            this._maxConcurrentWorkflows,
-                            this._lifetimeDomainLockHandle);
-
-                        if (session.OwnerAuthHandle is not null)
-                        {
-                            session.OwnerAuthHandle.Dispose();
-                            session.OwnerAuthHandle = null;
-                        }
-                        else
-                        {
-                            WorkflowSchedulerOwnerAuthentication.RemoveOwnerAuthentication(
-                                this._paths,
-                                workflowId,
-                                expectedOwnerToken_: session.ActiveLease.OwnerToken,
-                                domainLockHandle_: this._lifetimeDomainLockHandle);
-                        }
-
-                        session.ReleaseLeaseLocks();
-                    }
-                    catch
-                    {
-                        if (session.WorkflowLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.WorkflowLockHandle);
-                        if (session.SlotLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.SlotLockHandle);
-                        if (session.DomainModeLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.DomainModeLockHandle);
-                        if (session.OwnerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(session.OwnerAuthHandle);
-
-                        session.WorkflowLockHandle = null;
-                        session.SlotLockHandle = null;
-                        session.DomainModeLockHandle = null;
-                        session.OwnerAuthHandle = null;
-                    }
-                }
-            }
-            this._activeLeaseSessions.Clear();
-            this._occupiedSlots.Clear();
-
-            foreach (WorkflowBrokerSession session in this._sessions)
-            {
-                session.Dispose();
-            }
-            this._sessions.Clear();
-        }
-
-        if (OperatingSystem.IsLinux())
-        {
-            try
-            {
-                string socketPath = WorkflowBrokerIpcTransport.GetEndpointIdentifier(this._paths);
-                if (File.Exists(socketPath))
-                {
-                    File.Delete(socketPath);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        lock (this._retainedFailedGenerationLocks)
-        {
-            foreach (IDisposable lockHandle in this._retainedFailedGenerationLocks)
-            {
-                try
-                {
-                    lockHandle.Dispose();
-                }
-                catch
-                {
-                }
-            }
-            this._retainedFailedGenerationLocks.Clear();
-        }
-
-        this._linuxStorageRootHandle?.Dispose();
-        this._linuxStorageRootHandle = null;
-        this._windowsStorageRootHandle?.Dispose();
-        this._windowsStorageRootHandle = null;
-        this._lifetimeDomainLockHandle?.Dispose();
-        this._lifetimeDomainLockHandle = null;
-        this._cts.Dispose();
+        this.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (this._isDisposed)
+        if (Interlocked.CompareExchange(ref this._shuttingDown, 1, 0) != 0)
         {
+            await this._shutdownTcs.Task.ConfigureAwait(false);
             return;
         }
 
-        this._isDisposed = true;
-        this._cts.Cancel();
-
         try
         {
-            if (this._currentWindowsServerStream is not null)
+            this._cts.Cancel();
+
+            if (this.ControlledShutdownHook is not null)
             {
-                await this._currentWindowsServerStream.DisposeAsync().ConfigureAwait(false);
+                await this.ControlledShutdownHook().ConfigureAwait(false);
             }
-        }
-        catch
-        {
-        }
 
-        try
-        {
-            this._linuxServerSocket?.Dispose();
-        }
-        catch
-        {
-        }
-
-        // Safely finalize or durably quarantine live leases before releasing singleton authority
-        List<WorkflowBrokerSession> sessionsToDispose;
-        lock (this._sessions)
-        {
-            foreach (var kvp in this._activeLeaseSessions.ToList())
-            {
-                string workflowId = kvp.Key;
-                WorkflowBrokerSession session = kvp.Value;
-                if (session.ActiveLease is not null)
-                {
-                    try
-                    {
-                        bool isMaintenance = string.Equals(session.ActiveLease.DomainMode, "ExclusiveMaintenance", StringComparison.Ordinal);
-
-                        WorkflowSchedulerLeaseManifest preservedManifest;
-                        if (isMaintenance)
-                        {
-                            preservedManifest = new(
-                                workflowId,
-                                WorkflowSchedulerLeaseState.MaintenanceInProgress,
-                                session.ActiveLease.OwnerToken,
-                                slot_: null,
-                                domainMode_: "ExclusiveMaintenance",
-                                resourceClaims_: [],
-                                this._maxConcurrentWorkflows);
-                        }
-                        else
-                        {
-                            preservedManifest = new(
-                                workflowId,
-                                WorkflowSchedulerLeaseState.Quarantined,
-                                session.ActiveLease.OwnerToken,
-                                slot_: null,
-                                session.ActiveLease.DomainMode,
-                                session.ActiveLease.ResourceClaims.Select(c => new WorkflowResourceClaim(c.ResourceId, (WorkflowResourceAccessKind) c.AccessKind)).ToList(),
-                                this._maxConcurrentWorkflows);
-                        }
-
-                        WorkflowSchedulerLeaseManifest.WriteAtomic(
-                            this._paths,
-                            preservedManifest,
-                            this._maxConcurrentWorkflows,
-                            this._lifetimeDomainLockHandle);
-
-                        if (session.OwnerAuthHandle is not null)
-                        {
-                            session.OwnerAuthHandle.Dispose();
-                            session.OwnerAuthHandle = null;
-                        }
-                        else
-                        {
-                            WorkflowSchedulerOwnerAuthentication.RemoveOwnerAuthentication(
-                                this._paths,
-                                workflowId,
-                                expectedOwnerToken_: session.ActiveLease.OwnerToken,
-                                domainLockHandle_: this._lifetimeDomainLockHandle);
-                        }
-
-                        session.ReleaseLeaseLocks();
-                    }
-                    catch
-                    {
-                        if (session.WorkflowLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.WorkflowLockHandle);
-                        if (session.SlotLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.SlotLockHandle);
-                        if (session.DomainModeLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.DomainModeLockHandle);
-                        if (session.OwnerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(session.OwnerAuthHandle);
-
-                        session.WorkflowLockHandle = null;
-                        session.SlotLockHandle = null;
-                        session.DomainModeLockHandle = null;
-                        session.OwnerAuthHandle = null;
-                    }
-                }
-            }
-            this._activeLeaseSessions.Clear();
-            this._occupiedSlots.Clear();
-
-            sessionsToDispose = [.. this._sessions];
-            this._sessions.Clear();
-        }
-
-        foreach (WorkflowBrokerSession session in sessionsToDispose)
-        {
-            await session.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (OperatingSystem.IsLinux())
-        {
+            // 1. Close server listener streams immediately to stop accepting any new connections
             try
             {
-                string socketPath = WorkflowBrokerIpcTransport.GetEndpointIdentifier(this._paths);
-                if (File.Exists(socketPath))
+                if (this._currentWindowsServerStream is not null)
                 {
-                    File.Delete(socketPath);
+                    await this._currentWindowsServerStream.DisposeAsync().ConfigureAwait(false);
                 }
             }
             catch
             {
             }
-        }
 
+            try
+            {
+                this._linuxServerSocket?.Dispose();
+            }
+            catch
+            {
+            }
+
+            // 2. Await listener task exit
+            if (this._listenerTask is not null)
+            {
+                try
+                {
+                    await this._listenerTask.ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+            }
+
+            // 3. Dispose streams of all current sessions to unblock reads/writes immediately
+            List<WorkflowBrokerSession> sessionsList;
+            lock (this._sessions)
+            {
+                sessionsList = [.. this._sessions];
+            }
+
+            foreach (WorkflowBrokerSession s in sessionsList)
+            {
+                try
+                {
+                    s.Dispose();
+                }
+                catch
+                {
+                }
+            }
+
+            // 4. Await completion of all active session tasks without holding any locks or gates
+            Task[] tasksToAwait;
+            lock (this._activeSessionTasks)
+            {
+                this._activeSessionTasks.RemoveWhere(t => t.IsCompleted);
+                tasksToAwait = [.. this._activeSessionTasks];
+            }
+
+            if (tasksToAwait.Length > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(tasksToAwait).ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+            }
+
+            // 5. Under coordination gate, safely quarantine any residual live leases
+            await this._coordinationGate.WaitAsync().ConfigureAwait(false);
+            bool quarantineFailed = false;
+            Exception? firstQuarantineException = null;
+
+            try
+            {
+                lock (this._sessions)
+                {
+                    foreach (var kvp in this._activeLeaseSessions.ToList())
+                    {
+                        string workflowId = kvp.Key;
+                        WorkflowBrokerSession session = kvp.Value;
+                        if (session.ActiveLease is not null)
+                        {
+                            if (session.WorkflowLockHandle is null && session.SlotLockHandle is null && session.OwnerAuthHandle is null)
+                            {
+                                continue;
+                            }
+
+                            try
+                            {
+                                this.FaultInjectionBeforeQuarantineWrite?.Invoke();
+
+                                bool isMaintenance = string.Equals(session.ActiveLease.DomainMode, "ExclusiveMaintenance", StringComparison.Ordinal);
+
+                                WorkflowSchedulerLeaseManifest preservedManifest;
+                                if (isMaintenance)
+                                {
+                                    preservedManifest = new(
+                                        workflowId,
+                                        WorkflowSchedulerLeaseState.MaintenanceInProgress,
+                                        session.ActiveLease.OwnerToken,
+                                        slot_: null,
+                                        domainMode_: "ExclusiveMaintenance",
+                                        resourceClaims_: [],
+                                        this._maxConcurrentWorkflows);
+                                }
+                                else
+                                {
+                                    preservedManifest = new(
+                                        workflowId,
+                                        WorkflowSchedulerLeaseState.Quarantined,
+                                        session.ActiveLease.OwnerToken,
+                                        slot_: null,
+                                        session.ActiveLease.DomainMode,
+                                        session.ActiveLease.ResourceClaims.Select(c => new WorkflowResourceClaim(c.ResourceId, (WorkflowResourceAccessKind) c.AccessKind)).ToList(),
+                                        this._maxConcurrentWorkflows);
+                                }
+
+                                WorkflowSchedulerLeaseManifest.WriteAtomic(
+                                    this._paths,
+                                    preservedManifest,
+                                    this._maxConcurrentWorkflows,
+                                    this._lifetimeDomainLockHandle);
+
+                                if (session.OwnerAuthHandle is not null)
+                                {
+                                    session.OwnerAuthHandle.Dispose();
+                                    session.OwnerAuthHandle = null;
+                                }
+                                else
+                                {
+                                    WorkflowSchedulerOwnerAuthentication.RemoveOwnerAuthentication(
+                                        this._paths,
+                                        workflowId,
+                                        expectedOwnerToken_: session.ActiveLease.OwnerToken,
+                                        domainLockHandle_: this._lifetimeDomainLockHandle);
+                                }
+
+                                session.ReleaseLeaseLocks();
+                            }
+                            catch (Exception ex)
+                            {
+                                quarantineFailed = true;
+                                firstQuarantineException ??= ex;
+
+                                lock (this._retainedFailedGenerationLocks)
+                                {
+                                    if (session.WorkflowLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.WorkflowLockHandle);
+                                    if (session.SlotLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.SlotLockHandle);
+                                    if (session.DomainModeLockHandle is not null) this._retainedFailedGenerationLocks.Add(session.DomainModeLockHandle);
+                                    if (session.OwnerAuthHandle is not null) this._retainedFailedGenerationLocks.Add(session.OwnerAuthHandle);
+                                }
+
+                                session.WorkflowLockHandle = null;
+                                session.SlotLockHandle = null;
+                                session.DomainModeLockHandle = null;
+                                session.OwnerAuthHandle = null;
+                            }
+                        }
+                    }
+
+                    bool hasPriorRetainedLocks = false;
+                    lock (this._retainedFailedGenerationLocks)
+                    {
+                        hasPriorRetainedLocks = this._retainedFailedGenerationLocks.Count > 0;
+                    }
+
+                    if (!quarantineFailed && !hasPriorRetainedLocks && !this._quarantineFailedDuringShutdown)
+                    {
+                        this._activeLeaseSessions.Clear();
+                        this._occupiedSlots.Clear();
+
+                        foreach (WorkflowBrokerSession session in this._sessions)
+                        {
+                            session.Dispose();
+                        }
+                        this._sessions.Clear();
+                    }
+                }
+            }
+            finally
+            {
+                this._coordinationGate.Release();
+            }
+
+            if (OperatingSystem.IsLinux())
+            {
+                try
+                {
+                    string socketPath = WorkflowBrokerIpcTransport.GetEndpointIdentifier(this._paths);
+                    if (File.Exists(socketPath))
+                    {
+                        File.Delete(socketPath);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            bool hasRetainedFailureLocks = false;
+            lock (this._retainedFailedGenerationLocks)
+            {
+                hasRetainedFailureLocks = this._retainedFailedGenerationLocks.Count > 0;
+            }
+
+            if (this._quarantineFailedDuringShutdown || quarantineFailed || hasRetainedFailureLocks)
+            {
+                string failureReason = this._shutdownQuarantineException?.Message
+                    ?? firstQuarantineException?.Message
+                    ?? this._admissionBlockedReason
+                    ?? "Unresolved critical failure: retained failure locks present";
+
+                throw new InvalidOperationException(
+                    $"Broker shutdown failed: could not safely quarantine active leases ({failureReason}). Execution authority retained fail-closed.",
+                    this._shutdownQuarantineException ?? firstQuarantineException);
+            }
+
+            lock (this._retainedFailedGenerationLocks)
+            {
+                foreach (IDisposable lockHandle in this._retainedFailedGenerationLocks)
+                {
+                    try
+                    {
+                        lockHandle.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+                this._retainedFailedGenerationLocks.Clear();
+            }
+
+            this._linuxStorageRootHandle?.Dispose();
+            this._linuxStorageRootHandle = null;
+            this._windowsStorageRootHandle?.Dispose();
+            this._windowsStorageRootHandle = null;
+            this._lifetimeDomainLockHandle?.Dispose();
+            this._lifetimeDomainLockHandle = null;
+            this._cts.Dispose();
+
+            this._shutdownTcs.TrySetResult(null);
+        }
+        catch (Exception ex)
+        {
+            this._shutdownTcs.TrySetException(ex);
+            throw;
+        }
+    }
+
+    internal void ForceReleaseRetainedLocksForTesting()
+    {
         lock (this._retainedFailedGenerationLocks)
         {
             foreach (IDisposable lockHandle in this._retainedFailedGenerationLocks)
@@ -2493,6 +2552,12 @@ internal sealed class WorkflowCoordinationBroker : IAsyncDisposable, IDisposable
         this._windowsStorageRootHandle = null;
         this._lifetimeDomainLockHandle?.Dispose();
         this._lifetimeDomainLockHandle = null;
-        this._cts.Dispose();
+        try
+        {
+            this._cts.Dispose();
+        }
+        catch
+        {
+        }
     }
 }

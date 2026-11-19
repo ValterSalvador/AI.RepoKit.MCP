@@ -35,6 +35,8 @@ public sealed class WorkflowBrokerTests : IDisposable
         SecurityIdentifier systemSid = new(WellKnownSidType.LocalSystemSid, null);
         SecurityIdentifier adminSid = new(WellKnownSidType.BuiltinAdministratorsSid, null);
 
+        ds.SetOwner(currentUser);
+
         ds.AddAccessRule(new FileSystemAccessRule(
             currentUser,
             FileSystemRights.FullControl,
@@ -68,6 +70,8 @@ public sealed class WorkflowBrokerTests : IDisposable
         SecurityIdentifier systemSid = new(WellKnownSidType.LocalSystemSid, null);
         SecurityIdentifier adminSid = new(WellKnownSidType.BuiltinAdministratorsSid, null);
 
+        ds.SetOwner(currentUser);
+
         ds.AddAccessRule(new FileSystemAccessRule(
             currentUser,
             FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize,
@@ -100,6 +104,8 @@ public sealed class WorkflowBrokerTests : IDisposable
             ?? throw new InvalidOperationException("Current user SID unavailable.");
         SecurityIdentifier systemSid = new(WellKnownSidType.LocalSystemSid, null);
         SecurityIdentifier adminSid = new(WellKnownSidType.BuiltinAdministratorsSid, null);
+
+        ds.SetOwner(currentUser);
 
         ds.AddAccessRule(new FileSystemAccessRule(
             currentUser,
@@ -165,6 +171,8 @@ public sealed class WorkflowBrokerTests : IDisposable
             ?? throw new InvalidOperationException("Current user SID unavailable.");
         SecurityIdentifier systemSid = new(WellKnownSidType.LocalSystemSid, null);
         SecurityIdentifier adminSid = new(WellKnownSidType.BuiltinAdministratorsSid, null);
+
+        ds.SetOwner(currentUser);
 
         ds.AddAccessRule(new FileSystemAccessRule(
             groupSid,
@@ -645,42 +653,59 @@ public sealed class WorkflowBrokerTests : IDisposable
         WorkflowSchedulerPaths paths = new(root);
         WorkflowSchedulerDomainMetadata.InitializeOrValidate(paths, new WorkflowSchedulerPolicy(4, allowUnrestrictedExecution_: true));
 
-        await using WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
         await broker.StartAsync();
 
-        WorkflowResourceClaim[] claims = [new("fs:/repo/fault.txt", WorkflowResourceAccessKind.ExclusiveWrite)];
-        WorkflowBrokerClient client1 = await WorkflowBrokerClient.ConnectAsync(paths);
-        WorkflowBrokerLeaseHandle lease1 = await client1.AcquireLeaseAsync("wf-fault", claims, "Normal");
-
-        string leasePath = paths.GetActiveLeasePath("wf-fault");
-        Assert.True(File.Exists(leasePath));
-
-        // Inject fault: lock the active lease file exclusively with FileShare.None so File.Move fails
-        using (FileStream lockStream = new(leasePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        try
         {
-            // Now abruptly kill client connection
-            client1.Dispose();
+            WorkflowResourceClaim[] claims = [new("fs:/repo/fault.txt", WorkflowResourceAccessKind.ExclusiveWrite)];
+            WorkflowBrokerClient client1 = await WorkflowBrokerClient.ConnectAsync(paths);
+            WorkflowBrokerLeaseHandle lease1 = await client1.AcquireLeaseAsync("wf-fault", claims, "Normal");
 
-            // Wait for session termination loop to attempt quarantine and hit IOException
-            await Task.Delay(350);
+            string leasePath = paths.GetActiveLeasePath("wf-fault");
+            Assert.True(File.Exists(leasePath));
 
-            // Verify with real OS lock probes that the broker retained the OS locks fail-closed!
-            using WorkflowSchedulerLockHandle? wfLockProbe =
-                WorkflowSchedulerLockPrimitives.TryAcquireExclusive(paths.GetWorkflowLockPath("wf-fault"));
-            Assert.Null(wfLockProbe); // Lock MUST be retained by the broker!
+            // Inject fault: lock the active lease file exclusively with FileShare.None so File.Move fails
+            using (FileStream lockStream = new(leasePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                // Now abruptly kill client connection
+                client1.Dispose();
 
-            using WorkflowSchedulerLockHandle? slotLockProbe =
-                WorkflowSchedulerLockPrimitives.TryAcquireExclusive(paths.GetSlotLockPath(1, 4));
-            Assert.Null(slotLockProbe); // Slot lock MUST be retained by the broker!
+                // Wait for session termination loop to attempt quarantine and hit IOException
+                await Task.Delay(350);
 
-            // Verify that subsequent admissions are blocked fail-closed!
-            await using WorkflowBrokerClient client2 = await WorkflowBrokerClient.ConnectAsync(paths);
-            WorkflowResourceClaim[] claims2 = [new("fs:/repo/other.txt", WorkflowResourceAccessKind.SharedRead)];
+                // Verify with real OS lock probes that the broker retained the OS locks fail-closed!
+                using WorkflowSchedulerLockHandle? wfLockProbe =
+                    WorkflowSchedulerLockPrimitives.TryAcquireExclusive(paths.GetWorkflowLockPath("wf-fault"));
+                Assert.Null(wfLockProbe); // Lock MUST be retained by the broker!
 
-            WorkflowBrokerException ex = await Assert.ThrowsAsync<WorkflowBrokerException>(
-                () => client2.AcquireLeaseAsync("wf-blocked", claims2, "Normal"));
-            Assert.Equal(WorkflowBrokerProtocol.ErrorCodeConflict, ex.ErrorCode);
-            Assert.Contains("blocked", ex.Message, StringComparison.OrdinalIgnoreCase);
+                using WorkflowSchedulerLockHandle? slotLockProbe =
+                    WorkflowSchedulerLockPrimitives.TryAcquireExclusive(paths.GetSlotLockPath(1, 4));
+                Assert.Null(slotLockProbe); // Slot lock MUST be retained by the broker!
+
+                // Verify that subsequent admissions are blocked fail-closed!
+                await using WorkflowBrokerClient client2 = await WorkflowBrokerClient.ConnectAsync(paths);
+                WorkflowResourceClaim[] claims2 = [new("fs:/repo/other.txt", WorkflowResourceAccessKind.SharedRead)];
+
+                WorkflowBrokerException ex = await Assert.ThrowsAsync<WorkflowBrokerException>(
+                    () => client2.AcquireLeaseAsync("wf-blocked", claims2, "Normal"));
+                Assert.Equal(WorkflowBrokerProtocol.ErrorCodeConflict, ex.ErrorCode);
+                Assert.Contains("blocked", ex.Message, StringComparison.OrdinalIgnoreCase);
+            }
+
+            // Verify shutdown fails closed, retains domain lock, and fences subsequent broker
+            InvalidOperationException shutdownEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker.DisposeAsync());
+            Assert.Contains("Broker shutdown failed", shutdownEx.Message, StringComparison.OrdinalIgnoreCase);
+
+            WorkflowCoordinationBroker broker2 = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+            InvalidOperationException broker2StartEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker2.StartAsync());
+            Assert.Contains("domain lock", broker2StartEx.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            broker.ForceReleaseRetainedLocksForTesting();
         }
     }
 
@@ -1957,7 +1982,7 @@ public sealed class WorkflowBrokerTests : IDisposable
         WorkflowSchedulerPaths paths = new(root);
         WorkflowSchedulerDomainMetadata.InitializeOrValidate(paths, new WorkflowSchedulerPolicy(4, allowUnrestrictedExecution_: true));
 
-        await using WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
         await broker.StartAsync();
 
         try
@@ -2001,11 +2026,22 @@ public sealed class WorkflowBrokerTests : IDisposable
                 () => client.AcquireMaintenanceLeaseAsync("wf-subsequent-fail"));
             Assert.Equal(WorkflowBrokerProtocol.ErrorCodeConflict, maintBlockedEx.ErrorCode);
             Assert.Contains("admission is blocked", maintBlockedEx.Message, StringComparison.OrdinalIgnoreCase);
+
+            // 7. Verify shutdown fails closed, retains domain lock, and fences subsequent broker
+            InvalidOperationException shutdownEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker.DisposeAsync());
+            Assert.Contains("Broker shutdown failed", shutdownEx.Message, StringComparison.OrdinalIgnoreCase);
+
+            WorkflowCoordinationBroker broker2 = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+            InvalidOperationException broker2StartEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker2.StartAsync());
+            Assert.Contains("domain lock", broker2StartEx.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
             WorkflowCoordinationBroker.SimulateDurabilityFailure = false;
             WorkflowCoordinationBroker.SimulateRollbackFailure = false;
+            broker.ForceReleaseRetainedLocksForTesting();
         }
     }
 
@@ -2633,6 +2669,265 @@ public sealed class WorkflowBrokerTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Broker_Shutdown_ConcurrentClientDisconnectAndBrokerDispose_SafelyQuarantinesAndCleansUpDeterministically()
+    {
+        string root = this.CreateTempStorageRoot();
+        WorkflowSchedulerPaths paths = new(root);
+        WorkflowSchedulerDomainMetadata.InitializeOrValidate(paths, new WorkflowSchedulerPolicy(4, allowUnrestrictedExecution_: true));
+
+        string leasePath = paths.GetActiveLeasePath("wf-concurrent-shutdown");
+        string authPath = WorkflowSchedulerOwnerAuthentication.GetAuthFilePath(paths, "wf-concurrent-shutdown");
+
+        WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        await broker.StartAsync();
+
+        WorkflowBrokerClient client = await WorkflowBrokerClient.ConnectAsync(paths);
+        WorkflowResourceClaim[] claims = [new("fs:/repo/concurrent-shutdown-test", WorkflowResourceAccessKind.ExclusiveWrite)];
+        WorkflowBrokerLeaseHandle lease = await client.AcquireLeaseAsync("wf-concurrent-shutdown", claims, "Normal");
+
+        Assert.Equal(1, lease.Slot);
+        Assert.True(File.Exists(leasePath));
+        Assert.True(File.Exists(authPath));
+
+        // Use controlled synchronization to guarantee deterministic critical-moment overlap:
+        TaskCompletionSource<bool> brokerShutdownStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> clientDisposeAllowed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        broker.ControlledShutdownHook = async () =>
+        {
+            brokerShutdownStarted.TrySetResult(true);
+            await clientDisposeAllowed.Task.ConfigureAwait(false);
+        };
+
+        Task brokerDisposeTask = Task.Run(async () => await broker.DisposeAsync());
+        await brokerShutdownStarted.Task;
+
+        // At this exact moment, broker has cancelled listening and is in shutdown. Concurrently dispose client:
+        Task clientDisposeTask = Task.Run(async () => await client.DisposeAsync());
+        clientDisposeAllowed.TrySetResult(true);
+
+        await Task.WhenAll(clientDisposeTask, brokerDisposeTask);
+
+        // 1. Verify: Live lease was safely transitioned to Quarantined BEFORE domain lock was released
+        Assert.True(File.Exists(leasePath), "Manifest should remain on disk as quarantined.");
+        WorkflowSchedulerLeaseManifest quarantined = WorkflowSchedulerLeaseManifest.ReadAndValidate(leasePath, paths, 4);
+        Assert.Equal(WorkflowSchedulerLeaseState.Quarantined, quarantined.State);
+        Assert.Null(quarantined.Slot);
+        Assert.Equal("Normal", quarantined.DomainMode);
+
+        // 2. owner-auth.json was cleaned up deterministically
+        Assert.False(File.Exists(authPath), "owner-auth.json should have been cleaned up during quarantine transition.");
+
+        // 3. Subsequent broker must be able to start cleanly, acquire singleton domain authority, and admit new lease
+        await using (WorkflowCoordinationBroker broker2 = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true))
+        {
+            await broker2.StartAsync();
+
+            await using WorkflowBrokerClient client2 = await WorkflowBrokerClient.ConnectAsync(paths);
+            WorkflowResourceClaim[] newClaims = [new("fs:/repo/after-concurrent-shutdown", WorkflowResourceAccessKind.ExclusiveWrite)];
+            await using WorkflowBrokerLeaseHandle newLease = await client2.AcquireLeaseAsync("wf-after-concurrent-shutdown", newClaims, "Normal");
+
+            Assert.Equal(1, newLease.Slot);
+        }
+    }
+
+    [Fact]
+    public async Task Broker_Dispose_ConcurrentCalls_AwaitsSameRealShutdownDeterministically()
+    {
+        string root = this.CreateTempStorageRoot();
+        WorkflowSchedulerPaths paths = new(root);
+        WorkflowSchedulerDomainMetadata.InitializeOrValidate(paths, new WorkflowSchedulerPolicy(4, allowUnrestrictedExecution_: true));
+
+        WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        await broker.StartAsync();
+
+        await using WorkflowBrokerClient client = await WorkflowBrokerClient.ConnectAsync(paths);
+        WorkflowResourceClaim[] claims = [new("fs:/repo/concurrent-dispose-test", WorkflowResourceAccessKind.ExclusiveWrite)];
+        await using WorkflowBrokerLeaseHandle lease = await client.AcquireLeaseAsync("wf-concurrent-dispose", claims, "Normal");
+
+        TaskCompletionSource<bool> primaryStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> allowPrimaryToFinish = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        broker.ControlledShutdownHook = async () =>
+        {
+            primaryStarted.TrySetResult(true);
+            await allowPrimaryToFinish.Task.ConfigureAwait(false);
+        };
+
+        // Thread 1 initiates DisposeAsync
+        Task disposeTask1 = Task.Run(async () => await broker.DisposeAsync());
+        await primaryStarted.Task;
+
+        // Thread 2 calls DisposeAsync concurrently
+        Task disposeTask2 = Task.Run(async () => await broker.DisposeAsync());
+        // Thread 3 calls synchronous Dispose() concurrently
+        Task disposeTask3 = Task.Run(() => broker.Dispose());
+
+        // Verify that neither Thread 2 nor Thread 3 terminates before Thread 1 completes finalization
+        await Task.Yield();
+        Assert.False(disposeTask1.IsCompleted, "Primary dispose should still be running.");
+        Assert.False(disposeTask2.IsCompleted, "Concurrent disposeAsync must not complete early.");
+        Assert.False(disposeTask3.IsCompleted, "Concurrent synchronous dispose must not complete early.");
+
+        // Release the hook to allow primary disposal to complete
+        allowPrimaryToFinish.TrySetResult(true);
+
+        await Task.WhenAll(disposeTask1, disposeTask2, disposeTask3);
+
+        Assert.True(disposeTask1.IsCompletedSuccessfully);
+        Assert.True(disposeTask2.IsCompletedSuccessfully);
+        Assert.True(disposeTask3.IsCompletedSuccessfully);
+
+        // Verification: lease was quarantined and domain lock cleanly released
+        string leasePath = paths.GetActiveLeasePath("wf-concurrent-dispose");
+        WorkflowSchedulerLeaseManifest quarantined = WorkflowSchedulerLeaseManifest.ReadAndValidate(leasePath, paths, 4);
+        Assert.Equal(WorkflowSchedulerLeaseState.Quarantined, quarantined.State);
+
+        // And a subsequent broker can cleanly start
+        await using WorkflowCoordinationBroker broker2 = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        await broker2.StartAsync();
+    }
+
+    [Fact]
+    public async Task Broker_RapidConnectDisconnect_DoesNotAccumulateSessionTasks()
+    {
+        string root = this.CreateTempStorageRoot();
+        WorkflowSchedulerPaths paths = new(root);
+        WorkflowSchedulerDomainMetadata.InitializeOrValidate(paths, new WorkflowSchedulerPolicy(4, allowUnrestrictedExecution_: true));
+
+        await using (WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true))
+        {
+            await broker.StartAsync();
+
+            for (int i = 0; i < 30; i++)
+            {
+                WorkflowBrokerClient client = await WorkflowBrokerClient.ConnectAsync(paths);
+                await client.PingAsync();
+                await client.DisposeAsync();
+            }
+
+            for (int attempt = 0; attempt < 50 && broker.ActiveSessionTaskCount > 0; attempt++)
+            {
+                await Task.Delay(10);
+            }
+
+            Assert.Equal(0, broker.ActiveSessionTaskCount);
+        }
+    }
+
+    [Fact]
+    public async Task Broker_Shutdown_InjectedQuarantineFailure_FailsClosedRetainsDomainLockAndFencesNextBroker()
+    {
+        string root = this.CreateTempStorageRoot();
+        WorkflowSchedulerPaths paths = new(root);
+        WorkflowSchedulerDomainMetadata.InitializeOrValidate(paths, new WorkflowSchedulerPolicy(4, allowUnrestrictedExecution_: true));
+
+        string leasePath = paths.GetActiveLeasePath("wf-injected-failure");
+        string authPath = WorkflowSchedulerOwnerAuthentication.GetAuthFilePath(paths, "wf-injected-failure");
+
+        WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        await broker.StartAsync();
+
+        WorkflowBrokerClient client = await WorkflowBrokerClient.ConnectAsync(paths);
+        WorkflowResourceClaim[] claims = [new("fs:/repo/injected-failure-test", WorkflowResourceAccessKind.ExclusiveWrite)];
+        WorkflowBrokerLeaseHandle lease = await client.AcquireLeaseAsync("wf-injected-failure", claims, "Normal");
+
+        Assert.Equal(1, lease.Slot);
+        Assert.True(File.Exists(leasePath));
+        Assert.True(File.Exists(authPath));
+
+        broker.FaultInjectionBeforeQuarantineWrite = () =>
+            throw new IOException("Simulated disk error during quarantine manifest publication");
+
+        try
+        {
+            InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker.DisposeAsync());
+
+            Assert.Contains("Broker shutdown failed: could not safely quarantine active leases", ex.Message);
+
+            // 1. owner-auth.json MUST NOT be deleted because durable quarantine failed!
+            Assert.True(File.Exists(authPath), "owner-auth.json must NOT be deleted when quarantine write fails!");
+
+            // 2. Next broker MUST be fenced out because broker retained _lifetimeDomainLockHandle!
+            WorkflowCoordinationBroker broker2 = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+            InvalidOperationException broker2StartEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker2.StartAsync());
+
+            Assert.Contains("domain lock", broker2StartEx.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            broker.ForceReleaseRetainedLocksForTesting();
+            client.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Broker_Shutdown_PreShutdownQuarantineFailure_FailsClosedRetainsDomainLockAndFencesNextBroker()
+    {
+        string root = this.CreateTempStorageRoot();
+        WorkflowSchedulerPaths paths = new(root);
+        WorkflowSchedulerDomainMetadata.InitializeOrValidate(paths, new WorkflowSchedulerPolicy(4, allowUnrestrictedExecution_: true));
+
+        string leasePath = paths.GetActiveLeasePath("wf-preshutdown-fail");
+        string authPath = WorkflowSchedulerOwnerAuthentication.GetAuthFilePath(paths, "wf-preshutdown-fail");
+
+        WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        await broker.StartAsync();
+
+        WorkflowBrokerClient client = await WorkflowBrokerClient.ConnectAsync(paths);
+        WorkflowResourceClaim[] claims = [new("fs:/repo/preshutdown-fail-test", WorkflowResourceAccessKind.ExclusiveWrite)];
+        WorkflowBrokerLeaseHandle lease = await client.AcquireLeaseAsync("wf-preshutdown-fail", claims, "Normal");
+
+        Assert.Equal(1, lease.Slot);
+        Assert.True(File.Exists(leasePath));
+        Assert.True(File.Exists(authPath));
+
+        // Inject fault before quarantine write occurs
+        broker.FaultInjectionBeforeQuarantineWrite = () =>
+            throw new IOException("Simulated disk error during pre-shutdown quarantine publication");
+
+        try
+        {
+            // Client disconnects abruptly while broker is still active (prior to DisposeAsync)
+            client.Dispose();
+
+            // Await real completion of session task until active session tasks reach 0
+            for (int i = 0; i < 50 && broker.ActiveSessionTaskCount > 0; i++)
+            {
+                await Task.Delay(20);
+            }
+
+            // Verify admission is blocked, owner-auth is preserved, and durable failure remains unresolved
+            Assert.NotNull(broker.AdmissionBlockedReason);
+            Assert.Contains("quarantine publication failed", broker.AdmissionBlockedReason, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(authPath), "owner-auth.json must be preserved after pre-shutdown quarantine failure.");
+
+            // Attempt DisposeAsync: must fail closed and NOT report apparent success
+            InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker.DisposeAsync());
+
+            Assert.Contains("Broker shutdown failed", ex.Message);
+
+            // Verify owner-auth.json remains preserved
+            Assert.True(File.Exists(authPath), "owner-auth.json must remain preserved after DisposeAsync failure.");
+
+            // Verify second broker cannot acquire authority (fenced out by retained domain lock)
+            WorkflowCoordinationBroker broker2 = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+            InvalidOperationException broker2StartEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker2.StartAsync());
+
+            Assert.Contains("domain lock", broker2StartEx.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            broker.FaultInjectionBeforeQuarantineWrite = null;
+            broker.ForceReleaseRetainedLocksForTesting();
+        }
+    }
+
     // =========================================================================
     // 25. P09 Audit: Synthetic Journal Lacking ExecutionCompleted Fails Reconciliation
     // =========================================================================
@@ -2818,7 +3113,7 @@ public sealed class WorkflowBrokerTests : IDisposable
             maxConcurrentWorkflows_: 4);
         WorkflowSchedulerLeaseManifest.WriteAtomic(paths, quarantined, 4);
 
-        await using WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+        WorkflowCoordinationBroker broker = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
         await broker.StartAsync();
 
         try
@@ -2845,11 +3140,22 @@ public sealed class WorkflowBrokerTests : IDisposable
                 blockedEx.ErrorCode == WorkflowBrokerProtocol.ErrorCodeInternalError ||
                 blockedEx.ErrorCode == WorkflowBrokerProtocol.ErrorCodeConflict);
             Assert.Contains("admission is blocked", blockedEx.Message, StringComparison.OrdinalIgnoreCase);
+
+            // Verify shutdown fails closed, retains domain lock, and fences subsequent broker
+            InvalidOperationException shutdownEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker.DisposeAsync());
+            Assert.Contains("Broker shutdown failed", shutdownEx.Message, StringComparison.OrdinalIgnoreCase);
+
+            WorkflowCoordinationBroker broker2 = new(paths, maxConcurrentWorkflows_: 4, allowUnrestrictedExecution_: true);
+            InvalidOperationException broker2StartEx = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await broker2.StartAsync());
+            Assert.Contains("domain lock", broker2StartEx.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
             WorkflowCoordinationBroker.SimulateDurabilityFailure = false;
             WorkflowCoordinationBroker.SimulateRollbackFailure = false;
+            broker.ForceReleaseRetainedLocksForTesting();
         }
     }
 
@@ -4129,6 +4435,13 @@ public sealed class WorkflowBrokerTests : IDisposable
         }
 
         string root = this.CreateTempStorageRoot(protectWindowsAcl: true);
+
+        // Verify the effective owner SID explicitly assigned to the test directory
+        DirectoryInfo di = new(root);
+        DirectorySecurity sec = di.GetAccessControl(AccessControlSections.Owner);
+        SecurityIdentifier? actualOwner = sec.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        Assert.NotNull(actualOwner);
+        Assert.Equal(WindowsIdentity.GetCurrent().User, actualOwner);
 
         // Validate directly that an untrusted owner SID fails closed
         Assert.False(WorkflowBrokerIpcTransport.ValidateWindowsStorageRootHierarchy(
