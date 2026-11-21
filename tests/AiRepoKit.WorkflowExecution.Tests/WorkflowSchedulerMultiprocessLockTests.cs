@@ -19,37 +19,277 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
         throw new InvalidOperationException("Could not locate repository root.");
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentBag<string> _tempScripts =
-        new();
+    private static readonly object _helperBuildSync = new();
+    private static string? _cachedHelperDll;
+    private static string? _helperDirectory;
 
     static WorkflowSchedulerMultiprocessLockTests()
     {
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => CleanupHelperScripts();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => CleanupHelperDirectory();
     }
 
-    private static string CreateUniqueHelperScript()
+    private static void CleanupHelperDirectory()
     {
-        string scriptPath = Path.Combine(
-            Path.GetTempPath(),
-            "RepokitLockHelper_" + Guid.NewGuid().ToString("N") + ".cs");
-        File.WriteAllText(scriptPath, TestLockProcessSource.SourceCode);
-        _tempScripts.Add(scriptPath);
-        return scriptPath;
-    }
-
-    private static void CleanupHelperScripts()
-    {
-        while (_tempScripts.TryTake(out string? path))
+        string? dir = _helperDirectory;
+        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
         {
             try
             {
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                }
+                Directory.Delete(dir, recursive: true);
             }
             catch
             {
+            }
+        }
+    }
+
+    private static string EnsureHelperCompiled()
+    {
+        if (_cachedHelperDll != null && File.Exists(_cachedHelperDll))
+        {
+            return _cachedHelperDll;
+        }
+
+        lock (_helperBuildSync)
+        {
+            if (_cachedHelperDll != null && File.Exists(_cachedHelperDll))
+            {
+                return _cachedHelperDll;
+            }
+
+            string source = TestLockProcessSource.SourceCode;
+            string runId = $"{Environment.ProcessId}_{Guid.NewGuid():N}";
+            string helperDir = Path.Combine(Path.GetTempPath(), "repokit-lockhelper-" + runId);
+            string outDir = Path.Combine(helperDir, "out");
+            string helperDll = Path.Combine(outDir, "Helper.dll");
+
+            try
+            {
+                if (OperatingSystem.IsLinux())
+                {
+                    Directory.CreateDirectory(
+                        helperDir,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    _helperDirectory = helperDir;
+
+                    File.SetUnixFileMode(
+                        helperDir,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+                    UnixFileMode mode = File.GetUnixFileMode(helperDir);
+                    UnixFileMode groupOtherAccess =
+                        UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                        UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+
+                    if ((mode & groupOtherAccess) != 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"Failed to secure multiprocess lock helper directory '{helperDir}'. Effective permissions ({mode}) grant group or others access.");
+                    }
+
+                    Directory.CreateDirectory(
+                        outDir,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    File.SetUnixFileMode(
+                        outDir,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+                    UnixFileMode outMode = File.GetUnixFileMode(outDir);
+                    if ((outMode & groupOtherAccess) != 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"Failed to secure multiprocess lock helper output directory '{outDir}'. Effective permissions ({outMode}) grant group or others access.");
+                    }
+                }
+                else
+                {
+                    Directory.CreateDirectory(helperDir);
+                    _helperDirectory = helperDir;
+                    Directory.CreateDirectory(outDir);
+                }
+
+                string projPath = Path.Combine(helperDir, "Helper.csproj");
+                string projContent = """
+                    <Project Sdk="Microsoft.NET.Sdk">
+                      <PropertyGroup>
+                        <OutputType>Exe</OutputType>
+                        <TargetFramework>net10.0</TargetFramework>
+                        <ImplicitUsings>enable</ImplicitUsings>
+                        <Nullable>enable</Nullable>
+                        <NuGetAudit>false</NuGetAudit>
+                      </PropertyGroup>
+                    </Project>
+                    """;
+                File.WriteAllText(projPath, projContent);
+
+                string programPath = Path.Combine(helperDir, "Program.cs");
+                File.WriteAllText(programPath, source);
+
+                ProcessStartInfo psi = new()
+                {
+                    FileName = "dotnet",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                psi.ArgumentList.Add("build");
+                psi.ArgumentList.Add(projPath);
+                psi.ArgumentList.Add("-c");
+                psi.ArgumentList.Add("Release");
+                psi.ArgumentList.Add("-o");
+                psi.ArgumentList.Add(outDir);
+                psi.ArgumentList.Add("/p:NuGetAudit=false");
+                psi.ArgumentList.Add("/nologo");
+                psi.ArgumentList.Add("-v");
+                psi.ArgumentList.Add("q");
+                psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+                psi.Environment["DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER"] = "1";
+
+                using Process buildProc = Process.Start(psi)
+                    ?? throw new InvalidOperationException("Failed to spawn dotnet build for lock helper.");
+
+                System.Text.StringBuilder stdoutCapture = new();
+                System.Text.StringBuilder stderrCapture = new();
+
+                using ManualResetEventSlim stdoutDone = new(false);
+                using ManualResetEventSlim stderrDone = new(false);
+
+                buildProc.OutputDataReceived += (_, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        lock (stdoutCapture)
+                        {
+                            stdoutCapture.AppendLine(e.Data);
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            stdoutDone.Set();
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                        }
+                    }
+                };
+
+                buildProc.ErrorDataReceived += (_, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        lock (stderrCapture)
+                        {
+                            stderrCapture.AppendLine(e.Data);
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            stderrDone.Set();
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                        }
+                    }
+                };
+
+                buildProc.BeginOutputReadLine();
+                buildProc.BeginErrorReadLine();
+
+                TimeSpan buildTimeout = TimeSpan.FromSeconds(60);
+                bool completed = buildProc.WaitForExit((int)buildTimeout.TotalMilliseconds);
+
+                if (!completed)
+                {
+                    try
+                    {
+                        if (!buildProc.HasExited)
+                        {
+                            buildProc.Kill(entireProcessTree: true);
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+
+                    bool exitedAfterKill = false;
+                    try
+                    {
+                        exitedAfterKill = buildProc.WaitForExit(5000);
+                    }
+                    catch
+                    {
+                    }
+
+                    string outTimedOut;
+                    string errTimedOut;
+                    lock (stdoutCapture) { outTimedOut = stdoutCapture.ToString(); }
+                    lock (stderrCapture) { errTimedOut = stderrCapture.ToString(); }
+                    throw new InvalidOperationException(
+                        $"Multiprocess lock helper build timed out after {buildTimeout.TotalSeconds}s (exitedAfterKill={exitedAfterKill}). Stdout: '{outTimedOut}', Stderr: '{errTimedOut}'");
+                }
+
+                // Ensure asynchronous stream readers have finished draining within a bounded timeout of 10 seconds total
+                TimeSpan drainTimeout = TimeSpan.FromSeconds(10);
+                Stopwatch drainSw = Stopwatch.StartNew();
+                bool stdoutDrained = stdoutDone.Wait(drainTimeout);
+                TimeSpan remainingDrain = drainTimeout - drainSw.Elapsed;
+                bool stderrDrained = remainingDrain > TimeSpan.Zero && stderrDone.Wait(remainingDrain);
+                bool drained = stdoutDrained && stderrDrained;
+
+                if (!drained)
+                {
+                    try
+                    {
+                        if (!buildProc.HasExited)
+                        {
+                            buildProc.Kill(entireProcessTree: true);
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+
+                    bool exitedAfterDrainKill = false;
+                    try
+                    {
+                        exitedAfterDrainKill = buildProc.WaitForExit(5000);
+                    }
+                    catch
+                    {
+                    }
+
+                    string outDrain;
+                    string errDrain;
+                    lock (stdoutCapture) { outDrain = stdoutCapture.ToString(); }
+                    lock (stderrCapture) { errDrain = stderrCapture.ToString(); }
+                    throw new InvalidOperationException(
+                        $"Multiprocess lock helper output drain timed out after {drainTimeout.TotalSeconds}s (stdoutDrained={stdoutDrained}, stderrDrained={stderrDrained}, exitedAfterDrainKill={exitedAfterDrainKill}). Stdout: '{outDrain}', Stderr: '{errDrain}'");
+                }
+
+                string stdout;
+                string stderr;
+                lock (stdoutCapture) { stdout = stdoutCapture.ToString(); }
+                lock (stderrCapture) { stderr = stderrCapture.ToString(); }
+
+                if (buildProc.ExitCode != 0 || !File.Exists(helperDll))
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to build multiprocess lock helper (exitCode={buildProc.ExitCode}). Stdout: '{stdout}', Stderr: '{stderr}'");
+                }
+
+                _cachedHelperDll = helperDll;
+                return helperDll;
+            }
+            catch
+            {
+                CleanupHelperDirectory();
+                _helperDirectory = null;
+                throw;
             }
         }
     }
@@ -65,21 +305,44 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
 
     private static Process StartHelperProcess(string command, string path, params string[] extraArgs)
     {
-        string scriptPath = CreateUniqueHelperScript();
-        string extra = extraArgs.Length > 0 ? " " + string.Join(" ", extraArgs) : string.Empty;
+        string helperDll = EnsureHelperCompiled();
 
         ProcessStartInfo psi = new()
         {
             FileName = "dotnet",
-            Arguments = $"run \"{scriptPath}\" -- {command} \"{path}\"{extra}",
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        psi.ArgumentList.Add(helperDll);
+        psi.ArgumentList.Add(command);
+        psi.ArgumentList.Add(path);
+        foreach (string extra in extraArgs)
+        {
+            psi.ArgumentList.Add(extra);
+        }
+        psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+        psi.Environment["DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER"] = "1";
 
         Process process = Process.Start(psi)!;
+
+        Stopwatch sw = Stopwatch.StartNew();
+        System.Text.StringBuilder stdoutCapture = new();
+        System.Text.StringBuilder stderrCapture = new();
+
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data != null)
+            {
+                lock (stderrCapture)
+                {
+                    stderrCapture.AppendLine(e.Data);
+                }
+            }
+        };
+        process.BeginErrorReadLine();
 
         // Read startup confirmation with timeout
         string? line = null;
@@ -106,6 +369,11 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
                 break;
             }
 
+            lock (stdoutCapture)
+            {
+                stdoutCapture.AppendLine(line);
+            }
+
             if (line.StartsWith("HELPER_PID:", StringComparison.Ordinal) &&
                 int.TryParse(
                     line.AsSpan("HELPER_PID:".Length),
@@ -125,9 +393,19 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
 
         if (line == null || (!line.Contains("LOCKED") && !line.Contains("SLOT_LOCKED") && !line.Contains("WORKFLOW_LOCKED")))
         {
-            string err = process.StandardError.ReadToEnd();
+            bool timedOut = cts.IsCancellationRequested;
+            long elapsedMs = sw.ElapsedMilliseconds;
+            string err;
+            lock (stderrCapture) { err = stderrCapture.ToString(); }
+            string capturedOut;
+            lock (stdoutCapture) { capturedOut = stdoutCapture.ToString(); }
+            string exitInfo = process.HasExited ? $"exitCode={process.ExitCode}" : "running/killed";
+            string extraStr = extraArgs.Length > 0 ? " " + string.Join(" ", extraArgs) : string.Empty;
             process.Dispose();
-            throw new InvalidOperationException($"Child process failed to acquire lock. Line: '{line}', Stderr: '{err}'");
+            throw new InvalidOperationException(
+                $"Child process failed to acquire lock after {elapsedMs}ms (timedOut={timedOut}, {exitInfo}). " +
+                $"Command: '{command}', Path: '{path}', Extra: '{extraStr}'. " +
+                $"LastLine: '{line}', Stdout: '{capturedOut}', Stderr: '{err}'");
         }
 
         return process;
@@ -557,9 +835,22 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
                         $"(launcher PID {launcherPid}, helper parent PID {holderParent}).");
                 }
 
-                // Kill abruptly: the actual holder first, then the launcher tree.
-                KillProcessByPid(holderPid);
-                child.Kill(entireProcessTree: true);
+                // Kill abruptly: terminate the lock holder process and the launcher tree idempotently.
+                if (holderPid != 0 && holderPid != child.Id)
+                {
+                    KillProcessByPid(holderPid);
+                }
+                try
+                {
+                    if (!child.HasExited)
+                    {
+                        child.Kill(entireProcessTree: true);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // Already exited between HasExited check and Kill.
+                }
                 Assert.True(
                     child.WaitForExit(5000),
                     $"Launcher PID {launcherPid} did not exit within 5s after Kill.");
@@ -1804,8 +2095,8 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
 
             string asmPath = typeof(WorkflowSchedulerPaths).Assembly.Location;
             Process procA = StartHelperProcess("hold-active-lease", root, wfId, "1", "4", "Normal", t1, asmPath);
-            int launcherPidA = procA.Id;
             int ownerPidA = GetHolderPid(procA);
+            int adversarialPid = Environment.ProcessId;
             try
             {
                 byte[] bytes = System.Text.Encoding.UTF8.GetBytes(wfId);
@@ -1814,8 +2105,8 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
                 string manifestPath = Path.Combine(root, "locks", "active", $"{hex}.lease.json");
                 string wfLockPath = paths.GetWorkflowLockPath(wfId);
 
-                // Effective identity of the owner: the process that holds the flock, NOT the dotnet-run launcher.
-                Assert.NotEqual(launcherPidA, ownerPidA);
+                // Effective identity of the owner: the process that holds the flock, distinct from the adversarial PID (test process).
+                Assert.NotEqual(adversarialPid, ownerPidA);
                 Assert.True(IsProcessHoldingResources(ownerPidA), $"Owner PID {ownerPidA} must be alive.");
                 AssertFlockHeldBy(authPath, ownerPidA, "owner-auth.json (before substitution)");
                 AssertFlockHeldBy(wfLockPath, ownerPidA, "workflow.lock (before substitution)");
@@ -1835,8 +2126,8 @@ public sealed class WorkflowSchedulerMultiprocessLockTests
 
                 // ---------- Scenario A: non-cooperative writer that cannot reproduce the owner identity ----------
                 // Substitutes token + manifest on the same inode via O_WRONLY|O_TRUNC without flock,
-                // recording the launcher PID and an invalid start time (as a naive attacker would).
-                RunSubstitutionHelper(root, wfId, t2, launcherPidA, 0L);
+                // recording an adversarial PID (test runner PID, distinct from the lock holder) and an invalid start time (as a naive attacker would).
+                RunSubstitutionHelper(root, wfId, t2, adversarialPid, 0L);
 
                 string authAfterA = ReadAllTextWithoutFlock(authPath);
                 string manifestAfterA = ReadAllTextWithoutFlock(manifestPath);
